@@ -1,0 +1,40 @@
+include: package:very_good_analysis/analysis_options.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "**/*.gr.dart"
+    - "**/generated/**"
+
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+  errors:
+    # Project-specific ignores for Clean Architecture
+    avoid_catches_without_on_clauses: ignore
+    library_private_types_in_public_api: ignore
+    one_member_abstracts: ignore
+    public_member_api_docs: ignore
+    sort_constructors_first: ignore
+    sort_pub_dependencies: ignore
+    lines_longer_than_80_chars: ignore # Using 120 chars
+
+    # Future handling - legitimate fire-and-forget cases
+    discarded_futures: ignore
+
+    # Development comfort
+    prefer_final_locals: ignore
+    omit_local_variable_types: ignore
+    avoid_redundant_argument_values: ignore
+
+linter:
+  rules:
+    # Disable rules that conflict with project standards
+    public_member_api_docs: false
+    lines_longer_than_80_chars: false
+
+    # Enforce critical patterns
+    always_use_package_imports: true
