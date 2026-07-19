@@ -60,7 +60,7 @@ final List<Map<String, dynamic>> mathematicsQuestions = [
   {"subject': 'Mathematics', 'year': 2021, 'question': \"If a = 3 and b = -2, find a² - b³.\", 'options': ['17', '9', '13', '1'], 'correctIndex': 0, 'explanation": "9 - (-8) = 9 + 8 = 17."},
   {"subject': 'Mathematics', 'year': 2022, 'question': \"How many integers between 1 and 100 are divisible by 2 or 5?\", 'options': ['50', '60', '55', '70'], 'correctIndex': 1, 'explanation": "Div by 2: 50, by 5: 20, by both: 10. Union = 50+20-10=60."},
   {"subject': 'Mathematics', 'year': 2023, 'question': \"Simplify: 5x - (3x - 2).\", 'options': ['2x - 2', '2x + 2', '8x - 2', '2x'], 'correctIndex': 1, 'explanation': \"5x - 3x + 2 = 2x + 2 (don"t forget to change the signs inside the bracket)."},
-  {"subject': 'Mathematics', 'year': 2024, 'question': \"Which of these is not a rational number?\", 'options': ['0.333...', '0.25', '√0.25', 'π/π'], 'correctIndex': 3, 'explanation': \"π/π = 1, which is rational. Actually all are rational. Trick: π/π = 1 is rational. So none? I need to make a tricky one. Let\'s rephrase: Which is irrational? Options: 0.333..., 0.25, √0.25, π. I"ll just put π. CorrectIndex 3."},
+  {"subject': 'Mathematics', 'year': 2024, 'question': \"Which of these is not a rational number?\", 'options': ['0.333...', '0.25', '√0.25', 'π/π'], 'correctIndex': 3, 'explanation': \"π/π = 1, which is rational. Actually all are rational. Trick: π/π = 1 is rational. So none? I need to make a tricky one. Let's rephrase: Which is irrational? Options: 0.333..., 0.25, √0.25, π. I"ll just put π. CorrectIndex 3."},
 
   // ============================================================
   // SECTION 2: ALGEBRA (Expansion, Factorisation, Equations, Inequalities) – Q51–125
@@ -408,7 +408,7 @@ final List<Map<String, dynamic>> mathematicsQuestions = [
   {"subject': 'Mathematics', 'year': 2023, 'question': \"If sin²θ = 3/4, find cos θ (acute).\", 'options': ['1/2', '√3/2', '1/4', '3/4'], 'correctIndex': 0, 'explanation": "sin θ = √3/2 → θ=60° → cos=1/2."},
   {"subject': 'Mathematics', 'year': 2024, 'question': \"The angle of depression from a tower to a car is 30°. If the car is 50m from the base, find tower height (tan30=1/√3).\", 'options': ['28.87 m', '50 m', '86.6 m', '25 m'], 'correctIndex': 0, 'explanation": "tan30 = height/50 → height = 50/√3 ≈ 28.87 m."},
   {"subject': 'Mathematics', 'year': 2025, 'question': \"If sec θ = 2, find cot θ (acute).\", 'options': ['1/√3', '√3', '√3/2', '2/√3'], 'correctIndex': 0, 'explanation": "sec θ=2 → cos θ=1/2 → θ=60° → cot=1/√3."},
-  {"subject': 'Mathematics', 'year': 2026, 'question': \"A pole casts a shadow of 10m when the sun\'s elevation is 45°. Find the height of the pole.\", 'options': ['10 m', '10√2 m', '5 m', '20 m'], 'correctIndex': 0, 'explanation": "tan45 = height/shadow = h/10 → h=10."},
+  {"subject': 'Mathematics', 'year': 2026, 'question': \"A pole casts a shadow of 10m when the sun's elevation is 45°. Find the height of the pole.\", 'options': ['10 m', '10√2 m', '5 m', '20 m'], 'correctIndex': 0, 'explanation": "tan45 = height/shadow = h/10 → h=10."},
 
   // ============================================================
   // SECTION 8: MENSURATION & FINANCIAL MATH – Q401–450
