@@ -1,20 +1,17 @@
 // lib/main.dart
 //
 // NaijaLearn — CBT Practice App
-// Single-file Flutter application. Material 3. No backend, no auth.
+// Material 3. No backend, no auth.
 //
-// ARCHITECTURE NOTE:
-// All quiz content flows through `Question` + `QuestionRepository`.
-// To swap in a real question bank later, replace the body of
-// `QuestionRepository._buildSampleQuestions()` with data loaded from
-// a JSON asset/file via `QuestionRepository.loadFromJsonList(...)`
-// or `QuestionRepository.loadFromJsonString(...)`. No other class
-// needs to change.
+// Question content now lives in lib/questions_data.dart — this file only
+// contains app logic and UI. To add more questions, edit questions_data.dart
+// only; nothing here needs to change.
 
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'questions_data.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,9 +45,9 @@ class Question {
     this.explanation = '',
   });
 
-  factory Question.fromJson(Map<String, dynamic> json) {
+  factory Question.fromJson(Map<String, dynamic> json, {String? fallbackId}) {
     return Question(
-      id: json['id'] as String,
+      id: (json['id'] as String?) ?? fallbackId ?? '${json['subject']}_${json['year']}_${json.hashCode}',
       subject: json['subject'] as String,
       year: json['year'] as int,
       questionText: json['question'] as String,
@@ -98,21 +95,28 @@ const List<SubjectInfo> kSubjects = [
 class QuestionRepository {
   QuestionRepository._();
 
-  static List<Question> _questions = _buildSampleQuestions();
+  static List<Question> _questions = _buildFromRawData(sampleQuestionsData);
 
-  /// Replace the entire question bank with parsed JSON objects.
-  static void loadFromJsonList(List<Map<String, dynamic>> jsonList) {
-    _questions = jsonList.map((e) => Question.fromJson(e)).toList();
+  /// Converts the plain Map data from questions_data.dart (or any source
+  /// with the same shape) into Question objects.
+  static List<Question> _buildFromRawData(List<Map<String, dynamic>> raw) {
+    final List<Question> list = [];
+    for (final map in raw) {
+      list.add(Question.fromJson(map, fallbackId: '${map['subject']}_${map['year']}_${list.length}'));
+    }
+    return list;
   }
 
-  /// Replace the entire question bank from a raw JSON string, e.g.
-  /// the contents of assets/questions.json (a JSON array of question
-  /// objects matching Question.toJson()).
+  /// Replace the entire question bank with parsed JSON objects
+  /// (e.g. fetched from a remote API like ALOC in future).
+  static void loadFromJsonList(List<Map<String, dynamic>> jsonList) {
+    _questions = _buildFromRawData(jsonList);
+  }
+
+  /// Replace the entire question bank from a raw JSON string.
   static void loadFromJsonString(String jsonStr) {
     final decoded = jsonDecode(jsonStr) as List<dynamic>;
-    _questions = decoded
-        .map((e) => Question.fromJson(e as Map<String, dynamic>))
-        .toList();
+    loadFromJsonList(decoded.cast<Map<String, dynamic>>());
   }
 
   static List<Question> getAll() => List.unmodifiable(_questions);
@@ -128,213 +132,6 @@ class QuestionRepository {
         _questions.where((q) => q.subject == subject && q.year == year).toList();
     if (exact.isNotEmpty) return exact;
     return getForSubject(subject);
-  }
-
-  static List<Question> _buildSampleQuestions() {
-    final List<Question> list = [];
-
-    void add(String subject, int year, String q, List<String> options,
-        int correct, String explanation) {
-      list.add(Question(
-        id: '${subject}_${year}_${list.length}',
-        subject: subject,
-        year: year,
-        questionText: q,
-        options: options,
-        correctIndex: correct,
-        explanation: explanation,
-      ));
-    }
-
-    // ---------------- English ----------------
-    add('English', 2021, "Choose the option that best completes the sentence: She is ___ honest woman.",
-        ['a', 'an', 'the', 'no article needed'], 1,
-        "'Honest' starts with a vowel sound, so 'an' is used.");
-    add('English', 2022, "Select the correctly spelt word.",
-        ['Accomodate', 'Acommodate', 'Accommodate', 'Acomodate'], 2,
-        "The correct spelling is 'Accommodate' with double C and double M.");
-    add('English', 2019, "What is the synonym of 'Benevolent'?",
-        ['Cruel', 'Kind', 'Selfish', 'Angry'], 1,
-        "'Benevolent' means kind and generous.");
-    add('English', 2023, "Identify the figure of speech: 'The classroom was a zoo.'",
-        ['Simile', 'Metaphor', 'Personification', 'Hyperbole'], 1,
-        "A direct comparison without 'like' or 'as' is a metaphor.");
-    add('English', 2020, "Choose the antonym of 'Ancient'.",
-        ['Old', 'Modern', 'Historic', 'Aged'], 1,
-        "'Modern' is the opposite of 'Ancient'.");
-    add('English', 2024, "Which sentence is grammatically correct?",
-        [
-          'He don\'t like rice',
-          'He doesn\'t likes rice',
-          'He doesn\'t like rice',
-          'He not like rice'
-        ], 2, "Third person singular negative uses 'doesn't' + base verb.");
-
-    // ---------------- Mathematics ----------------
-    add('Mathematics', 2021, "Simplify: 3x + 5x - 2x",
-        ['6x', '8x', '10x', '4x'], 0, "3x + 5x - 2x = 6x.");
-    add('Mathematics', 2022, "What is the value of x if 2x + 6 = 20?",
-        ['5', '6', '7', '8'], 2, "2x = 14, so x = 7.");
-    add('Mathematics', 2019, "Find the area of a rectangle with length 8cm and width 5cm.",
-        ['13cm²', '26cm²', '40cm²', '45cm²'], 2, "Area = length × width = 8 × 5 = 40cm².");
-    add('Mathematics', 2023, "What is 15% of 200?",
-        ['20', '25', '30', '35'], 2, "15% of 200 = 0.15 × 200 = 30.");
-    add('Mathematics', 2020, "Solve for x: x² = 49",
-        ['x = 6', 'x = 7', 'x = 8', 'x = 9'], 1, "√49 = 7.");
-    add('Mathematics', 2024, "What is the next number in the sequence: 2, 4, 8, 16, ___?",
-        ['20', '24', '32', '18'], 2, "Each term doubles the previous one; 16 × 2 = 32.");
-
-    // ---------------- Physics ----------------
-    add('Physics', 2021, "What is the SI unit of force?",
-        ['Joule', 'Newton', 'Watt', 'Pascal'], 1, "Force is measured in Newtons (N).");
-    add('Physics', 2022, "Which law states that for every action there is an equal and opposite reaction?",
-        ["Newton's First Law", "Newton's Second Law", "Newton's Third Law", "Law of Gravitation"], 2,
-        "This is Newton's Third Law of Motion.");
-    add('Physics', 2019, "What is the speed of light in a vacuum (approx)?",
-        ['3 × 10⁶ m/s', '3 × 10⁸ m/s', '3 × 10¹⁰ m/s', '3 × 10⁵ m/s'], 1,
-        "The speed of light is approximately 3 × 10⁸ m/s.");
-    add('Physics', 2023, "A body at rest has what type of energy relative to motion?",
-        ['Kinetic energy only', 'No energy', 'Potential energy only', 'Both kinetic and potential'], 2,
-        "A body at rest has zero kinetic energy but may have potential energy.");
-    add('Physics', 2020, "What instrument is used to measure current?",
-        ['Voltmeter', 'Ammeter', 'Barometer', 'Thermometer'], 1, "An ammeter measures electric current.");
-    add('Physics', 2024, "What is the unit of electrical resistance?",
-        ['Volt', 'Ampere', 'Ohm', 'Watt'], 2, "Resistance is measured in Ohms (Ω).");
-
-    // ---------------- Chemistry ----------------
-    add('Chemistry', 2021, "What is the chemical symbol for Sodium?",
-        ['So', 'Sd', 'Na', 'S'], 2, "Sodium's symbol, Na, comes from its Latin name 'Natrium'.");
-    add('Chemistry', 2022, "What is the pH of a neutral solution?",
-        ['0', '7', '14', '10'], 1, "A neutral solution has a pH of 7.");
-    add('Chemistry', 2019, "Which gas is most abundant in the Earth's atmosphere?",
-        ['Oxygen', 'Carbon dioxide', 'Nitrogen', 'Hydrogen'], 2, "Nitrogen makes up about 78% of the atmosphere.");
-    add('Chemistry', 2023, "What type of bond involves the sharing of electron pairs?",
-        ['Ionic bond', 'Covalent bond', 'Metallic bond', 'Hydrogen bond'], 1,
-        "A covalent bond forms when atoms share electron pairs.");
-    add('Chemistry', 2020, "What is the atomic number of Hydrogen?",
-        ['0', '1', '2', '3'], 1, "Hydrogen has 1 proton, giving it atomic number 1.");
-    add('Chemistry', 2024, "Which of these is an example of an exothermic reaction?",
-        ['Photosynthesis', 'Combustion', 'Melting ice', 'Evaporation'], 1,
-        "Combustion releases heat, making it exothermic.");
-
-    // ---------------- Biology ----------------
-    add('Biology', 2021, "What is the powerhouse of the cell?",
-        ['Nucleus', 'Ribosome', 'Mitochondria', 'Golgi body'], 2,
-        "Mitochondria produce ATP, the cell's energy currency.");
-    add('Biology', 2022, "Which blood cells are responsible for fighting infection?",
-        ['Red blood cells', 'White blood cells', 'Platelets', 'Plasma'], 1,
-        "White blood cells (leukocytes) defend the body against infection.");
-    add('Biology', 2019, "What process do plants use to make food?",
-        ['Respiration', 'Photosynthesis', 'Transpiration', 'Digestion'], 1,
-        "Photosynthesis converts light energy into chemical energy in plants.");
-    add('Biology', 2023, "How many chambers does the human heart have?",
-        ['2', '3', '4', '5'], 2, "The human heart has four chambers.");
-    add('Biology', 2020, "Which organ is primarily responsible for filtering blood?",
-        ['Liver', 'Kidney', 'Lungs', 'Pancreas'], 1, "The kidneys filter waste from the blood.");
-    add('Biology', 2024, "What is the basic unit of heredity?",
-        ['Cell', 'Chromosome', 'Gene', 'Protein'], 2, "Genes are the basic units of heredity.");
-
-    // ---------------- Government ----------------
-    add('Government', 2021, "What type of government does Nigeria practice?",
-        ['Monarchy', 'Federal Republic', 'Unitary state', 'Confederation'], 1,
-        "Nigeria operates as a Federal Republic.");
-    add('Government', 2022, "How many arms of government are there typically?",
-        ['1', '2', '3', '4'], 2, "The three arms are the Executive, Legislature, and Judiciary.");
-    add('Government', 2019, "What is the term of office for a Nigerian President?",
-        ['3 years', '4 years', '5 years', '6 years'], 1, "A Nigerian President serves a 4-year term per cycle.");
-    add('Government', 2023, "What is the principle of separation of powers meant to prevent?",
-        ['Economic growth', 'Abuse of power', 'International trade', 'Population growth'], 1,
-        "Separation of powers prevents concentration and abuse of power.");
-    add('Government', 2020, "Who is the head of the Judiciary in Nigeria?",
-        ['The President', 'The Senate President', 'Chief Justice of Nigeria', 'The Speaker'], 2,
-        "The Chief Justice of Nigeria heads the judicial arm.");
-    add('Government', 2024, "Which body is responsible for making laws in Nigeria?",
-        ['Executive', 'Legislature', 'Judiciary', 'Civil Service'], 1, "The Legislature (National Assembly) makes laws.");
-
-    // ---------------- Economics ----------------
-    add('Economics', 2021, "What does GDP stand for?",
-        ['General Domestic Product', 'Gross Domestic Product', 'Gross Development Plan', 'General Development Product'], 1,
-        "GDP stands for Gross Domestic Product.");
-    add('Economics', 2022, "What is the study of how individuals and firms make choices called?",
-        ['Macroeconomics', 'Microeconomics', 'Sociology', 'Statistics'], 1,
-        "Microeconomics studies individual and firm-level decision making.");
-    add('Economics', 2019, "What term describes a persistent rise in general price levels?",
-        ['Deflation', 'Inflation', 'Recession', 'Depression'], 1, "Inflation is a sustained rise in prices.");
-    add('Economics', 2023, "What is the law of demand?",
-        [
-          'Price and quantity demanded move in the same direction',
-          'Price and quantity demanded move in opposite directions',
-          'Demand is unaffected by price',
-          'Supply determines demand'
-        ], 1, "As price rises, quantity demanded typically falls, and vice versa.");
-    add('Economics', 2020, "What is a monopoly?",
-        [
-          'Many sellers, one buyer',
-          'A market with a single seller',
-          'A market with two sellers',
-          'A market with free entry'
-        ], 1, "A monopoly exists when one seller dominates the entire market.");
-    add('Economics', 2024, "Which sector does agriculture belong to?",
-        ['Primary sector', 'Secondary sector', 'Tertiary sector', 'Quaternary sector'], 0,
-        "Agriculture is part of the primary sector, extracting raw materials.");
-
-    // ---------------- Literature ----------------
-    add('Literature', 2021, "Who wrote 'Things Fall Apart'?",
-        ['Wole Soyinka', 'Chinua Achebe', 'Chimamanda Adichie', 'Ben Okri'], 1,
-        "'Things Fall Apart' was written by Chinua Achebe.");
-    add('Literature', 2022, "What is a 'protagonist'?",
-        ['The villain of a story', 'The main character', 'The setting', 'The narrator only'], 1,
-        "The protagonist is the central character of a story.");
-    add('Literature', 2019, "What literary device compares two unlike things using 'like' or 'as'?",
-        ['Metaphor', 'Simile', 'Personification', 'Irony'], 1, "A simile uses 'like' or 'as' to compare things.");
-    add('Literature', 2023, "What is the term for the time and place a story occurs?",
-        ['Plot', 'Theme', 'Setting', 'Climax'], 2, "Setting refers to the time and place of a narrative.");
-    add('Literature', 2020, "What is a 'soliloquy'?",
-        [
-          'A conversation between two characters',
-          'A speech a character makes alone, revealing inner thoughts',
-          'The moral of a story',
-          'A rhyming poem'
-        ], 1, "A soliloquy is a character speaking their thoughts aloud, alone.");
-    add('Literature', 2024, "Who wrote the play 'Death and the King's Horseman'?",
-        ['Chinua Achebe', 'Wole Soyinka', 'J.P. Clark', 'Zulu Sofola'], 1,
-        "Wole Soyinka wrote 'Death and the King's Horseman'.");
-
-    // ---------------- CRS ----------------
-    add('CRS', 2021, "Who is regarded as the father of faith in Christianity?",
-        ['Moses', 'Abraham', 'David', 'Noah'], 1, "Abraham is called the father of faith.");
-    add('CRS', 2022, "How many books are in the New Testament?",
-        ['27', '39', '66', '12'], 0, "The New Testament contains 27 books.");
-    add('CRS', 2019, "Who betrayed Jesus Christ?",
-        ['Peter', 'John', 'Judas Iscariot', 'Thomas'], 2, "Judas Iscariot betrayed Jesus for thirty pieces of silver.");
-    add('CRS', 2023, "On which mountain did Moses receive the Ten Commandments?",
-        ['Mount Zion', 'Mount Sinai', 'Mount Carmel', 'Mount Ararat'], 1,
-        "Moses received the Ten Commandments on Mount Sinai.");
-    add('CRS', 2020, "Who was thrown into the lion's den but survived?",
-        ['Daniel', 'Jonah', 'Elijah', 'Samuel'], 0, "Daniel survived the lion's den unharmed.");
-    add('CRS', 2024, "What is the first book of the Bible?",
-        ['Exodus', 'Genesis', 'Leviticus', 'Numbers'], 1, "Genesis is the first book of the Bible.");
-
-    // ---------------- Geography ----------------
-    add('Geography', 2021, "What is the largest continent by land area?",
-        ['Africa', 'Asia', 'North America', 'Europe'], 1, "Asia is the largest continent by land area.");
-    add('Geography', 2022, "Which river is the longest in Africa?",
-        ['Niger River', 'Congo River', 'Nile River', 'Zambezi River'], 2, "The Nile River is the longest river in Africa.");
-    add('Geography', 2019, "What causes day and night?",
-        [
-          "The Earth's revolution around the sun",
-          "The Earth's rotation on its axis",
-          'The Moon orbiting Earth',
-          'Seasonal changes'
-        ], 1, "Day and night are caused by the Earth's rotation on its axis.");
-    add('Geography', 2023, "What type of rock is formed from cooled magma or lava?",
-        ['Sedimentary', 'Metamorphic', 'Igneous', 'Organic'], 2, "Igneous rock forms from cooled magma or lava.");
-    add('Geography', 2020, "Which layer of the Earth do we live on?",
-        ['Core', 'Mantle', 'Crust', 'Outer core'], 2, "Humans live on the Earth's crust, the outermost layer.");
-    add('Geography', 2024, "What is the term for a permanent settlement with a large population and administrative functions?",
-        ['Village', 'City', 'Hamlet', 'Farmstead'], 1, "A city is a large permanent settlement with administrative functions.");
-
-    return list;
   }
 }
 
@@ -1421,7 +1218,6 @@ class ResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final wrongCount = questions.length - correctCount - unansweredCount + (unansweredCount - skippedCount).clamp(0, questions.length) * 0; 
     final actualWrong = questions.length - correctCount - unansweredCount;
 
     return Scaffold(
