@@ -1,4 +1,4 @@
-name: Build NigerGram APK
+name: Build NaijaLearn APK
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            console.log("Scanning repository storage for matching NigerGram-debug artifacts...");
+            console.log("Scanning repository storage for matching NaijaLearn-debug artifacts...");
 
             const response = await github.rest.actions.listArtifactsForRepo({
               owner: owner,
@@ -34,7 +34,7 @@ jobs:
 
             const artifacts = response.data.artifacts;
             for (const artifact of artifacts) {
-              if (artifact.name === 'NigerGram-debug') {
+              if (artifact.name === 'NaijaLearn-debug') {
                 console.log(`Force deleting artifact: ${artifact.name} (ID: ${artifact.id}) to clear space`);
                 await github.rest.actions.deleteArtifact({
                   owner: owner,
@@ -63,7 +63,7 @@ jobs:
 
       - name: Fix ALL package names in ALL dart files
         run: |
-          find lib -name "*.dart" -exec sed -i 's/package:flutter_video_feed/package:nigergram/g' {} +
+          find lib -name "*.dart" -exec sed -i 's/package:flutter_video_feed/package:naijalearn/g' {} +
 
       - name: Fix app icon
         run: |
@@ -87,7 +87,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NigerGram-debug
+          name: NaijaLearn-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 1
           overwrite: true

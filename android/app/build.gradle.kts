@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.nigergram.app"
+    namespace = "com.naijalearn.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -21,15 +21,15 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("nigergram.jks")
-            storePassword = "nigergram123"
-            keyAlias = "nigergram"
-            keyPassword = "nigergram123"
+            storeFile = file("naijalearn.jks")
+            storePassword = "naijalearn123"
+            keyAlias = "naijalearn"
+            keyPassword = "naijalearn123"
         }
     }
 
     defaultConfig {
-        applicationId = "com.nigergram.app"
+        applicationId = "com.naijalearn.app"
         minSdk = 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

@@ -1,4 +1,4 @@
-package com.nigergram.app
+package com.naijalearn.app
 
 import io.flutter.embedding.android.FlutterActivity
 

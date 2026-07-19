@@ -1,5 +1,9 @@
 name: naijalearn
+<<<<<<< HEAD
 description: "NaijaLearn - JAMB & WAEC CBT Practice"
+=======
+description: "NaijaLearn - Nigeria's Video Platform"
+>>>>>>> 27dd778 (Rename package to com.naijalearn.app)
 publish_to: 'none'
 
 version: 1.0.0+1
