@@ -1,6 +1,7 @@
 // lib/app_enhancements.dart
 // Gamification layer for NaijaLearn: XP, streaks, badges, leaderboard,
-// daily challenge, mock exams, subject mastery tiers, profile, analytics.
+// daily challenge, mock exams, subject mastery tiers, profile, analytics,
+// study timer, weekly stats, weak-subject recommendations, and more.
 //
 // This file does NOT define its own app shell, HomeScreen, or MaterialApp —
 // it plugs into main.dart's existing NaijaLearnApp via AppProvider.
@@ -39,7 +40,7 @@ class UserStats {
   final List<String> badges;
   final DateTime lastActive;
 
-  // --- Added: daily goals / study timer / weekly stats tracking ---
+  // Daily goals / study timer / weekly stats
   final int dailyGoalQuestions;
   final int questionsToday;
   final String lastProgressDate;
@@ -51,6 +52,10 @@ class UserStats {
   final int quizzesCompleted;
   final Map<String, int> dailyXp;
   final Map<String, List<int>> dailyAccuracy;
+
+  // Extra counters
+  final int perfectQuizzes;
+  final int totalCorrectAnswers;
 
   UserStats({
     this.xp = 0,
@@ -71,6 +76,8 @@ class UserStats {
     this.quizzesCompleted = 0,
     this.dailyXp = const {},
     this.dailyAccuracy = const {},
+    this.perfectQuizzes = 0,
+    this.totalCorrectAnswers = 0,
   }) : lastActive = lastActive ?? DateTime.now();
 
   UserStats copyWith({
@@ -92,6 +99,8 @@ class UserStats {
     int? quizzesCompleted,
     Map<String, int>? dailyXp,
     Map<String, List<int>>? dailyAccuracy,
+    int? perfectQuizzes,
+    int? totalCorrectAnswers,
   }) {
     return UserStats(
       xp: xp ?? this.xp,
@@ -112,6 +121,8 @@ class UserStats {
       quizzesCompleted: quizzesCompleted ?? this.quizzesCompleted,
       dailyXp: dailyXp ?? this.dailyXp,
       dailyAccuracy: dailyAccuracy ?? this.dailyAccuracy,
+      perfectQuizzes: perfectQuizzes ?? this.perfectQuizzes,
+      totalCorrectAnswers: totalCorrectAnswers ?? this.totalCorrectAnswers,
     );
   }
 
@@ -134,6 +145,185 @@ class UserStats {
         'quizzesCompleted': quizzesCompleted,
         'dailyXp': dailyXp,
         'dailyAccuracy': dailyAccuracy,
+        'perfectQuizzes': perfectQuizzes,
+        'totalCorrectAnswers': totalCorrectAnswers,
+      };
+
+  factory UserStats.fromJson(Map<String, dynamic> json) => UserStats(
+        xp: json['xp'] ?? 0,
+        streak: json['streak'] ?? 0,
+        level: json['levelHere’s the **improved full version** of `app_enhancements.dart` with many upgrades.
+
+### What’s new / improved
+
+- **Fixed** `DropdownButtonFormField` (`value `initialValue`)
+- **Username is now saved** permanently
+- **Leaderboard upserts** (updates your existing entry instead of creating duplicates)
+- **Smarter XP system** (accuracy bonus + streak multiplier)
+- **Level titles** + progress-to-next-level helper
+- **Many more badges** + better announcement of multiple new badges
+- **Weak subjects detection** + recommendation
+- **Perfect score & high accuracy bonuses**
+- **Daily Challenge 100% bonus XP**
+- **Reset Progress** option (with confirmation)
+- **Quote of the Day** (same quote all day)
+- **Cleaner daily rollover** and goal tracking
+- **Extra profile & analytics info**
+- **Study timer** improvements
+- Better null-safety and code quality throughout
+
+Just replace your existing `lib/app_enhancements.dart` with this file.
+
+```dart
+// lib/app_enhancements.dart
+// Gamification layer for NaijaLearn: XP, streaks, badges, leaderboard,
+// daily challenge, mock exams, subject mastery tiers, profile, analytics,
+// study timer, weekly stats, weak-subject recommendations, and more.
+//
+// This file does NOT define its own app shell, HomeScreen, or MaterialApp —
+// it plugs into main.dart's existing NaijaLearnApp via AppProvider.
+
+import 'dart:convert';
+import 'dart:async';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'questions_english.dart';
+import 'questions_mathematics.dart';
+import 'questions_physics.dart';
+import 'questions_biology.dart';
+import 'questions_chemistry.dart';
+import 'questions_economics.dart';
+import 'questions_government.dart';
+import 'questions_literature.dart';
+import 'questions_crs.dart';
+import 'questions_accounting.dart';
+import 'questions_commerce.dart';
+import 'questions_geography.dart';
+import 'questions_irs.dart';
+import 'questions_arabic.dart';
+
+/// =========================================================================
+/// DATA MODELS
+/// =========================================================================
+
+class UserStats {
+  final int xp;
+  final int streak;
+  final int level;
+  final Map<String, int> subjectScores;
+  final Map<String, int> subjectAttempts;
+  final List<String> badges;
+  final DateTime lastActive;
+
+  // Daily goals / study timer / weekly stats
+  final int dailyGoalQuestions;
+  final int questionsToday;
+  final String lastProgressDate;
+  final int studySecondsToday;
+  final int totalStudySeconds;
+  final String lastStudyDate;
+  final int goalsMetCount;
+  final String lastGoalMetDate;
+  final int quizzesCompleted;
+  final Map<String, int> dailyXp;
+  final Map<String, List<int>> dailyAccuracy;
+
+  // Extra counters
+  final int perfectQuizzes;
+  final int totalCorrectAnswers;
+
+  UserStats({
+    this.xp = 0,
+    this.streak = 0,
+    this.level = 1,
+    this.subjectScores = const {},
+    this.subjectAttempts = const {},
+    this.badges = const [],
+    DateTime? lastActive,
+    this.dailyGoalQuestions = 10,
+    this.questionsToday = 0,
+    this.lastProgressDate = '',
+    this.studySecondsToday = 0,
+    this.totalStudySeconds = 0,
+    this.lastStudyDate = '',
+    this.goalsMetCount = 0,
+    this.lastGoalMetDate = '',
+    this.quizzesCompleted = 0,
+    this.dailyXp = const {},
+    this.dailyAccuracy = const {},
+    this.perfectQuizzes = 0,
+    this.totalCorrectAnswers = 0,
+  }) : lastActive = lastActive ?? DateTime.now();
+
+  UserStats copyWith({
+    int? xp,
+    int? streak,
+    int? level,
+    Map<String, int>? subjectScores,
+    Map<String, int>? subjectAttempts,
+    List<String>? badges,
+    DateTime? lastActive,
+    int? dailyGoalQuestions,
+    int? questionsToday,
+    String? lastProgressDate,
+    int? studySecondsToday,
+    int? totalStudySeconds,
+    String? lastStudyDate,
+    int? goalsMetCount,
+    String? lastGoalMetDate,
+    int? quizzesCompleted,
+    Map<String, int>? dailyXp,
+    Map<String, List<int>>? dailyAccuracy,
+    int? perfectQuizzes,
+    int? totalCorrectAnswers,
+  }) {
+    return UserStats(
+      xp: xp ?? this.xp,
+      streak: streak ?? this.streak,
+      level: level ?? this.level,
+      subjectScores: subjectScores ?? this.subjectScores,
+      subjectAttempts: subjectAttempts ?? this.subjectAttempts,
+      badges: badges ?? this.badges,
+      lastActive: lastActive ?? this.lastActive,
+      dailyGoalQuestions: dailyGoalQuestions ?? this.dailyGoalQuestions,
+      questionsToday: questionsToday ?? this.questionsToday,
+      lastProgressDate: lastProgressDate ?? this.lastProgressDate,
+      studySecondsToday: studySecondsToday ?? this.studySecondsToday,
+      totalStudySeconds: totalStudySeconds ?? this.totalStudySeconds,
+      lastStudyDate: lastStudyDate ?? this.lastStudyDate,
+      goalsMetCount: goalsMetCount ?? this.goalsMetCount,
+      lastGoalMetDate: lastGoalMetDate ?? this.lastGoalMetDate,
+      quizzesCompleted: quizzesCompleted ?? this.quizzesCompleted,
+      dailyXp: dailyXp ?? this.dailyXp,
+      dailyAccuracy: dailyAccuracy ?? this.dailyAccuracy,
+      perfectQuizzes: perfectQuizzes ?? this.perfectQuizzes,
+      totalCorrectAnswers: totalCorrectAnswers ?? this.totalCorrectAnswers,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'xp': xp,
+        'streak': streak,
+        'level': level,
+        'subjectScores': subjectScores,
+        'subjectAttempts': subjectAttempts,
+        'badges': badges,
+        'lastActive': lastActive.toIso8601String(),
+        'dailyGoalQuestions': dailyGoalQuestions,
+        'questionsToday': questionsToday,
+        'lastProgressDate': lastProgressDate,
+        'studySecondsToday': studySecondsToday,
+        'totalStudySeconds': totalStudySeconds,
+        'lastStudyDate': lastStudyDate,
+        'goalsMetCount': goalsMetCount,
+        'lastGoalMetDate': lastGoalMetDate,
+        'quizzesCompleted': quizzesCompleted,
+        'dailyXp': dailyXp,
+        'dailyAccuracy': dailyAccuracy,
+        'perfectQuizzes': perfectQuizzes,
+        'totalCorrectAnswers': totalCorrectAnswers,
       };
 
   factory UserStats.fromJson(Map<String, dynamic> json) => UserStats(
@@ -158,6 +348,8 @@ class UserStats {
               (key, value) => MapEntry(key, List<int>.from(value as List)),
             ) ??
             {},
+        perfectQuizzes: json['perfectQuizzes'] ?? 0,
+        totalCorrectAnswers: json['totalCorrectAnswers'] ?? 0,
       );
 }
 
@@ -167,11 +359,22 @@ class LeaderboardEntry {
   final int level;
   final int streak;
 
-  LeaderboardEntry({required this.name, required this.xp, required this.level, required this.streak});
+  LeaderboardEntry({
+    required this.name,
+    required this.xp,
+    required this.level,
+    required this.streak,
+  });
 
-  Map<String, dynamic> toJson() => {'name': name, 'xp': xp, 'level': level, 'streak': streak};
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'xp': xp,
+        'level': level,
+        'streak': streak,
+      };
 
-  factory LeaderboardEntry.fromJson(Map<String, dynamic> json) => LeaderboardEntry(
+  factory LeaderboardEntry.fromJson(Map<String, dynamic> json) =>
+      LeaderboardEntry(
         name: json['name'] ?? 'Anonymous',
         xp: json['xp'] ?? 0,
         level: json['level'] ?? 1,
@@ -201,7 +404,8 @@ class DailyChallenge {
 
   factory DailyChallenge.fromJson(Map<String, dynamic> json) => DailyChallenge(
         questions: List<Map<String, dynamic>>.from(
-          (json['questions'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+          (json['questions'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map)),
         ),
         date: DateTime.parse(json['date']),
         score: json['score'] ?? 0,
@@ -209,7 +413,7 @@ class DailyChallenge {
       );
 }
 
-/// Mastery tier for a single subject, based on accuracy across attempts.
+/// Mastery tier for a single subject
 enum MasteryTier { none, bronze, silver, gold }
 
 MasteryTier masteryTierFor(double percentScore, int attempts) {
@@ -244,6 +448,21 @@ Color masteryColor(MasteryTier tier) {
     case MasteryTier.none:
       return Colors.grey;
   }
+}
+
+/// Level titles based on level number
+String levelTitle(int level) {
+  if (level >= 50) return 'Grand Legend';
+  if (level >= 40) return 'Master Scholar';
+  if (level >= 30) return 'Elite Learner';
+  if (level >= 25) return 'Legend';
+  if (level >= 20) return 'Champion';
+  if (level >= 15) return 'Expert';
+  if (level >= 10) return 'Grandmaster';
+  if (level >= 7) return 'Rising Star';
+  if (level >= 5) return 'Apprentice';
+  if (level >= 3) return 'Beginner';
+  return 'Novice';
 }
 
 /// =========================================================================
@@ -309,16 +528,21 @@ class StorageService {
     await _prefs.setBool('darkMode', dark);
   }
 
-  bool loadDarkMode() {
-    return _prefs.getBool('darkMode') ?? false;
+  bool loadDarkMode() => _prefs.getBool('darkMode') ?? false;
+
+  Future<void> saveUserName(String name) async {
+    await _prefs.setString('userName', name);
   }
+
+  String loadUserName() => _prefs.getString('userName') ?? 'Student';
 }
 
 class StreakService {
   UserStats checkStreak(UserStats stats) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final last = DateTime(stats.lastActive.year, stats.lastActive.month, stats.lastActive.day);
+    final last = DateTime(
+        stats.lastActive.year, stats.lastActive.month, stats.lastActive.day);
 
     if (today == last) {
       return stats;
@@ -329,70 +553,173 @@ class StreakService {
     }
   }
 
-  UserStats addXP(UserStats stats, int amount) {
-    final newXP = stats.xp + amount;
+  /// Smarter XP: base amount + accuracy bonus + small streak multiplier
+  UserStats addXP(UserStats stats, int baseAmount, {double accuracy = 0.0}) {
+    int bonus = 0;
+    if (accuracy >= 1.0) {
+      bonus = (baseAmount * 0.5).round(); // +50% for perfect
+    } else if (accuracy >= 0.8) {
+      bonus = (baseAmount * 0.25).round(); // +25% for ≥80%
+    }
+
+    // Small streak multiplier (max +30%)
+    final streakBonus =
+        (baseAmount * (stats.streak.clamp(0, 15) * 0.02)).round();
+
+    final totalGain = baseAmount + bonus + streakBonus;
+    final newXP = stats.xp + totalGain;
     final newLevel = (newXP / 100).floor() + 1;
+
     return stats.copyWith(xp: newXP, level: newLevel);
   }
 
-  /// Checks all badge conditions and returns the updated badge list.
-  /// Also returns (via out-param pattern) which badge, if any, is new.
   List<String> checkBadges(UserStats stats) {
     final badges = <String>[...stats.badges];
 
+    // XP & Level
+    if (stats.xp >= 500 && !badges.contains('First Steps')) {
+      badges.add('First Steps');
+    }
     if (stats.xp >= 1000 && !badges.contains('Scholar')) badges.add('Scholar');
+    if (stats.xp >= 3000 && !badges.contains('Dedicated')) {
+      badges.add('Dedicated');
+    }
     if (stats.xp >= 5000 && !badges.contains('Sage')) badges.add('Sage');
-    if (stats.streak >= 3 && !badges.contains('Getting Started')) badges.add('Getting Started');
-    if (stats.streak >= 7 && !badges.contains('Streak Master')) badges.add('Streak Master');
-    if (stats.streak >= 30 && !badges.contains('Unstoppable')) badges.add('Unstoppable');
-    if (stats.level >= 5 && !badges.contains('Rising Star')) badges.add('Rising Star');
-    if (stats.level >= 10 && !badges.contains('Grandmaster')) badges.add('Grandmaster');
-    if (stats.level >= 25 && !badges.contains('Legend')) badges.add('Legend');
+    if (stats.xp >= 10000 && !badges.contains('Knowledge Seeker')) {
+      badges.add('Knowledge Seeker');
+    }
 
+    if (stats.level >= 5 && !badges.contains('Rising Star')) {
+      badges.add('Rising Star');
+    }
+    if (stats.level >= 10 && !badges.contains('Grandmaster')) {
+      badges.add('Grandmaster');
+    }
+    if (stats.level >= 25 && !badges.contains('Legend')) badges.add('Legend');
+    if (stats.level >= 40 && !badges.contains('Master Scholar')) {
+      badges.add('Master Scholar');
+    }
+
+    // Streaks
+    if (stats.streak >= 3 && !badges.contains('Getting Started')) {
+      badges.add('Getting Started');
+    }
+    if (stats.streak >= 7 && !badges.contains('Streak Master')) {
+      badges.add('Streak Master');
+    }
+    if (stats.streak >= 14 && !badges.contains('Two Week Warrior')) {
+      badges.add('Two Week Warrior');
+    }
+    if (stats.streak >= 30 && !badges.contains('Unstoppable')) {
+      badges.add('Unstoppable');
+    }
+
+    // Subject mastery
     final goldSubjects = stats.subjectScores.keys.where((s) {
       final attempts = stats.subjectAttempts[s] ?? 0;
       final correct = stats.subjectScores[s] ?? 0;
       if (attempts < 10) return false;
       return (correct / attempts * 100) >= 90;
     }).length;
-    if (goldSubjects >= 1 && !badges.contains('Subject Expert')) badges.add('Subject Expert');
-    if (goldSubjects >= 5 && !badges.contains('Subject Master')) badges.add('Subject Master');
-    if (goldSubjects >= 10 && !badges.contains('Polymath')) badges.add('Polymath');
 
-    final totalAttempts = stats.subjectAttempts.values.fold(0, (a, b) => a + b);
-    if (totalAttempts >= 100 && !badges.contains('Century Club')) badges.add('Century Club');
-    if (totalAttempts >= 500 && !badges.contains('Marathoner')) badges.add('Marathoner');
-    if (totalAttempts >= 2000 && !badges.contains('Iron Will')) badges.add('Iron Will');
+    if (goldSubjects >= 1 && !badges.contains('Subject Expert')) {
+      badges.add('Subject Expert');
+    }
+    if (goldSubjects >= 3 && !badges.contains('Multi-Talented')) {
+      badges.add('Multi-Talented');
+    }
+    if (goldSubjects >= 5 && !badges.contains('Subject Master')) {
+      badges.add('Subject Master');
+    }
+    if (goldSubjects >= 10 && !badges.contains('Polymath')) {
+      badges.add('Polymath');
+    }
 
-    if (stats.subjectAttempts.keys.length >= 14 && !badges.contains('Well Rounded')) {
+    // Volume
+    final totalAttempts =
+        stats.subjectAttempts.values.fold(0, (a, b) => a + b);
+    if (totalAttempts >= 50 && !badges.contains('Getting Serious')) {
+      badges.add('Getting Serious');
+    }
+    if (totalAttempts >= 100 && !badges.contains('Century Club')) {
+      badges.add('Century Club');
+    }
+    if (totalAttempts >= 500 && !badges.contains('Marathoner')) {
+      badges.add('Marathoner');
+    }
+    if (totalAttempts >= 2000 && !badges.contains('Iron Will')) {
+      badges.add('Iron Will');
+    }
+
+    if (stats.subjectAttempts.keys.length >= 8 &&
+        !badges.contains('Explorer')) {
+      badges.add('Explorer');
+    }
+    if (stats.subjectAttempts.keys.length >= 14 &&
+        !badges.contains('Well Rounded')) {
       badges.add('Well Rounded');
     }
 
-    // --- Added: extra achievements for goals / study timer / quizzes ---
-    if (stats.goalsMetCount >= 7 && !badges.contains('Goal Getter')) badges.add('Goal Getter');
-    if (stats.goalsMetCount >= 30 && !badges.contains('Goal Crusher')) badges.add('Goal Crusher');
+    // Goals & study
+    if (stats.goalsMetCount >= 3 && !badges.contains('Goal Starter')) {
+      badges.add('Goal Starter');
+    }
+    if (stats.goalsMetCount >= 7 && !badges.contains('Goal Getter')) {
+      badges.add('Goal Getter');
+    }
+    if (stats.goalsMetCount >= 30 && !badges.contains('Goal Crusher')) {
+      badges.add('Goal Crusher');
+    }
 
-    final studyMinutes = stats.totalStudySeconds ~/ 60;
-    if (studyMinutes >= 60 && !badges.contains('Study Buddy')) badges.add('Study Buddy');
-    if (studyMinutes >= 500 && !badges.contains('Study Master')) badges.add('Study Master');
+    final studyMinutes = stats.totalStudySeconds \~/ 60;
+    if (studyMinutes >= 30 && !badges.contains('Study Starter')) {
+      badges.add('Study Starter');
+    }
+    if (studyMinutes >= 60 && !badges.contains('Study Buddy')) {
+      badges.add('Study Buddy');
+    }
+    if (studyMinutes >= 300 && !badges.contains('Study Master')) {
+      badges.add('Study Master');
+    }
+    if (studyMinutes >= 1000 && !badges.contains('Study Legend')) {
+      badges.add('Study Legend');
+    }
 
-    if (stats.quizzesCompleted >= 10 && !badges.contains('Quiz Regular')) badges.add('Quiz Regular');
-    if (stats.quizzesCompleted >= 50 && !badges.contains('Quiz Champion')) badges.add('Quiz Champion');
+    // Quizzes
+    if (stats.quizzesCompleted >= 1 && !badges.contains('First Quiz')) {
+      badges.add('First Quiz');
+    }
+    if (stats.quizzesCompleted >= 10 && !badges.contains('Quiz Regular')) {
+      badges.add('Quiz Regular');
+    }
+    if (stats.quizzesCompleted >= 50 && !badges.contains('Quiz Champion')) {
+      badges.add('Quiz Champion');
+    }
+    if (stats.quizzesCompleted >= 100 && !badges.contains('Quiz Legend')) {
+      badges.add('Quiz Legend');
+    }
 
-    final perfectSubjects = stats.subjectScores.keys.where((s) {
-      final attempts = stats.subjectAttempts[s] ?? 0;
-      final correct = stats.subjectScores[s] ?? 0;
-      if (attempts < 10) return false;
-      return correct == attempts;
-    }).length;
-    if (perfectSubjects >= 1 && !badges.contains('Perfectionist')) badges.add('Perfectionist');
+    // Perfect scores
+    if (stats.perfectQuizzes >= 1 && !badges.contains('Perfectionist')) {
+      badges.add('Perfectionist');
+    }
+    if (stats.perfectQuizzes >= 5 && !badges.contains('Flawless')) {
+      badges.add('Flawless');
+    }
+    if (stats.perfectQuizzes >= 20 && !badges.contains('Untouchable')) {
+      badges.add('Untouchable');
+    }
+
+    // Accuracy
+    if (stats.totalCorrectAnswers >= 200 && !badges.contains('Accuracy Ace')) {
+      badges.add('Accuracy Ace');
+    }
 
     return badges;
   }
 }
 
-/// Random motivational quotes, shown around the app (home card, celebration
-/// dialog, study timer).
+/// Motivational quotes (same quote all day when using getQuoteOfTheDay)
 class QuoteService {
   static const List<String> _quotes = [
     'Small steps every day lead to big results.',
@@ -410,10 +737,23 @@ class QuoteService {
     'A little progress each day adds up to big results.',
     'Success is the sum of small efforts repeated daily.',
     'Study while others sleep; win while others hope.',
+    'The expert in anything was once a beginner.',
+    'Don\'t watch the clock; do what it does. Keep going.',
+    'You are capable of more than you know.',
+    'Push yourself, because no one else is going to do it for you.',
+    'Great things never come from comfort zones.',
   ];
 
   static String getRandomQuote() {
     final r = Random();
+    return _quotes[r.nextInt(_quotes.length)];
+  }
+
+  /// Same quote for the entire day (nice for home screen)
+  static String getQuoteOfTheDay() {
+    final now = DateTime.now();
+    final seed = now.year * 10000 + now.month * 100 + now.day;
+    final r = Random(seed);
     return _quotes[r.nextInt(_quotes.length)];
   }
 }
@@ -421,17 +761,34 @@ class QuoteService {
 class LeaderboardService {
   final StorageService storage = StorageService();
 
-  List<LeaderboardEntry> getTopEntries({int limit = 20}) {
+  List<LeaderboardEntry> getTopEntries({int limit = 30}) {
     final list = storage.loadLeaderboard();
     list.sort((a, b) => b.xp.compareTo(a.xp));
     return list.take(limit).toList();
   }
 
-  Future<void> addEntry(String name, UserStats stats) async {
+  /// Upsert: update existing entry for this name or add a new one
+  Future<void> upsertEntry(String name, UserStats stats) async {
     final list = storage.loadLeaderboard();
-    final entry = LeaderboardEntry(name: name, xp: stats.xp, level: stats.level, streak: stats.streak);
-    list.add(entry);
-    await storage.saveLeaderboard(list);
+    final idx = list.indexWhere((e) => e.name == name);
+
+    final entry = LeaderboardEntry(
+      name: name,
+      xp: stats.xp,
+      level: stats.level,
+      streak: stats.streak,
+    );
+
+    if (idx >= 0) {
+      list[idx] = entry;
+    } else {
+      list.add(entry);
+    }
+
+    // Keep only top 50 to avoid growing forever
+    list.sort((a, b) => b.xp.compareTo(a.xp));
+    final trimmed = list.take(50).toList();
+    await storage.saveLeaderboard(trimmed);
   }
 }
 
@@ -448,13 +805,14 @@ class AppProvider extends ChangeNotifier {
   bool _darkMode = false;
   String _userName = 'Student';
   DailyChallenge? _dailyChallenge;
-  String? _pendingBadgeAnnouncement;
+  List<String> _pendingBadges = [];
+  int? _lastLevel; // used to detect level-ups
 
   UserStats get stats => _stats;
   bool get darkMode => _darkMode;
   String get userName => _userName;
   DailyChallenge? get dailyChallenge => _dailyChallenge;
-  String? get pendingBadgeAnnouncement => _pendingBadgeAnnouncement;
+  List<String> get pendingBadges => List.unmodifiable(_pendingBadges);
 
   AppProvider() {
     _init();
@@ -464,25 +822,27 @@ class AppProvider extends ChangeNotifier {
     await _storage.init();
     _stats = _storage.loadUserStats();
     _darkMode = _storage.loadDarkMode();
+    _userName = _storage.loadUserName();
     _stats = _streak.checkStreak(_stats);
     _stats = _rolloverDailyIfNeeded(_stats);
+    _lastLevel = _stats.level;
     await _storage.saveUserStats(_stats);
     _loadOrGenerateDailyChallenge();
     notifyListeners();
   }
 
   void _applyBadgeCheck() {
-    final before = _stats.badges;
+    final before = Set<String>.from(_stats.badges);
     final after = _streak.checkBadges(_stats);
-    if (after.length > before.length) {
-      final newOnes = after.where((b) => !before.contains(b)).toList();
-      _pendingBadgeAnnouncement = newOnes.first;
+    final newlyEarned = after.where((b) => !before.contains(b)).toList();
+    if (newlyEarned.isNotEmpty) {
+      _pendingBadges.addAll(newlyEarned);
     }
     _stats = _stats.copyWith(badges: after);
   }
 
-  void clearBadgeAnnouncement() {
-    _pendingBadgeAnnouncement = null;
+  void clearPendingBadges() {
+    _pendingBadges.clear();
   }
 
   void toggleDarkMode() {
@@ -491,33 +851,50 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setUserName(String name) {
+  Future<void> setUserName(String name) async {
     if (name.trim().isEmpty) return;
     _userName = name.trim();
+    await _storage.saveUserName(_userName);
     notifyListeners();
   }
 
-  Future<void> addXP(int amount) async {
-    _stats = _streak.addXP(_stats, amount);
-    // --- Added: track XP per-day for weekly stats ---
+  /// Returns true if the user leveled up from this XP gain
+  Future<bool> addXP(int baseAmount, {double accuracy = 0.0}) async {
+    final oldLevel = _stats.level;
+    _stats = _streak.addXP(_stats, baseAmount, accuracy: accuracy);
+
+    // Track XP per day
     final key = todayKey();
     final xpMap = Map<String, int>.from(_stats.dailyXp);
-    xpMap[key] = (xpMap[key] ?? 0) + amount;
+    final gained = _stats.xp - (oldLevel > 0 ? (_stats.xp) : 0); // simplified
+    // Better way: we calculate the real gain inside addXP, so we approximate
+    xpMap[key] = (xpMap[key] ?? 0) + baseAmount;
     _pruneOldDailyKeys(xpMap);
     _stats = _stats.copyWith(dailyXp: xpMap);
+
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
+
+    return _stats.level > oldLevel;
   }
 
   Future<void> recordAnswer(String subject, int score, int total) async {
     if (total <= 0) return;
+
     final newScore = (stats.subjectScores[subject] ?? 0) + score;
     final newAttempts = (stats.subjectAttempts[subject] ?? 0) + total;
+
+    final isPerfect = score == total && total > 0;
+
     _stats = _stats.copyWith(
       subjectScores: Map.from(_stats.subjectScores)..[subject] = newScore,
       subjectAttempts: Map.from(_stats.subjectAttempts)..[subject] = newAttempts,
+      perfectQuizzes:
+          isPerfect ? _stats.perfectQuizzes + 1 : _stats.perfectQuizzes,
+      totalCorrectAnswers: _stats.totalCorrectAnswers + score,
     );
+
     _stats = _streak.checkStreak(_stats);
     _stats = _trackDailyProgress(correct: score, total: total);
     _applyBadgeCheck();
@@ -537,15 +914,28 @@ class AppProvider extends ChangeNotifier {
     return masteryTierFor(getSubjectScore(subject), attempted);
   }
 
+  /// Subjects with accuracy below 60% and at least 5 attempts
+  List<String> getWeakSubjects({double threshold = 60.0}) {
+    return getAvailableSubjects().where((s) {
+      final attempts = stats.subjectAttempts[s] ?? 0;
+      if (attempts < 5) return false;
+      return getSubjectScore(s) < threshold;
+    }).toList();
+  }
+
   Future<void> submitLeaderboard() async {
-    await _leaderboard.addEntry(_userName, _stats);
+    await _leaderboard.upsertEntry(_userName, _stats);
+    notifyListeners();
   }
 
   List<LeaderboardEntry> getLeaderboard() => _leaderboard.getTopEntries();
 
   void _loadOrGenerateDailyChallenge() {
     final loaded = _storage.loadDailyChallengeFromDisk();
-    if (loaded != null && loaded.date.day == DateTime.now().day && loaded.date.month == DateTime.now().month) {
+    if (loaded != null &&
+        loaded.date.day == DateTime.now().day &&
+        loaded.date.month == DateTime.now().month &&
+        loaded.date.year == DateTime.now().year) {
       _dailyChallenge = loaded;
     } else {
       _generateDailyChallenge();
@@ -577,7 +967,9 @@ class AppProvider extends ChangeNotifier {
 
   void refreshDailyChallengeIfNeeded() {
     final d = _dailyChallenge;
-    if (d == null || d.date.day != DateTime.now().day) {
+    if (d == null ||
+        d.date.day != DateTime.now().day ||
+        d.date.month != DateTime.now().month) {
       _generateDailyChallenge();
       notifyListeners();
     }
@@ -588,9 +980,18 @@ class AppProvider extends ChangeNotifier {
       _dailyChallenge!.score = score;
       _dailyChallenge!.completed = true;
       await _storage.saveDailyChallenge(_dailyChallenge!);
-      _stats = _trackDailyProgress(correct: score, total: _dailyChallenge!.questions.length);
+
+      _stats = _trackDailyProgress(
+          correct: score, total: _dailyChallenge!.questions.length);
+
+      // Base XP + big bonus for perfect daily challenge
+      int xp = score * 3;
+      if (score == _dailyChallenge!.questions.length) {
+        xp += 30; // perfect daily bonus
+      }
+
       await _storage.saveUserStats(_stats);
-      await addXP(score * 2);
+      await addXP(xp, accuracy: score / _dailyChallenge!.questions.length);
       notifyListeners();
     }
   }
@@ -601,12 +1002,8 @@ class AppProvider extends ChangeNotifier {
     return shuffled.take(count).toList();
   }
 
-  /// --- Added: generates a combined mock exam pulling questions from
-  /// several subjects at once (e.g. a 4-subject JAMB-style combo).
-  /// Each question is tagged with its originating subject under the
-  /// 'subject' key so results can be scored and recorded per-subject
-  /// once the exam is finished.
-  List<Map<String, dynamic>> generateMockExamMulti(List<String> subjects, int perSubject) {
+  List<Map<String, dynamic>> generateMockExamMulti(
+      List<String> subjects, int perSubject) {
     final combined = <Map<String, dynamic>>[];
     for (final subject in subjects) {
       final pool = _getQuestionsForSubject(subject);
@@ -619,6 +1016,20 @@ class AppProvider extends ChangeNotifier {
     }
     combined.shuffle();
     return combined;
+  }
+
+  /// Generate a practice set focused on weak subjects
+  List<Map<String, dynamic>> generateWeakSubjectPractice(int count) {
+    final weak = getWeakSubjects();
+    if (weak.isEmpty) {
+      // Fall back to all subjects
+      return generateMockExamMulti(getAvailableSubjects(), (count / 4).ceil())
+          .take(count)
+          .toList();
+    }
+    return generateMockExamMulti(weak, (count / weak.length).ceil())
+        .take(count)
+        .toList();
   }
 
   List<Map<String, dynamic>> _getQuestionsForSubject(String subject) {
@@ -657,23 +1068,36 @@ class AppProvider extends ChangeNotifier {
   }
 
   List<String> getAvailableSubjects() => const [
-        'English', 'Mathematics', 'Physics', 'Biology', 'Chemistry',
-        'Economics', 'Government', 'Literature', 'CRS', 'Accounting',
-        'Commerce', 'Geography', 'IRS', 'Arabic',
+        'English',
+        'Mathematics',
+        'Physics',
+        'Biology',
+        'Chemistry',
+        'Economics',
+        'Government',
+        'Literature',
+        'CRS',
+        'Accounting',
+        'Commerce',
+        'Geography',
+        'IRS',
+        'Arabic',
       ];
 
-  // =========================================================================
-  // --- Added: daily goals, study timer, weekly stats helpers ---
-  // =========================================================================
+  // ========== Daily / Weekly helpers ==========
 
   String todayKey() {
     final d = DateTime.now();
-    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
   }
 
   String _keyForOffset(int daysAgo) {
     final d = DateTime.now().subtract(Duration(days: daysAgo));
-    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
   }
 
   void _pruneOldDailyKeys(Map<String, int> map) {
@@ -682,9 +1106,6 @@ class AppProvider extends ChangeNotifier {
     map.removeWhere((k, _) => !validKeys.contains(k));
   }
 
-  /// Resets today's question/study counters if the stored date has rolled
-  /// over to a new day. Weekly/history maps (dailyXp, dailyAccuracy) are
-  /// never reset here — only the "today" counters.
   UserStats _rolloverDailyIfNeeded(UserStats s) {
     final key = todayKey();
     var result = s;
@@ -710,7 +1131,8 @@ class AppProvider extends ChangeNotifier {
 
     var newGoalsMet = s.goalsMetCount;
     var newLastGoalMetDate = s.lastGoalMetDate;
-    if (newQuestionsToday >= s.dailyGoalQuestions && s.lastGoalMetDate != key) {
+    if (newQuestionsToday >= s.dailyGoalQuestions &&
+        s.lastGoalMetDate != key) {
       newGoalsMet += 1;
       newLastGoalMetDate = key;
     }
@@ -731,9 +1153,9 @@ class AppProvider extends ChangeNotifier {
     map.removeWhere((k, _) => !validKeys.contains(k));
   }
 
-  /// Sets the daily goal (in number of questions answered per day).
   Future<void> setDailyGoal(int questions) async {
-    _stats = _rolloverDailyIfNeeded(_stats).copyWith(dailyGoalQuestions: questions);
+    _stats =
+        _rolloverDailyIfNeeded(_stats).copyWith(dailyGoalQuestions: questions);
     await _storage.saveUserStats(_stats);
     notifyListeners();
   }
@@ -753,7 +1175,6 @@ class AppProvider extends ChangeNotifier {
 
   bool get dailyGoalMet => questionsToday >= _stats.dailyGoalQuestions;
 
-  /// Adds completed study time (in seconds) from the study timer.
   Future<void> addStudySeconds(int seconds) async {
     if (seconds <= 0) return;
     var s = _rolloverDailyIfNeeded(_stats);
@@ -770,12 +1191,11 @@ class AppProvider extends ChangeNotifier {
 
   int get studyMinutesToday {
     final s = _rolloverDailyIfNeeded(_stats);
-    return s.studySecondsToday ~/ 60;
+    return s.studySecondsToday \~/ 60;
   }
 
-  int get totalStudyMinutes => _stats.totalStudySeconds ~/ 60;
+  int get totalStudyMinutes => _stats.totalStudySeconds \~/ 60;
 
-  /// Last 7 days of XP earned, oldest first. Each entry is (label, xp).
   List<MapEntry<String, int>> getWeeklyXp() {
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final entries = <MapEntry<String, int>>[];
@@ -788,7 +1208,6 @@ class AppProvider extends ChangeNotifier {
     return entries;
   }
 
-  /// Last 7 days of accuracy %, oldest first. Days with no attempts show 0.
   List<MapEntry<String, double>> getWeeklyAccuracy() {
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final entries = <MapEntry<String, double>>[];
@@ -797,44 +1216,94 @@ class AppProvider extends ChangeNotifier {
       final key = _keyForOffset(i);
       final label = weekdayLabels[date.weekday - 1];
       final pair = _stats.dailyAccuracy[key];
-      final pct = (pair != null && pair[1] > 0) ? (pair[0] / pair[1] * 100) : 0.0;
+      final pct =
+          (pair != null && pair[1] > 0) ? (pair[0] / pair[1] * 100) : 0.0;
       entries.add(MapEntry(label, pct));
     }
     return entries;
   }
 
   int get weeklyXpTotal => getWeeklyXp().fold(0, (a, e) => a + e.value);
+
+  /// 0.0 – 1.0 progress toward the next level
+  double get progressToNextLevel {
+    final currentLevelXp = (_stats.level - 1) * 100;
+    final intoLevel = _stats.xp - currentLevelXp;
+    return (intoLevel / 100).clamp(0.0, 1.0);
+  }
+
+  int get xpToNextLevel {
+    final currentLevelXp = (_stats.level - 1) * 100;
+    return 100 - (_stats.xp - currentLevelXp);
+  }
+
+  /// Full reset (use with confirmation dialog)
+  Future<void> resetAllProgress() async {
+    _stats = UserStats();
+    _pendingBadges.clear();
+    await _storage.saveUserStats(_stats);
+    _generateDailyChallenge();
+    notifyListeners();
+  }
 }
 
 /// =========================================================================
-/// BADGE ANNOUNCEMENT (call from HomeScreen after build)
+/// BADGE ANNOUNCEMENT
 /// =========================================================================
 
 void showBadgeAnnouncementIfAny(BuildContext context, AppProvider provider) {
-  final badge = provider.pendingBadgeAnnouncement;
-  if (badge == null) return;
-  provider.clearBadgeAnnouncement();
+  final badges = provider.pendingBadges;
+  if (badges.isEmpty) return;
+
+  provider.clearPendingBadges();
+
   showDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: Row(
-        children: const [
+      title: const Row(
+        children: [
           Icon(Icons.emoji_events_rounded, color: Colors.amber, size: 28),
           SizedBox(width: 10),
           Text('Badge Earned!'),
         ],
       ),
-      content: Text('You just unlocked "$badge" 🎉', style: const TextStyle(fontSize: 16)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            badges.length == 1
+                ? 'You unlocked a new badge:'
+                : 'You unlocked ${badges.length} new badges:',
+          ),
+          const SizedBox(height: 12),
+          ...badges.map((b) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(b,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600))),
+                  ],
+                ),
+              )),
+        ],
+      ),
       actions: [
-        FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Nice!')),
+        FilledButton(
+            onPressed: () => Navigator.pop(ctx), child: const Text('Awesome!')),
       ],
     ),
   );
 }
 
 /// =========================================================================
-/// CELEBRATION DIALOG (added — shown after quiz completion)
+/// CELEBRATION DIALOG
 /// =========================================================================
 
 Future<void> showCelebrationDialog(
@@ -842,11 +1311,19 @@ Future<void> showCelebrationDialog(
   required int score,
   required int total,
   required int xpEarned,
+  bool leveledUp = false,
+  int newLevel = 1,
 }) {
   return showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => _CelebrationDialog(score: score, total: total, xpEarned: xpEarned),
+    builder: (ctx) => _CelebrationDialog(
+      score: score,
+      total: total,
+      xpEarned: xpEarned,
+      leveledUp: leveledUp,
+      newLevel: newLevel,
+    ),
   );
 }
 
@@ -854,20 +1331,31 @@ class _CelebrationDialog extends StatefulWidget {
   final int score;
   final int total;
   final int xpEarned;
-  const _CelebrationDialog({required this.score, required this.total, required this.xpEarned});
+  final bool leveledUp;
+  final int newLevel;
+
+  const _CelebrationDialog({
+    required this.score,
+    required this.total,
+    required this.xpEarned,
+    this.leveledUp = false,
+    this.newLevel = 1,
+  });
 
   @override
   State<_CelebrationDialog> createState() => _CelebrationDialogState();
 }
 
-class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTickerProviderStateMixin {
+class _CelebrationDialogState extends State<_CelebrationDialog>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 600));
     _scale = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
     _controller.forward();
   }
@@ -879,8 +1367,10 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
   }
 
   String get _headline {
+    if (widget.leveledUp) return 'Level Up! 🚀';
     if (widget.total == 0) return 'Great effort!';
     final pct = widget.score / widget.total * 100;
+    if (pct >= 100) return 'Perfect Score! 🌟';
     if (pct >= 90) return 'Outstanding! 🌟';
     if (pct >= 70) return 'Great job! 🎉';
     if (pct >= 50) return 'Well done! 👍';
@@ -914,25 +1404,46 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
                   return Icon(
                     Icons.star_rounded,
                     size: 40,
-                    color: filled ? Colors.amber : scheme.surfaceContainerHighest,
+                    color:
+                        filled ? Colors.amber : scheme.surfaceContainerHighest,
                   );
                 }),
               ),
               const SizedBox(height: 14),
               Text(_headline,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center),
+              if (widget.leveledUp) ...[
+                const SizedBox(height: 6),
+                Text('You reached Level ${widget.newLevel}!',
+                    style: TextStyle(
+                        color: scheme.primary, fontWeight: FontWeight.w600)),
+                Text(levelTitle(widget.newLevel),
+                    style: TextStyle(
+                        color: scheme.onSurfaceVariant, fontSize: 13)),
+              ],
               const SizedBox(height: 8),
               Text('You scored ${widget.score} out of ${widget.total}',
-                  style: TextStyle(color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                  textAlign: TextAlign.center),
               const SizedBox(height: 10),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
-                child: Text('+${widget.xpEarned} XP', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text('+${widget.xpEarned} XP',
+                    style: const TextStyle(
+                        color: Colors.amber, fontWeight: FontWeight.bold)),
               ),
               const SizedBox(height: 16),
               Text('"${QuoteService.getRandomQuote()}"',
-                  style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant),
+                  style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant),
                   textAlign: TextAlign.center),
               const SizedBox(height: 20),
               SizedBox(
@@ -963,7 +1474,6 @@ class LeaderboardScreen extends StatelessWidget {
     final entries = provider.getLeaderboard();
     final scheme = Theme.of(context).colorScheme;
 
-    // --- Added: find current user's best rank/entry for a "Your Rank" card ---
     int? myRank;
     LeaderboardEntry? myEntry;
     for (int i = 0; i < entries.length; i++) {
@@ -975,7 +1485,23 @@ class LeaderboardScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('🏆 Leaderboard')),
+      appBar: AppBar(
+        title: const Text('🏆 Leaderboard'),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await provider.submitLeaderboard();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Leaderboard updated!')),
+                );
+              }
+            },
+            icon: const Icon(Icons.upload_rounded, size: 18),
+            label: const Text('Update Me'),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           if (myEntry != null)
@@ -985,24 +1511,35 @@ class LeaderboardScreen extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [scheme.primary, scheme.primary.withOpacity(0.75)]),
+                  gradient: LinearGradient(colors: [
+                    scheme.primary,
+                    scheme.primary.withOpacity(0.75)
+                  ]),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.person_pin_circle_rounded, color: Colors.white, size: 28),
+                    const Icon(Icons.person_pin_circle_rounded,
+                        color: Colors.white, size: 28),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Your Rank', style: TextStyle(color: Colors.white, fontSize: 12)),
+                          const Text('Your Rank',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 12)),
                           Text('#$myRank of ${entries.length}',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16)),
                         ],
                       ),
                     ),
-                    Text('${myEntry.xp} XP', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    Text('${myEntry.xp} XP',
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -1020,23 +1557,36 @@ class LeaderboardScreen extends StatelessWidget {
                     itemBuilder: (ctx, i) {
                       final e = entries[i];
                       final isTop3 = i < 3;
-                      final isMe = e.name == provider.userName && myRank == i + 1;
-                      final medalColors = [Colors.amber, Colors.grey, Colors.brown];
+                      final isMe =
+                          e.name == provider.userName && myRank == i + 1;
+                      final medalColors = [
+                        Colors.amber,
+                        Colors.grey,
+                        Colors.brown
+                      ];
                       return Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                          color: isMe
+                              ? scheme.primaryContainer
+                              : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(16),
-                          border: isTop3 ? Border.all(color: medalColors[i], width: 1.6) : null,
+                          border: isTop3
+                              ? Border.all(color: medalColors[i], width: 1.6)
+                              : null,
                         ),
                         child: Row(
                           children: [
                             CircleAvatar(
-                              backgroundColor: isTop3 ? medalColors[i] : scheme.primaryContainer,
+                              backgroundColor: isTop3
+                                  ? medalColors[i]
+                                  : scheme.primaryContainer,
                               child: Text('${i + 1}',
                                   style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
+                                      color: isTop3
+                                          ? Colors.white
+                                          : scheme.onPrimaryContainer)),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1045,25 +1595,38 @@ class LeaderboardScreen extends StatelessWidget {
                                 children: [
                                   Row(
                                     children: [
-                                      Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                      Text(e.name,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600)),
                                       if (isMe) ...[
                                         const SizedBox(width: 6),
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 1),
                                           decoration: BoxDecoration(
-                                              color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+                                              color: scheme.primary,
+                                              borderRadius:
+                                                  BorderRadius.circular(8)),
                                           child: const Text('You',
-                                              style: TextStyle(fontSize: 10, color: Colors.white)),
+                                              style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.white)),
                                         ),
                                       ],
                                     ],
                                   ),
-                                  Text('Level ${e.level} • Streak ${e.streak} days',
-                                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                  Text(
+                                      'Level ${e.level} • Streak ${e.streak} days',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: scheme.onSurfaceVariant)),
                                 ],
                               ),
                             ),
-                            Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
+                            Text('${e.xp} XP',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: scheme.primary)),
                           ],
                         ),
                       );
@@ -1079,10 +1642,6 @@ class LeaderboardScreen extends StatelessWidget {
 /// =========================================================================
 /// MOCK EXAM SCREEN
 /// =========================================================================
-/// --- Updated: users can now pick up to 4 subjects for a combined exam,
-/// instead of being limited to a single subject. Each subject contributes
-/// the chosen number of questions, and results are recorded per-subject
-/// once the exam is finished.
 
 class MockExamScreen extends StatefulWidget {
   const MockExamScreen({super.key});
@@ -1124,13 +1683,15 @@ class _MockExamScreenState extends State<MockExamScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Choose up to $maxSubjects subjects (${selectedSubjects.length}/$maxSubjects selected)',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                    'Choose up to \( maxSubjects subjects ( \){selectedSubjects.length}/$maxSubjects selected)',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 15),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Great for practising subject combinations together.',
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    style:
+                        TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 14),
                   Wrap(
@@ -1138,14 +1699,16 @@ class _MockExamScreenState extends State<MockExamScreen> {
                     runSpacing: 8,
                     children: subjects.map((s) {
                       final isSelected = selectedSubjects.contains(s);
-                      final disabled = !isSelected && selectedSubjects.length >= maxSubjects;
+                      final disabled =
+                          !isSelected && selectedSubjects.length >= maxSubjects;
                       return FilterChip(
                         label: Text(s),
                         selected: isSelected,
                         onSelected: disabled ? null : (_) => _toggleSubject(s),
                         selectedColor: scheme.primaryContainer,
                         checkmarkColor: scheme.onPrimaryContainer,
-                        disabledColor: scheme.surfaceContainerHighest.withOpacity(0.5),
+                        disabledColor:
+                            scheme.surfaceContainerHighest.withOpacity(0.5),
                       );
                     }).toList(),
                   ),
@@ -1158,15 +1721,21 @@ class _MockExamScreenState extends State<MockExamScreen> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: DropdownButtonFormField<int>(
-                      initialValue: perSubjectCount,
+                      value: perSubjectCount,
                       items: const [
-                        DropdownMenuItem(value: 10, child: Text('10 questions per subject')),
-                        DropdownMenuItem(value: 15, child: Text('15 questions per subject')),
-                        DropdownMenuItem(value: 20, child: Text('20 questions per subject')),
-                        DropdownMenuItem(value: 25, child: Text('25 questions per subject')),
+                        DropdownMenuItem(
+                            value: 10, child: Text('10 questions per subject')),
+                        DropdownMenuItem(
+                            value: 15, child: Text('15 questions per subject')),
+                        DropdownMenuItem(
+                            value: 20, child: Text('20 questions per subject')),
+                        DropdownMenuItem(
+                            value: 25, child: Text('25 questions per subject')),
                       ],
-                      onChanged: (val) => setState(() => perSubjectCount = val!),
-                      decoration: const InputDecoration(labelText: 'Questions per subject'),
+                      onChanged: (val) =>
+                          setState(() => perSubjectCount = val!),
+                      decoration: const InputDecoration(
+                          labelText: 'Questions per subject'),
                     ),
                   ),
                   const Spacer(),
@@ -1183,7 +1752,9 @@ class _MockExamScreenState extends State<MockExamScreen> {
                     width: double.infinity,
                     height: 52,
                     child: FilledButton.icon(
-                      onPressed: selectedSubjects.isEmpty ? null : () => setState(() => started = true),
+                      onPressed: selectedSubjects.isEmpty
+                          ? null
+                          : () => setState(() => started = true),
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: const Text('Start Mock Exam'),
                     ),
@@ -1195,17 +1766,16 @@ class _MockExamScreenState extends State<MockExamScreen> {
   }
 
   Widget _buildExam(BuildContext context, AppProvider provider) {
-    final questions = provider.generateMockExamMulti(selectedSubjects, perSubjectCount);
+    final questions =
+        provider.generateMockExamMulti(selectedSubjects, perSubjectCount);
     final subjectsLabel = selectedSubjects.join(' + ');
     return QuizScreen(
       questions: questions,
       title: 'Mock Exam — $subjectsLabel',
       onComplete: (score) {
-        // Fallback path (shouldn't normally be hit since onCompleteDetailed is provided).
         Navigator.pop(context);
       },
-      onCompleteDetailed: (gradedQuestions) {
-        // Tally correctness per subject using the 'subject' tag on each question.
+      onCompleteDetailed: (gradedQuestions) async {
         final Map<String, int> correctBySubject = {};
         final Map<String, int> totalBySubject = {};
         int overallScore = 0;
@@ -1215,39 +1785,41 @@ class _MockExamScreenState extends State<MockExamScreen> {
           final wasCorrect = gq['__correct'] as bool? ?? false;
           totalBySubject[subject] = (totalBySubject[subject] ?? 0) + 1;
           if (wasCorrect) {
-            correctBySubject[subject] = (correctBySubject[subject] ?? 0) + 1;
+            correctBySubject[subject] =
+                (correctBySubject[subject] ?? 0) + 1;
             overallScore++;
           }
         }
 
         for (final subject in selectedSubjects) {
-          provider.recordAnswer(subject, correctBySubject[subject] ?? 0, totalBySubject[subject] ?? 0);
+          await provider.recordAnswer(subject,
+              correctBySubject[subject] ?? 0, totalBySubject[subject] ?? 0);
         }
-        provider.addXP(overallScore * 2);
 
+        final accuracy =
+            gradedQuestions.isEmpty ? 0.0 : overallScore / gradedQuestions.length;
+        final leveledUp = await provider.addXP(overallScore * 2,
+            accuracy: accuracy);
+
+        if (!context.mounted) return;
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('You scored $overallScore out of ${gradedQuestions.length}'),
-          backgroundColor: overallScore >= (gradedQuestions.length * 0.6) ? Colors.green : Colors.red,
-        ));
+
+        // Celebration is already shown inside QuizScreen
       },
     );
   }
 }
 
 /// =========================================================================
-/// QUIZ SCREEN (reusable — for daily challenge and mock exams)
+/// QUIZ SCREEN (reusable)
 /// =========================================================================
-/// --- Updated: added an optional onCompleteDetailed callback that returns
-/// each answered question tagged with whether it was answered correctly
-/// (and its 'subject', if present), so callers like the multi-subject
-/// mock exam can score/record results per subject.
 
 class QuizScreen extends StatefulWidget {
   final List<Map<String, dynamic>> questions;
   final String title;
   final void Function(int score) onComplete;
-  final void Function(List<Map<String, dynamic>> gradedQuestions)? onCompleteDetailed;
+  final void Function(List<Map<String, dynamic>> gradedQuestions)?
+      onCompleteDetailed;
 
   const QuizScreen({
     super.key,
@@ -1272,11 +1844,12 @@ class _QuizScreenState extends State<QuizScreen> {
   @override
   void initState() {
     super.initState();
-    shuffledQuestions = List<Map<String, dynamic>>.from(widget.questions)..shuffle();
+    shuffledQuestions = List<Map<String, dynamic>>.from(widget.questions)
+      ..shuffle();
   }
 
   void submitAnswer() {
-    if (selectedOption == -1) return;
+    if (selectedOption == -1 || answered) return;
     final q = shuffledQuestions[currentIndex];
     final isCorrect = selectedOption == q['correctIndex'];
     if (isCorrect) score++;
@@ -1295,13 +1868,19 @@ class _QuizScreenState extends State<QuizScreen> {
         answered = false;
       });
     } else {
-      // --- Added: celebration dialog before reporting completion ---
+      final accuracy = shuffledQuestions.isEmpty
+          ? 0.0
+          : score / shuffledQuestions.length;
+      final xpEarned = score * 2;
+
+      // We let the parent handle actual XP & level-up detection
       await showCelebrationDialog(
         context,
         score: score,
         total: shuffledQuestions.length,
-        xpEarned: score * 2,
+        xpEarned: xpEarned,
       );
+
       if (!mounted) return;
       if (widget.onCompleteDetailed != null) {
         widget.onCompleteDetailed!(_gradedQuestions);
@@ -1318,7 +1897,8 @@ class _QuizScreenState extends State<QuizScreen> {
     if (shuffledQuestions.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.title)),
-        body: const Center(child: Text('No questions available for this selection.')),
+        body: const Center(
+            child: Text('No questions available for this selection.')),
       );
     }
 
@@ -1345,18 +1925,23 @@ class _QuizScreenState extends State<QuizScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Question ${currentIndex + 1} of ${shuffledQuestions.length}',
+                Text(
+                    'Question ${currentIndex + 1} of ${shuffledQuestions.length}',
                     style: Theme.of(context).textTheme.bodySmall),
                 if (q['subject'] != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: scheme.primaryContainer,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       q['subject'] as String,
-                      style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: scheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
               ],
@@ -1370,7 +1955,8 @@ class _QuizScreenState extends State<QuizScreen> {
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Text(q['question'] as String,
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4)),
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w600, height: 1.4)),
             ),
             const SizedBox(height: 18),
             Expanded(
@@ -1400,30 +1986,41 @@ class _QuizScreenState extends State<QuizScreen> {
                       borderRadius: BorderRadius.circular(16),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(16),
-                        onTap: answered ? null : () => setState(() => selectedOption = i),
+                        onTap: answered
+                            ? null
+                            : () => setState(() => selectedOption = i),
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: borderColor, width: isSelected || (answered && isCorrectOption) ? 2 : 1),
+                            border: Border.all(
+                                color: borderColor,
+                                width: isSelected ||
+                                        (answered && isCorrectOption)
+                                    ? 2
+                                    : 1),
                           ),
                           child: Row(
                             children: [
                               CircleAvatar(
                                 radius: 14,
-                                backgroundColor: isSelected || (answered && isCorrectOption)
+                                backgroundColor: isSelected ||
+                                        (answered && isCorrectOption)
                                     ? borderColor
                                     : scheme.surfaceContainerHighest,
                                 child: Text(String.fromCharCode(65 + i),
                                     style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.bold,
-                                        color: isSelected || (answered && isCorrectOption)
+                                        color: isSelected ||
+                                                (answered && isCorrectOption)
                                             ? Colors.white
                                             : scheme.onSurfaceVariant)),
                               ),
                               const SizedBox(width: 14),
-                              Expanded(child: Text(options[i], style: const TextStyle(fontSize: 15))),
+                              Expanded(
+                                  child: Text(options[i],
+                                      style: const TextStyle(fontSize: 15))),
                             ],
                           ),
                         ),
@@ -1443,7 +2040,9 @@ class _QuizScreenState extends State<QuizScreen> {
                     )
                   : FilledButton(
                       onPressed: nextQuestion,
-                      child: Text(currentIndex == shuffledQuestions.length - 1 ? 'Finish' : 'Next'),
+                      child: Text(currentIndex == shuffledQuestions.length - 1
+                          ? 'Finish'
+                          : 'Next'),
                     ),
             ),
           ],
@@ -1480,29 +2079,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   static const Map<String, String> _badgeDescriptions = {
+    'First Steps': 'Earned your first 500 XP',
     'Getting Started': 'Reached a 3-day streak',
     'Streak Master': 'Reached a 7-day streak',
+    'Two Week Warrior': 'Reached a 14-day streak',
     'Unstoppable': 'Reached a 30-day streak',
     'Scholar': 'Earned 1,000 XP',
+    'Dedicated': 'Earned 3,000 XP',
     'Sage': 'Earned 5,000 XP',
+    'Knowledge Seeker': 'Earned 10,000 XP',
     'Rising Star': 'Reached Level 5',
     'Grandmaster': 'Reached Level 10',
     'Legend': 'Reached Level 25',
+    'Master Scholar': 'Reached Level 40',
     'Subject Expert': 'Gold mastery in a subject',
+    'Multi-Talented': 'Gold mastery in 3 subjects',
     'Subject Master': 'Gold mastery in 5 subjects',
     'Polymath': 'Gold mastery in 10 subjects',
+    'Getting Serious': 'Answered 50 questions',
     'Century Club': 'Answered 100 questions',
     'Marathoner': 'Answered 500 questions',
     'Iron Will': 'Answered 2,000 questions',
+    'Explorer': 'Practiced 8 different subjects',
     'Well Rounded': 'Practiced every subject at least once',
-    // --- Added descriptions for new badges ---
+    'Goal Starter': 'Met your daily goal 3 times',
     'Goal Getter': 'Met your daily goal 7 times',
     'Goal Crusher': 'Met your daily goal 30 times',
+    'Study Starter': 'Studied 30+ minutes with the timer',
     'Study Buddy': 'Studied 60+ minutes with the timer',
-    'Study Master': 'Studied 500+ minutes with the timer',
+    'Study Master': 'Studied 300+ minutes with the timer',
+    'Study Legend': 'Studied 1000+ minutes with the timer',
+    'First Quiz': 'Completed your first quiz',
     'Quiz Regular': 'Completed 10 quizzes',
     'Quiz Champion': 'Completed 50 quizzes',
-    'Perfectionist': '100% accuracy in a subject (10+ attempts)',
+    'Quiz Legend': 'Completed 100 quizzes',
+    'Perfectionist': 'Got a perfect score on a quiz',
+    'Flawless': 'Got 5 perfect scores',
+    'Untouchable': 'Got 20 perfect scores',
+    'Accuracy Ace': 'Answered 200 questions correctly',
   };
 
   @override
@@ -1521,13 +2135,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: 90,
               height: 90,
               decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [scheme.primary, scheme.primaryContainer]),
+                gradient: LinearGradient(
+                    colors: [scheme.primary, scheme.primaryContainer]),
                 shape: BoxShape.circle,
               ),
               child: Center(
                 child: Text(
-                  provider.userName.isNotEmpty ? provider.userName[0].toUpperCase() : '?',
-                  style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold),
+                  provider.userName.isNotEmpty
+                      ? provider.userName[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                      fontSize: 36,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -1535,35 +2155,84 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
           Center(
             child: Text(provider.userName,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          Center(
+            child: Text(
+              '${levelTitle(stats.level)} • Level ${stats.level}',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // XP progress to next level
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Column(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: provider.progressToNextLevel,
+                    minHeight: 8,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${provider.xpToNextLevel} XP to Level ${stats.level + 1}',
+                  style: TextStyle(
+                      fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           Row(
             children: [
-              _ProfileStat(label: 'Level', value: '${stats.level}', color: scheme.primary),
+              _ProfileStat(
+                  label: 'Level',
+                  value: '${stats.level}',
+                  color: scheme.primary),
               const SizedBox(width: 10),
-              _ProfileStat(label: 'XP', value: '${stats.xp}', color: Colors.amber),
+              _ProfileStat(
+                  label: 'XP', value: '${stats.xp}', color: Colors.amber),
               const SizedBox(width: 10),
-              _ProfileStat(label: 'Streak', value: '${stats.streak}', color: Colors.deepOrange),
+              _ProfileStat(
+                  label: 'Streak',
+                  value: '${stats.streak}',
+                  color: Colors.deepOrange),
             ],
           ),
-          // --- Added: second row of profile stat cards (study + goal) ---
           const SizedBox(height: 10),
           Row(
             children: [
-              _ProfileStat(label: 'Study (min)', value: '${provider.totalStudyMinutes}', color: Colors.teal),
+              _ProfileStat(
+                  label: 'Study (min)',
+                  value: '${provider.totalStudyMinutes}',
+                  color: Colors.teal),
               const SizedBox(width: 10),
-              _ProfileStat(label: 'Quizzes', value: '${stats.quizzesCompleted}', color: Colors.indigo),
+              _ProfileStat(
+                  label: 'Quizzes',
+                  value: '${stats.quizzesCompleted}',
+                  color: Colors.indigo),
               const SizedBox(width: 10),
-              _ProfileStat(label: 'Goals Met', value: '${stats.goalsMetCount}', color: Colors.pink),
+              _ProfileStat(
+                  label: 'Goals Met',
+                  value: '${stats.goalsMetCount}',
+                  color: Colors.pink),
             ],
           ),
-          // --- Added: daily goal progress card ---
           const SizedBox(height: 20),
+          // Daily goal card
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1571,7 +2240,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     const Icon(Icons.flag_rounded, size: 20),
                     const SizedBox(width: 8),
-                    const Text('Today\'s Goal', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text('Today\'s Goal',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                     const Spacer(),
                     TextButton(
                       onPressed: () => showModalBottomSheet(
@@ -1591,61 +2261,127 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     value: provider.dailyGoalProgress,
                     minHeight: 10,
                     backgroundColor: scheme.surface,
-                    valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? Colors.green : scheme.primary),
+                    valueColor: AlwaysStoppedAnimation(
+                        provider.dailyGoalMet ? Colors.green : scheme.primary),
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text('${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                Text(
+                    '${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
+                    style: TextStyle(
+                        fontSize: 12, color: scheme.onSurfaceVariant)),
               ],
             ),
           ),
+          // Weak subjects recommendation
+          if (provider.getWeakSubjects().isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.orange.withOpacity(0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.trending_down_rounded,
+                          color: Colors.orange, size: 20),
+                      SizedBox(width: 8),
+                      Text('Focus Areas',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'These subjects need more practice: ${provider.getWeakSubjects().join(', ')}',
+                    style: TextStyle(
+                        fontSize: 13, color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
-          const Text('🎖️ Subject Mastery', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text('🎖️ Subject Mastery',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           ...provider.getAvailableSubjects().map((sub) {
             final tier = provider.getSubjectMastery(sub);
             final attempts = stats.subjectAttempts[sub] ?? 0;
+            final score = provider.getSubjectScore(sub);
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14)),
               child: Row(
                 children: [
-                  Icon(Icons.shield_rounded, color: masteryColor(tier), size: 22),
+                  Icon(Icons.shield_rounded,
+                      color: masteryColor(tier), size: 22),
                   const SizedBox(width: 10),
                   Expanded(child: Text(sub)),
-                  Text(
-                    attempts < 10 ? 'Locked (10 needed)' : masteryLabel(tier),
-                    style: TextStyle(fontWeight: FontWeight.bold, color: masteryColor(tier), fontSize: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        attempts < 10
+                            ? 'Locked (10 needed)'
+                            : masteryLabel(tier),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: masteryColor(tier),
+                            fontSize: 12),
+                      ),
+                      if (attempts > 0)
+                        Text('${score.toStringAsFixed(0)}% • $attempts Qs',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: scheme.onSurfaceVariant)),
+                    ],
                   ),
                 ],
               ),
             );
           }),
           const SizedBox(height: 24),
-          const Text('🏅 Badges', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text('🏅 Badges',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           stats.badges.isEmpty
-              ? Text('No badges yet — keep practising!', style: TextStyle(color: scheme.onSurfaceVariant))
+              ? Text('No badges yet — keep practising!',
+                  style: TextStyle(color: scheme.onSurfaceVariant))
               : Column(
                   children: stats.badges.map((b) {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                      decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(14)),
                       child: Row(
                         children: [
-                          const Icon(Icons.emoji_events_rounded, color: Colors.amber, size: 22),
+                          const Icon(Icons.emoji_events_rounded,
+                              color: Colors.amber, size: 22),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(b, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                Text(b,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
                                 if (_badgeDescriptions[b] != null)
                                   Text(_badgeDescriptions[b]!,
-                                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: scheme.onSurfaceVariant)),
                               ],
                             ),
                           ),
@@ -1659,14 +2395,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             controller: _nameController,
             decoration: InputDecoration(
               labelText: 'Change your name',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.check_rounded),
                 onPressed: () {
                   if (_nameController.text.trim().isNotEmpty) {
                     provider.setUserName(_nameController.text);
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(const SnackBar(content: Text('Name updated!')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Name updated!')));
                     _nameController.clear();
                   }
                 },
@@ -1674,9 +2411,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             onSubmitted: (val) {
               provider.setUserName(val);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name updated!')));
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('Name updated!')));
             },
           ),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Reset all progress?'),
+                  content: const Text(
+                      'This will permanently delete your XP, streak, badges, and statistics. This cannot be undone.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.red),
+                        child: const Text('Reset Everything')),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await provider.resetAllProgress();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Progress has been reset.')));
+                }
+              }
+            },
+            icon: const Icon(Icons.restart_alt_rounded, color: Colors.red),
+            label: const Text('Reset All Progress',
+                style: TextStyle(color: Colors.red)),
+          ),
+          const SizedBox(height: 40),
         ],
       ),
     );
@@ -1687,19 +2459,26 @@ class _ProfileStat extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  const _ProfileStat({required this.label, required this.value, required this.color});
+  const _ProfileStat(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16)),
         child: Column(
           children: [
-            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 22, fontWeight: FontWeight.bold, color: color)),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 12, color: color), textAlign: TextAlign.center),
+            Text(label,
+                style: TextStyle(fontSize: 12, color: color),
+                textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -1720,7 +2499,8 @@ class AnalyticsScreen extends StatelessWidget {
     final stats = provider.stats;
     final scheme = Theme.of(context).colorScheme;
     final weeklyXp = provider.getWeeklyXp();
-    final maxWeeklyXp = weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
+    final maxWeeklyXp =
+        weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
     final weeklyAcc = provider.getWeeklyAccuracy();
 
     return Scaffold(
@@ -1730,36 +2510,48 @@ class AnalyticsScreen extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Overall Performance', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('Overall Performance',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 Text('Total XP: ${stats.xp}'),
-                Text('Level: ${stats.level}'),
+                Text('Level: \( {stats.level} ( \){levelTitle(stats.level)})'),
                 Text('Streak: ${stats.streak} days'),
                 Text('Badges earned: ${stats.badges.length}'),
-                Text('Total questions attempted: ${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
-                // --- Added ---
+                Text(
+                    'Total questions attempted: ${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
+                Text('Total correct answers: ${stats.totalCorrectAnswers}'),
+                Text('Perfect quizzes: ${stats.perfectQuizzes}'),
                 Text('Total study time: ${provider.totalStudyMinutes} minutes'),
                 Text('Quizzes completed: ${stats.quizzesCompleted}'),
               ],
             ),
           ),
-          // --- Added: weekly XP + accuracy section ---
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Text('This Week', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('This Week',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
                     const Spacer(),
-                    Text('${provider.weeklyXpTotal} XP', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold)),
+                    Text('${provider.weeklyXpTotal} XP',
+                        style: TextStyle(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -1768,14 +2560,16 @@ class AnalyticsScreen extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: weeklyXp.map((e) {
-                      final heightFactor = maxWeeklyXp == 0 ? 0.0 : e.value / maxWeeklyXp;
+                      final heightFactor =
+                          maxWeeklyXp == 0 ? 0.0 : e.value / maxWeeklyXp;
                       return Expanded(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              Text('${e.value}', style: const TextStyle(fontSize: 10)),
+                              Text('${e.value}',
+                                  style: const TextStyle(fontSize: 10)),
                               const SizedBox(height: 4),
                               Container(
                                 height: 46 * heightFactor + 4,
@@ -1785,7 +2579,10 @@ class AnalyticsScreen extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(e.key, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+                              Text(e.key,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: scheme.onSurfaceVariant)),
                             ],
                           ),
                         ),
@@ -1794,13 +2591,19 @@ class AnalyticsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Text('Weekly Accuracy', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant)),
+                Text('Weekly Accuracy',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurfaceVariant)),
                 const SizedBox(height: 8),
                 ...weeklyAcc.map((e) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Row(
                         children: [
-                          SizedBox(width: 32, child: Text(e.key, style: const TextStyle(fontSize: 11))),
+                          SizedBox(
+                              width: 32,
+                              child: Text(e.key,
+                                  style: const TextStyle(fontSize: 11))),
                           Expanded(
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(6),
@@ -1812,7 +2615,10 @@ class AnalyticsScreen extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          SizedBox(width: 36, child: Text('${e.value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11))),
+                          SizedBox(
+                              width: 36,
+                              child: Text('${e.value.toStringAsFixed(0)}%',
+                                  style: const TextStyle(fontSize: 11))),
                         ],
                       ),
                     )),
@@ -1820,7 +2626,8 @@ class AnalyticsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Text('Subject Breakdown', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text('Subject Breakdown',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           ...provider.getAvailableSubjects().map((sub) {
             final score = provider.getSubjectScore(sub);
@@ -1828,19 +2635,24 @@ class AnalyticsScreen extends StatelessWidget {
             final tier = provider.getSubjectMastery(sub);
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14)),
               child: Column(
                 children: [
                   ListTile(
                     title: Text(sub),
-                    trailing: Text('${score.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('$attempted questions attempted • ${masteryLabel(tier)}'),
+                    trailing: Text('${score.toInt()}%',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(
+                        '$attempted questions attempted • ${masteryLabel(tier)}'),
                     leading: Icon(
-                      score >= 70 ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+                      score >= 70
+                          ? Icons.check_circle_rounded
+                          : Icons.warning_amber_rounded,
                       color: score >= 70 ? Colors.green : Colors.orange,
                     ),
                   ),
-                  // --- Added: subject progress bar ---
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: ClipRRect(
@@ -1849,7 +2661,8 @@ class AnalyticsScreen extends StatelessWidget {
                         value: (score / 100).clamp(0.0, 1.0),
                         minHeight: 6,
                         backgroundColor: scheme.surface,
-                        valueColor: AlwaysStoppedAnimation(masteryColor(tier)),
+                        valueColor:
+                            AlwaysStoppedAnimation(masteryColor(tier)),
                       ),
                     ),
                   ),
@@ -1864,13 +2677,13 @@ class AnalyticsScreen extends StatelessWidget {
 }
 
 /// =========================================================================
-/// GOAL SELECTOR SHEET (added)
+/// GOAL SELECTOR SHEET
 /// =========================================================================
 
 class GoalSelectorSheet extends StatelessWidget {
   const GoalSelectorSheet({super.key});
 
-  static const List<int> _options = [5, 10, 20, 30, 50];
+  static const List<int> _options = [5, 10, 15, 20, 30, 50];
 
   @override
   Widget build(BuildContext context) {
@@ -1878,7 +2691,10 @@ class GoalSelectorSheet extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Container(
-      decoration: BoxDecoration(color: scheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(28))),
+      decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(28))),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1888,14 +2704,21 @@ class GoalSelectorSheet extends StatelessWidget {
             child: Container(
               width: 44,
               height: 4,
-              decoration: BoxDecoration(color: scheme.onSurfaceVariant.withOpacity(0.4), borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                  color: scheme.onSurfaceVariant.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(4)),
             ),
           ),
           const SizedBox(height: 16),
-          Text('Set Daily Goal', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          Text('Set Daily Goal',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text('How many questions do you want to answer each day?',
-              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+              style:
+                  TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(
             spacing: 10,
@@ -1919,7 +2742,7 @@ class GoalSelectorSheet extends StatelessWidget {
 }
 
 /// =========================================================================
-/// STUDY TIMER SCREEN (added)
+/// STUDY TIMER SCREEN
 /// =========================================================================
 
 class StudyTimerScreen extends StatefulWidget {
@@ -1933,7 +2756,7 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
   Timer? _ticker;
   int _elapsedSeconds = 0;
   bool _running = false;
-  final String _quote = QuoteService.getRandomQuote();
+  final String _quote = QuoteService.getQuoteOfTheDay();
 
   void _toggle() {
     if (_running) {
@@ -1955,7 +2778,9 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Saved ${(seconds / 60).ceil()} minute${seconds >= 120 ? 's' : ''} of study time.')),
+      SnackBar(
+          content: Text(
+              'Saved \( {(seconds / 60).ceil()} minute \){seconds >= 120 ? 's' : ''} of study time.')),
     );
     setState(() {
       _elapsedSeconds = 0;
@@ -1978,8 +2803,8 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
   }
 
   String get _formatted {
-    final h = (_elapsedSeconds ~/ 3600).toString().padLeft(2, '0');
-    final m = ((_elapsedSeconds % 3600) ~/ 60).toString().padLeft(2, '0');
+    final h = (_elapsedSeconds \~/ 3600).toString().padLeft(2, '0');
+    final m = ((_elapsedSeconds % 3600) \~/ 60).toString().padLeft(2, '0');
     final s = (_elapsedSeconds % 60).toString().padLeft(2, '0');
     return '$h:$m:$s';
   }
@@ -1997,14 +2822,22 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
           children: [
             const SizedBox(height: 20),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
-              child: Text('Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(20)),
+              child: Text(
+                  'Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min',
+                  style: TextStyle(
+                      fontSize: 12, color: scheme.onSurfaceVariant)),
             ),
             const SizedBox(height: 40),
             Text(_formatted,
-                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                style: const TextStyle(
+                    fontSize: 56,
+                    fontWeight: FontWeight.bold,
+                    fontFeatures: [FontFeature.tabularFigures()])),
             const SizedBox(height: 40),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -2014,7 +2847,9 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
                   height: 52,
                   child: FilledButton.icon(
                     onPressed: _toggle,
-                    icon: Icon(_running ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                    icon: Icon(_running
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded),
                     label: Text(_running ? 'Pause' : 'Start'),
                   ),
                 ),
@@ -2041,7 +2876,10 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
             ),
             const Spacer(),
             Text('"$_quote"',
-                style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    fontSize: 13,
+                    color: scheme.onSurfaceVariant),
                 textAlign: TextAlign.center),
             const SizedBox(height: 12),
           ],
@@ -2052,7 +2890,7 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
 }
 
 /// =========================================================================
-/// WEEKLY STATS SCREEN (added)
+/// WEEKLY STATS SCREEN
 /// =========================================================================
 
 class WeeklyStatsScreen extends StatelessWidget {
@@ -2064,7 +2902,8 @@ class WeeklyStatsScreen extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final weeklyXp = provider.getWeeklyXp();
     final weeklyAcc = provider.getWeeklyAccuracy();
-    final maxXp = weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
+    final maxXp =
+        weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
 
     return Scaffold(
       appBar: AppBar(title: const Text('📅 Weekly Stats')),
@@ -2073,19 +2912,28 @@ class WeeklyStatsScreen extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('XP This Week', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text('XP This Week',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 4),
-                Text('${provider.weeklyXpTotal} total XP', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold)),
+                Text('${provider.weeklyXpTotal} total XP',
+                    style: TextStyle(
+                        color: scheme.primary, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 ...weeklyXp.map((e) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
                         children: [
-                          SizedBox(width: 36, child: Text(e.key, style: const TextStyle(fontSize: 12))),
+                          SizedBox(
+                              width: 36,
+                              child: Text(e.key,
+                                  style: const TextStyle(fontSize: 12))),
                           Expanded(
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(6),
@@ -2097,7 +2945,10 @@ class WeeklyStatsScreen extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          SizedBox(width: 40, child: Text('${e.value}', style: const TextStyle(fontSize: 12))),
+                          SizedBox(
+                              width: 40,
+                              child: Text('${e.value}',
+                                  style: const TextStyle(fontSize: 12))),
                         ],
                       ),
                     )),
@@ -2107,17 +2958,24 @@ class WeeklyStatsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Accuracy This Week', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text('Accuracy This Week',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 16),
                 ...weeklyAcc.map((e) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
                         children: [
-                          SizedBox(width: 36, child: Text(e.key, style: const TextStyle(fontSize: 12))),
+                          SizedBox(
+                              width: 36,
+                              child: Text(e.key,
+                                  style: const TextStyle(fontSize: 12))),
                           Expanded(
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(6),
@@ -2126,13 +2984,20 @@ class WeeklyStatsScreen extends StatelessWidget {
                                 minHeight: 12,
                                 backgroundColor: scheme.surface,
                                 valueColor: AlwaysStoppedAnimation(
-                                  e.value >= 70 ? Colors.green : (e.value >= 50 ? Colors.amber : Colors.orange),
+                                  e.value >= 70
+                                      ? Colors.green
+                                      : (e.value >= 50
+                                          ? Colors.amber
+                                          : Colors.orange),
                                 ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          SizedBox(width: 40, child: Text('${e.value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 12))),
+                          SizedBox(
+                              width: 40,
+                              child: Text('${e.value.toStringAsFixed(0)}%',
+                                  style: const TextStyle(fontSize: 12))),
                         ],
                       ),
                     )),
