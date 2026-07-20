@@ -107,6 +107,19 @@ class SubjectInfo {
 // entries as you wire in each new subject file.
 const List<SubjectInfo> kSubjects = [
   SubjectInfo('English', Icons.menu_book_rounded, Color(0xFF3F51B5)),
+  SubjectInfo('Mathematics', Icons.calculate_rounded, Colors.blue),
+  SubjectInfo('Physics', Icons.science_rounded, Colors.deepPurple),
+  SubjectInfo('Chemistry', Icons.biotech_rounded, Colors.red),
+  SubjectInfo('Biology', Icons.eco_rounded, Colors.green),
+  SubjectInfo('Economics', Icons.attach_money_rounded, Colors.teal),
+  SubjectInfo('Government', Icons.account_balance_rounded, Colors.indigo),
+  SubjectInfo('Geography', Icons.public_rounded, Colors.brown),
+  SubjectInfo('Literature', Icons.menu_book_rounded, Colors.purple),
+  SubjectInfo('Commerce', Icons.shopping_cart_rounded, Colors.orange),
+  SubjectInfo('Accounting', Icons.receipt_long_rounded, Colors.cyan),
+  SubjectInfo('CRS', Icons.auto_stories_rounded, Colors.deepOrange),
+  SubjectInfo('IRS', Icons.mosque_rounded, Colors.green),
+  SubjectInfo('Arabic', Icons.translate_rounded, Colors.lime),
 ];
 
 /// =========================================================================
