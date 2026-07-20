@@ -23,6 +23,7 @@ import 'app_enhancements.dart';
 
 import 'questions_english.dart';
 import 'questions_accounting.dart';
+import 'questions_arabic.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
