@@ -473,6 +473,44 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
             ),
+            // --- Added: Daily Goal progress card ---
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.flag_rounded, size: 20, color: scheme.primary),
+                          const SizedBox(width: 8),
+                          const Text('Daily Goal', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          value: provider.dailyGoalProgress,
+                          minHeight: 10,
+                          backgroundColor: scheme.surface,
+                          valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? Colors.green : scheme.primary),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
@@ -488,6 +526,11 @@ class HomeScreen extends StatelessWidget {
                       _QuickActionChip(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
                       const SizedBox(width: 10),
                       _QuickActionChip(icon: Icons.person_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
+                      // --- Added: Study Timer and Weekly Stats quick actions ---
+                      const SizedBox(width: 10),
+                      _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
+                      const SizedBox(width: 10),
+                      _QuickActionChip(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
                     ],
                   ),
                 ),
