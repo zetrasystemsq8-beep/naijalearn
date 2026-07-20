@@ -6,6 +6,8 @@
 // it plugs into main.dart's existing NaijaLearnApp via AppProvider.
 
 import 'dart:convert';
+import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
@@ -37,6 +39,19 @@ class UserStats {
   final List<String> badges;
   final DateTime lastActive;
 
+  // --- Added: daily goals / study timer / weekly stats tracking ---
+  final int dailyGoalQuestions;
+  final int questionsToday;
+  final String lastProgressDate;
+  final int studySecondsToday;
+  final int totalStudySeconds;
+  final String lastStudyDate;
+  final int goalsMetCount;
+  final String lastGoalMetDate;
+  final int quizzesCompleted;
+  final Map<String, int> dailyXp;
+  final Map<String, List<int>> dailyAccuracy;
+
   UserStats({
     this.xp = 0,
     this.streak = 0,
@@ -45,6 +60,17 @@ class UserStats {
     this.subjectAttempts = const {},
     this.badges = const [],
     DateTime? lastActive,
+    this.dailyGoalQuestions = 10,
+    this.questionsToday = 0,
+    this.lastProgressDate = '',
+    this.studySecondsToday = 0,
+    this.totalStudySeconds = 0,
+    this.lastStudyDate = '',
+    this.goalsMetCount = 0,
+    this.lastGoalMetDate = '',
+    this.quizzesCompleted = 0,
+    this.dailyXp = const {},
+    this.dailyAccuracy = const {},
   }) : lastActive = lastActive ?? DateTime.now();
 
   UserStats copyWith({
@@ -55,6 +81,17 @@ class UserStats {
     Map<String, int>? subjectAttempts,
     List<String>? badges,
     DateTime? lastActive,
+    int? dailyGoalQuestions,
+    int? questionsToday,
+    String? lastProgressDate,
+    int? studySecondsToday,
+    int? totalStudySeconds,
+    String? lastStudyDate,
+    int? goalsMetCount,
+    String? lastGoalMetDate,
+    int? quizzesCompleted,
+    Map<String, int>? dailyXp,
+    Map<String, List<int>>? dailyAccuracy,
   }) {
     return UserStats(
       xp: xp ?? this.xp,
@@ -64,6 +101,17 @@ class UserStats {
       subjectAttempts: subjectAttempts ?? this.subjectAttempts,
       badges: badges ?? this.badges,
       lastActive: lastActive ?? this.lastActive,
+      dailyGoalQuestions: dailyGoalQuestions ?? this.dailyGoalQuestions,
+      questionsToday: questionsToday ?? this.questionsToday,
+      lastProgressDate: lastProgressDate ?? this.lastProgressDate,
+      studySecondsToday: studySecondsToday ?? this.studySecondsToday,
+      totalStudySeconds: totalStudySeconds ?? this.totalStudySeconds,
+      lastStudyDate: lastStudyDate ?? this.lastStudyDate,
+      goalsMetCount: goalsMetCount ?? this.goalsMetCount,
+      lastGoalMetDate: lastGoalMetDate ?? this.lastGoalMetDate,
+      quizzesCompleted: quizzesCompleted ?? this.quizzesCompleted,
+      dailyXp: dailyXp ?? this.dailyXp,
+      dailyAccuracy: dailyAccuracy ?? this.dailyAccuracy,
     );
   }
 
@@ -75,6 +123,17 @@ class UserStats {
         'subjectAttempts': subjectAttempts,
         'badges': badges,
         'lastActive': lastActive.toIso8601String(),
+        'dailyGoalQuestions': dailyGoalQuestions,
+        'questionsToday': questionsToday,
+        'lastProgressDate': lastProgressDate,
+        'studySecondsToday': studySecondsToday,
+        'totalStudySeconds': totalStudySeconds,
+        'lastStudyDate': lastStudyDate,
+        'goalsMetCount': goalsMetCount,
+        'lastGoalMetDate': lastGoalMetDate,
+        'quizzesCompleted': quizzesCompleted,
+        'dailyXp': dailyXp,
+        'dailyAccuracy': dailyAccuracy,
       };
 
   factory UserStats.fromJson(Map<String, dynamic> json) => UserStats(
@@ -85,6 +144,20 @@ class UserStats {
         subjectAttempts: Map<String, int>.from(json['subjectAttempts'] ?? {}),
         badges: List<String>.from(json['badges'] ?? []),
         lastActive: DateTime.tryParse(json['lastActive'] ?? '') ?? DateTime.now(),
+        dailyGoalQuestions: json['dailyGoalQuestions'] ?? 10,
+        questionsToday: json['questionsToday'] ?? 0,
+        lastProgressDate: json['lastProgressDate'] ?? '',
+        studySecondsToday: json['studySecondsToday'] ?? 0,
+        totalStudySeconds: json['totalStudySeconds'] ?? 0,
+        lastStudyDate: json['lastStudyDate'] ?? '',
+        goalsMetCount: json['goalsMetCount'] ?? 0,
+        lastGoalMetDate: json['lastGoalMetDate'] ?? '',
+        quizzesCompleted: json['quizzesCompleted'] ?? 0,
+        dailyXp: Map<String, int>.from(json['dailyXp'] ?? {}),
+        dailyAccuracy: (json['dailyAccuracy'] as Map<String, dynamic>?)?.map(
+              (key, value) => MapEntry(key, List<int>.from(value as List)),
+            ) ??
+            {},
       );
 }
 
@@ -295,7 +368,53 @@ class StreakService {
       badges.add('Well Rounded');
     }
 
+    // --- Added: extra achievements for goals / study timer / quizzes ---
+    if (stats.goalsMetCount >= 7 && !badges.contains('Goal Getter')) badges.add('Goal Getter');
+    if (stats.goalsMetCount >= 30 && !badges.contains('Goal Crusher')) badges.add('Goal Crusher');
+
+    final studyMinutes = stats.totalStudySeconds ~/ 60;
+    if (studyMinutes >= 60 && !badges.contains('Study Buddy')) badges.add('Study Buddy');
+    if (studyMinutes >= 500 && !badges.contains('Study Master')) badges.add('Study Master');
+
+    if (stats.quizzesCompleted >= 10 && !badges.contains('Quiz Regular')) badges.add('Quiz Regular');
+    if (stats.quizzesCompleted >= 50 && !badges.contains('Quiz Champion')) badges.add('Quiz Champion');
+
+    final perfectSubjects = stats.subjectScores.keys.where((s) {
+      final attempts = stats.subjectAttempts[s] ?? 0;
+      final correct = stats.subjectScores[s] ?? 0;
+      if (attempts < 10) return false;
+      return correct == attempts;
+    }).length;
+    if (perfectSubjects >= 1 && !badges.contains('Perfectionist')) badges.add('Perfectionist');
+
     return badges;
+  }
+}
+
+/// Random motivational quotes, shown around the app (home card, celebration
+/// dialog, study timer).
+class QuoteService {
+  static const List<String> _quotes = [
+    'Small steps every day lead to big results.',
+    'Discipline today, success tomorrow.',
+    'Your future is built by what you do now, not tomorrow.',
+    'Every question you practice is a step closer to your goal.',
+    'Consistency beats intensity — show up daily.',
+    'Champions are made in practice, not just on exam day.',
+    'You don\'t have to be perfect, just persistent.',
+    'Hard work beats talent when talent doesn\'t work hard.',
+    'The best time to study was yesterday. The next best time is now.',
+    'Progress, not perfection.',
+    'Believe you can, and you\'re halfway there.',
+    'Focus on being productive instead of busy.',
+    'A little progress each day adds up to big results.',
+    'Success is the sum of small efforts repeated daily.',
+    'Study while others sleep; win while others hope.',
+  ];
+
+  static String getRandomQuote() {
+    final r = Random();
+    return _quotes[r.nextInt(_quotes.length)];
   }
 }
 
@@ -346,6 +465,7 @@ class AppProvider extends ChangeNotifier {
     _stats = _storage.loadUserStats();
     _darkMode = _storage.loadDarkMode();
     _stats = _streak.checkStreak(_stats);
+    _stats = _rolloverDailyIfNeeded(_stats);
     await _storage.saveUserStats(_stats);
     _loadOrGenerateDailyChallenge();
     notifyListeners();
@@ -379,6 +499,12 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> addXP(int amount) async {
     _stats = _streak.addXP(_stats, amount);
+    // --- Added: track XP per-day for weekly stats ---
+    final key = todayKey();
+    final xpMap = Map<String, int>.from(_stats.dailyXp);
+    xpMap[key] = (xpMap[key] ?? 0) + amount;
+    _pruneOldDailyKeys(xpMap);
+    _stats = _stats.copyWith(dailyXp: xpMap);
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
@@ -392,6 +518,7 @@ class AppProvider extends ChangeNotifier {
       subjectAttempts: Map.from(_stats.subjectAttempts)..[subject] = newAttempts,
     );
     _stats = _streak.checkStreak(_stats);
+    _stats = _trackDailyProgress(correct: score, total: total);
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
@@ -460,6 +587,8 @@ class AppProvider extends ChangeNotifier {
       _dailyChallenge!.score = score;
       _dailyChallenge!.completed = true;
       await _storage.saveDailyChallenge(_dailyChallenge!);
+      _stats = _trackDailyProgress(correct: score, total: _dailyChallenge!.questions.length);
+      await _storage.saveUserStats(_stats);
       await addXP(score * 2);
       notifyListeners();
     }
@@ -511,6 +640,149 @@ class AppProvider extends ChangeNotifier {
         'Economics', 'Government', 'Literature', 'CRS', 'Accounting',
         'Commerce', 'Geography', 'IRS', 'Arabic',
       ];
+
+  // =========================================================================
+  // --- Added: daily goals, study timer, weekly stats helpers ---
+  // =========================================================================
+
+  String todayKey() {
+    final d = DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  String _keyForOffset(int daysAgo) {
+    final d = DateTime.now().subtract(Duration(days: daysAgo));
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  void _pruneOldDailyKeys(Map<String, int> map) {
+    if (map.length <= 30) return;
+    final validKeys = List.generate(30, (i) => _keyForOffset(i)).toSet();
+    map.removeWhere((k, _) => !validKeys.contains(k));
+  }
+
+  /// Resets today's question/study counters if the stored date has rolled
+  /// over to a new day. Weekly/history maps (dailyXp, dailyAccuracy) are
+  /// never reset here — only the "today" counters.
+  UserStats _rolloverDailyIfNeeded(UserStats s) {
+    final key = todayKey();
+    var result = s;
+    if (s.lastProgressDate != key) {
+      result = result.copyWith(questionsToday: 0, lastProgressDate: key);
+    }
+    if (s.lastStudyDate != key) {
+      result = result.copyWith(studySecondsToday: 0, lastStudyDate: key);
+    }
+    return result;
+  }
+
+  UserStats _trackDailyProgress({required int correct, required int total}) {
+    var s = _rolloverDailyIfNeeded(_stats);
+    final key = todayKey();
+
+    final newQuestionsToday = s.questionsToday + total;
+
+    final accMap = Map<String, List<int>>.from(s.dailyAccuracy);
+    final existing = accMap[key] ?? [0, 0];
+    accMap[key] = [existing[0] + correct, existing[1] + total];
+    _pruneOldAccuracyKeys(accMap);
+
+    var newGoalsMet = s.goalsMetCount;
+    var newLastGoalMetDate = s.lastGoalMetDate;
+    if (newQuestionsToday >= s.dailyGoalQuestions && s.lastGoalMetDate != key) {
+      newGoalsMet += 1;
+      newLastGoalMetDate = key;
+    }
+
+    return s.copyWith(
+      questionsToday: newQuestionsToday,
+      lastProgressDate: key,
+      dailyAccuracy: accMap,
+      goalsMetCount: newGoalsMet,
+      lastGoalMetDate: newLastGoalMetDate,
+      quizzesCompleted: s.quizzesCompleted + 1,
+    );
+  }
+
+  void _pruneOldAccuracyKeys(Map<String, List<int>> map) {
+    if (map.length <= 30) return;
+    final validKeys = List.generate(30, (i) => _keyForOffset(i)).toSet();
+    map.removeWhere((k, _) => !validKeys.contains(k));
+  }
+
+  /// Sets the daily goal (in number of questions answered per day).
+  Future<void> setDailyGoal(int questions) async {
+    _stats = _rolloverDailyIfNeeded(_stats).copyWith(dailyGoalQuestions: questions);
+    await _storage.saveUserStats(_stats);
+    notifyListeners();
+  }
+
+  int get dailyGoalQuestions => _stats.dailyGoalQuestions;
+
+  int get questionsToday {
+    final s = _rolloverDailyIfNeeded(_stats);
+    return s.questionsToday;
+  }
+
+  double get dailyGoalProgress {
+    if (_stats.dailyGoalQuestions <= 0) return 0;
+    final progress = questionsToday / _stats.dailyGoalQuestions;
+    return progress.clamp(0.0, 1.0);
+  }
+
+  bool get dailyGoalMet => questionsToday >= _stats.dailyGoalQuestions;
+
+  /// Adds completed study time (in seconds) from the study timer.
+  Future<void> addStudySeconds(int seconds) async {
+    if (seconds <= 0) return;
+    var s = _rolloverDailyIfNeeded(_stats);
+    s = s.copyWith(
+      studySecondsToday: s.studySecondsToday + seconds,
+      totalStudySeconds: s.totalStudySeconds + seconds,
+      lastStudyDate: todayKey(),
+    );
+    _stats = s;
+    _applyBadgeCheck();
+    await _storage.saveUserStats(_stats);
+    notifyListeners();
+  }
+
+  int get studyMinutesToday {
+    final s = _rolloverDailyIfNeeded(_stats);
+    return s.studySecondsToday ~/ 60;
+  }
+
+  int get totalStudyMinutes => _stats.totalStudySeconds ~/ 60;
+
+  /// Last 7 days of XP earned, oldest first. Each entry is (label, xp).
+  List<MapEntry<String, int>> getWeeklyXp() {
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final entries = <MapEntry<String, int>>[];
+    for (int i = 6; i >= 0; i--) {
+      final date = DateTime.now().subtract(Duration(days: i));
+      final key = _keyForOffset(i);
+      final label = weekdayLabels[date.weekday - 1];
+      entries.add(MapEntry(label, _stats.dailyXp[key] ?? 0));
+    }
+    return entries;
+  }
+
+  /// Last 7 days of accuracy %, oldest first. Days with no attempts show 0.
+  List<MapEntry<String, double>> getWeeklyAccuracy() {
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final entries = <MapEntry<String, double>>[];
+    for (int i = 6; i >= 0; i--) {
+      final date = DateTime.now().subtract(Duration(days: i));
+      final key = _keyForOffset(i);
+      final label = weekdayLabels[date.weekday - 1];
+      final pair = _stats.dailyAccuracy[key];
+      final pct = (pair != null && pair[1] > 0) ? (pair[0] / pair[1] * 100) : 0.0;
+      entries.add(MapEntry(label, pct));
+    }
+    return entries;
+  }
+
+  int get weeklyXpTotal => getWeeklyXp().fold(0, (a, e) => a + e.value);
 }
 
 /// =========================================================================
@@ -541,6 +813,123 @@ void showBadgeAnnouncementIfAny(BuildContext context, AppProvider provider) {
 }
 
 /// =========================================================================
+/// CELEBRATION DIALOG (added — shown after quiz completion)
+/// =========================================================================
+
+Future<void> showCelebrationDialog(
+  BuildContext context, {
+  required int score,
+  required int total,
+  required int xpEarned,
+}) {
+  return showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => _CelebrationDialog(score: score, total: total, xpEarned: xpEarned),
+  );
+}
+
+class _CelebrationDialog extends StatefulWidget {
+  final int score;
+  final int total;
+  final int xpEarned;
+  const _CelebrationDialog({required this.score, required this.total, required this.xpEarned});
+
+  @override
+  State<_CelebrationDialog> createState() => _CelebrationDialogState();
+}
+
+class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _scale = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _headline {
+    if (widget.total == 0) return 'Great effort!';
+    final pct = widget.score / widget.total * 100;
+    if (pct >= 90) return 'Outstanding! 🌟';
+    if (pct >= 70) return 'Great job! 🎉';
+    if (pct >= 50) return 'Well done! 👍';
+    return 'Keep practising! 💪';
+  }
+
+  int get _stars {
+    if (widget.total == 0) return 1;
+    final pct = widget.score / widget.total * 100;
+    if (pct >= 90) return 3;
+    if (pct >= 60) return 2;
+    return 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: ScaleTransition(
+        scale: _scale,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(3, (i) {
+                  final filled = i < _stars;
+                  return Icon(
+                    Icons.star_rounded,
+                    size: 40,
+                    color: filled ? Colors.amber : scheme.surfaceContainerHighest,
+                  );
+                }),
+              ),
+              const SizedBox(height: 14),
+              Text(_headline,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text('You scored ${widget.score} out of ${widget.total}',
+                  style: TextStyle(color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
+                child: Text('+${widget.xpEarned} XP', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 16),
+              Text('"${QuoteService.getRandomQuote()}"',
+                  style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Continue'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// =========================================================================
 /// LEADERBOARD SCREEN
 /// =========================================================================
 
@@ -553,54 +942,115 @@ class LeaderboardScreen extends StatelessWidget {
     final entries = provider.getLeaderboard();
     final scheme = Theme.of(context).colorScheme;
 
+    // --- Added: find current user's best rank/entry for a "Your Rank" card ---
+    int? myRank;
+    LeaderboardEntry? myEntry;
+    for (int i = 0; i < entries.length; i++) {
+      if (entries[i].name == provider.userName) {
+        myRank = i + 1;
+        myEntry = entries[i];
+        break;
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('🏆 Leaderboard')),
-      body: entries.isEmpty
-          ? Center(
-              child: Text('No entries yet. Be the first!',
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: entries.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (ctx, i) {
-                final e = entries[i];
-                final isTop3 = i < 3;
-                final medalColors = [Colors.amber, Colors.grey, Colors.brown];
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
-                    border: isTop3 ? Border.all(color: medalColors[i], width: 1.6) : null,
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: isTop3 ? medalColors[i] : scheme.primaryContainer,
-                        child: Text('${i + 1}',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
+      body: Column(
+        children: [
+          if (myEntry != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [scheme.primary, scheme.primary.withOpacity(0.75)]),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person_pin_circle_rounded, color: Colors.white, size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Your Rank', style: TextStyle(color: Colors.white, fontSize: 12)),
+                          Text('#$myRank of ${entries.length}',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        ],
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    Text('${myEntry.xp} XP', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: entries.isEmpty
+                ? Center(
+                    child: Text('No entries yet. Be the first!',
+                        style: TextStyle(color: scheme.onSurfaceVariant)),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: entries.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (ctx, i) {
+                      final e = entries[i];
+                      final isTop3 = i < 3;
+                      final isMe = e.name == provider.userName && myRank == i + 1;
+                      final medalColors = [Colors.amber, Colors.grey, Colors.brown];
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(16),
+                          border: isTop3 ? Border.all(color: medalColors[i], width: 1.6) : null,
+                        ),
+                        child: Row(
                           children: [
-                            Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                            Text('Level ${e.level} • Streak ${e.streak} days',
-                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                            CircleAvatar(
+                              backgroundColor: isTop3 ? medalColors[i] : scheme.primaryContainer,
+                              child: Text('${i + 1}',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                      if (isMe) ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                          decoration: BoxDecoration(
+                                              color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+                                          child: const Text('You',
+                                              style: TextStyle(fontSize: 10, color: Colors.white)),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  Text('Level ${e.level} • Streak ${e.streak} days',
+                                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                ],
+                              ),
+                            ),
+                            Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
                           ],
                         ),
-                      ),
-                      Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
-                    ],
+                      );
+                    },
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -738,7 +1188,7 @@ class _QuizScreenState extends State<QuizScreen> {
     setState(() => answered = true);
   }
 
-  void nextQuestion() {
+  Future<void> nextQuestion() async {
     if (currentIndex < shuffledQuestions.length - 1) {
       setState(() {
         currentIndex++;
@@ -746,6 +1196,14 @@ class _QuizScreenState extends State<QuizScreen> {
         answered = false;
       });
     } else {
+      // --- Added: celebration dialog before reporting completion ---
+      await showCelebrationDialog(
+        context,
+        score: score,
+        total: shuffledQuestions.length,
+        xpEarned: score * 2,
+      );
+      if (!mounted) return;
       widget.onComplete(score);
     }
   }
@@ -917,6 +1375,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Marathoner': 'Answered 500 questions',
     'Iron Will': 'Answered 2,000 questions',
     'Well Rounded': 'Practiced every subject at least once',
+    // --- Added descriptions for new badges ---
+    'Goal Getter': 'Met your daily goal 7 times',
+    'Goal Crusher': 'Met your daily goal 30 times',
+    'Study Buddy': 'Studied 60+ minutes with the timer',
+    'Study Master': 'Studied 500+ minutes with the timer',
+    'Quiz Regular': 'Completed 10 quizzes',
+    'Quiz Champion': 'Completed 50 quizzes',
+    'Perfectionist': '100% accuracy in a subject (10+ attempts)',
   };
 
   @override
@@ -960,6 +1426,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(width: 10),
               _ProfileStat(label: 'Streak', value: '${stats.streak}', color: Colors.deepOrange),
             ],
+          ),
+          // --- Added: second row of profile stat cards (study + goal) ---
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _ProfileStat(label: 'Study (min)', value: '${provider.totalStudyMinutes}', color: Colors.teal),
+              const SizedBox(width: 10),
+              _ProfileStat(label: 'Quizzes', value: '${stats.quizzesCompleted}', color: Colors.indigo),
+              const SizedBox(width: 10),
+              _ProfileStat(label: 'Goals Met', value: '${stats.goalsMetCount}', color: Colors.pink),
+            ],
+          ),
+          // --- Added: daily goal progress card ---
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.flag_rounded, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Today\'s Goal', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const GoalSelectorSheet(),
+                      ),
+                      child: const Text('Change'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: provider.dailyGoalProgress,
+                    minHeight: 10,
+                    backgroundColor: scheme.surface,
+                    valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? Colors.green : scheme.primary),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text('${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           const Text('🎖️ Subject Mastery', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -1060,7 +1579,7 @@ class _ProfileStat extends StatelessWidget {
           children: [
             Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
             const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 12, color: color)),
+            Text(label, style: TextStyle(fontSize: 12, color: color), textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -1080,6 +1599,9 @@ class AnalyticsScreen extends StatelessWidget {
     final provider = Provider.of<AppProvider>(context);
     final stats = provider.stats;
     final scheme = Theme.of(context).colorScheme;
+    final weeklyXp = provider.getWeeklyXp();
+    final maxWeeklyXp = weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
+    final weeklyAcc = provider.getWeeklyAccuracy();
 
     return Scaffold(
       appBar: AppBar(title: const Text('📊 Analytics')),
@@ -1099,6 +1621,81 @@ class AnalyticsScreen extends StatelessWidget {
                 Text('Streak: ${stats.streak} days'),
                 Text('Badges earned: ${stats.badges.length}'),
                 Text('Total questions attempted: ${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
+                // --- Added ---
+                Text('Total study time: ${provider.totalStudyMinutes} minutes'),
+                Text('Quizzes completed: ${stats.quizzesCompleted}'),
+              ],
+            ),
+          ),
+          // --- Added: weekly XP + accuracy section ---
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text('This Week', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('${provider.weeklyXpTotal} XP', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 90,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: weeklyXp.map((e) {
+                      final heightFactor = maxWeeklyXp == 0 ? 0.0 : e.value / maxWeeklyXp;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text('${e.value}', style: const TextStyle(fontSize: 10)),
+                              const SizedBox(height: 4),
+                              Container(
+                                height: 46 * heightFactor + 4,
+                                decoration: BoxDecoration(
+                                  color: scheme.primary,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(e.key, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text('Weekly Accuracy', style: TextStyle(fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                ...weeklyAcc.map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 32, child: Text(e.key, style: const TextStyle(fontSize: 11))),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: (e.value / 100).clamp(0.0, 1.0),
+                                minHeight: 8,
+                                backgroundColor: scheme.surface,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(width: 36, child: Text('${e.value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11))),
+                        ],
+                      ),
+                    )),
               ],
             ),
           ),
@@ -1112,17 +1709,316 @@ class AnalyticsScreen extends StatelessWidget {
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
-              child: ListTile(
-                title: Text(sub),
-                trailing: Text('${score.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('$attempted questions attempted • ${masteryLabel(tier)}'),
-                leading: Icon(
-                  score >= 70 ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
-                  color: score >= 70 ? Colors.green : Colors.orange,
-                ),
+              child: Column(
+                children: [
+                  ListTile(
+                    title: Text(sub),
+                    trailing: Text('${score.toInt()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('$attempted questions attempted • ${masteryLabel(tier)}'),
+                    leading: Icon(
+                      score >= 70 ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+                      color: score >= 70 ? Colors.green : Colors.orange,
+                    ),
+                  ),
+                  // --- Added: subject progress bar ---
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: (score / 100).clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor: scheme.surface,
+                        valueColor: AlwaysStoppedAnimation(masteryColor(tier)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             );
           }),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// GOAL SELECTOR SHEET (added)
+/// =========================================================================
+
+class GoalSelectorSheet extends StatelessWidget {
+  const GoalSelectorSheet({super.key});
+
+  static const List<int> _options = [5, 10, 20, 30, 50];
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = Provider.of<AppProvider>(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(color: scheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(28))),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(color: scheme.onSurfaceVariant.withOpacity(0.4), borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('Set Daily Goal', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text('How many questions do you want to answer each day?',
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _options.map((opt) {
+              final isSelected = provider.dailyGoalQuestions == opt;
+              return ChoiceChip(
+                label: Text('$opt questions'),
+                selected: isSelected,
+                onSelected: (_) {
+                  provider.setDailyGoal(opt);
+                  Navigator.pop(context);
+                },
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// STUDY TIMER SCREEN (added)
+/// =========================================================================
+
+class StudyTimerScreen extends StatefulWidget {
+  const StudyTimerScreen({super.key});
+
+  @override
+  State<StudyTimerScreen> createState() => _StudyTimerScreenState();
+}
+
+class _StudyTimerScreenState extends State<StudyTimerScreen> {
+  Timer? _ticker;
+  int _elapsedSeconds = 0;
+  bool _running = false;
+  final String _quote = QuoteService.getRandomQuote();
+
+  void _toggle() {
+    if (_running) {
+      _ticker?.cancel();
+      setState(() => _running = false);
+    } else {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        setState(() => _elapsedSeconds++);
+      });
+      setState(() => _running = true);
+    }
+  }
+
+  Future<void> _saveSession() async {
+    _ticker?.cancel();
+    final seconds = _elapsedSeconds;
+    if (seconds > 0) {
+      await context.read<AppProvider>().addStudySeconds(seconds);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Saved ${(seconds / 60).ceil()} minute${seconds >= 120 ? 's' : ''} of study time.')),
+    );
+    setState(() {
+      _elapsedSeconds = 0;
+      _running = false;
+    });
+  }
+
+  void _reset() {
+    _ticker?.cancel();
+    setState(() {
+      _elapsedSeconds = 0;
+      _running = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String get _formatted {
+    final h = (_elapsedSeconds ~/ 3600).toString().padLeft(2, '0');
+    final m = ((_elapsedSeconds % 3600) ~/ 60).toString().padLeft(2, '0');
+    final s = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final provider = context.watch<AppProvider>();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('⏱️ Study Timer')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
+              child: Text('Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 40),
+            Text(_formatted,
+                style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+            const SizedBox(height: 40),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 140,
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: _toggle,
+                    icon: Icon(_running ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                    label: Text(_running ? 'Pause' : 'Start'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 100,
+                  height: 52,
+                  child: OutlinedButton(
+                    onPressed: _elapsedSeconds == 0 ? null : _reset,
+                    child: const Icon(Icons.refresh_rounded),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton.icon(
+                onPressed: _elapsedSeconds == 0 ? null : _saveSession,
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Save Session'),
+              ),
+            ),
+            const Spacer(),
+            Text('"$_quote"',
+                style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: scheme.onSurfaceVariant),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// WEEKLY STATS SCREEN (added)
+/// =========================================================================
+
+class WeeklyStatsScreen extends StatelessWidget {
+  const WeeklyStatsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = Provider.of<AppProvider>(context);
+    final scheme = Theme.of(context).colorScheme;
+    final weeklyXp = provider.getWeeklyXp();
+    final weeklyAcc = provider.getWeeklyAccuracy();
+    final maxXp = weeklyXp.fold<int>(1, (m, e) => e.value > m ? e.value : m);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('📅 Weekly Stats')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('XP This Week', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text('${provider.weeklyXpTotal} total XP', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                ...weeklyXp.map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 36, child: Text(e.key, style: const TextStyle(fontSize: 12))),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: maxXp == 0 ? 0 : e.value / maxXp,
+                                minHeight: 12,
+                                backgroundColor: scheme.surface,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(width: 40, child: Text('${e.value}', style: const TextStyle(fontSize: 12))),
+                        ],
+                      ),
+                    )),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Accuracy This Week', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 16),
+                ...weeklyAcc.map((e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 36, child: Text(e.key, style: const TextStyle(fontSize: 12))),
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: (e.value / 100).clamp(0.0, 1.0),
+                                minHeight: 12,
+                                backgroundColor: scheme.surface,
+                                valueColor: AlwaysStoppedAnimation(
+                                  e.value >= 70 ? Colors.green : (e.value >= 50 ? Colors.amber : Colors.orange),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(width: 40, child: Text('${e.value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 12))),
+                        ],
+                      ),
+                    )),
+              ],
+            ),
+          ),
         ],
       ),
     );
