@@ -599,7 +599,7 @@ final List<Map<String, dynamic>> physicsQuestions = [
     'question': 'A piece of ice of mass 100 g at 0°C is dropped into water of mass 200 g at 30°C. The final temperature of the mixture is (specific latent heat of ice = 336 J/g, specific heat of water = 4.2 J/g°C):',
     'options': ['10.5°C', '15°C', '20°C', '0°C'],
     'correctIndex': 0,
-    'explanation': 'Heat gained by ice to melt = 100×336 = 33,600 J. Heat lost by water to cool to 0°C = 200×4.2×30 = 25,200 J. Not enough to melt all ice, so final temp is 0°C (some ice remains). Wait, the problem asks final temp, so it's 0°C.'
+    'explanation': "Heat gained by ice to melt = 100×336 = 33,600 J. Heat lost by water to cool to 0°C = 200×4.2×30 = 25,200 J. Not enough to melt all ice, so final temp is 0°C (some ice remains). Wait, the problem asks final temp, so it's 0°C."
   },
   {
     'subject': 'Physics',
