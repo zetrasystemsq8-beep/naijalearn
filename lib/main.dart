@@ -130,8 +130,21 @@ class QuestionRepository {
   QuestionRepository._();
 
   static List<Question> _questions = _buildFromRawData([
-    ...englishQuestions,
-  ]);
+  ...englishQuestions,
+  ...mathematicsQuestions,
+  ...physicsQuestions,
+  ...chemistryQuestions,
+  ...biologyQuestions,
+  ...economicsQuestions,
+  ...governmentQuestions,
+  ...geographyQuestions,
+  ...literatureQuestions,
+  ...commerceQuestions,
+  ...accountingQuestions,
+  ...crsQuestions,
+  ...irsQuestions,
+  ...arabicQuestions,
+]);
 
   static List<Question> _buildFromRawData(List<Map<String, dynamic>> raw) {
     final List<Question> list = [];
