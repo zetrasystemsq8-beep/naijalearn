@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -82,12 +82,14 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --debug --no-tree-shake-icons
+        run: flutter build apk --release
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: NaijaLearn-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 1
-          overwrite: true
+          tag_name: latest
+          name: NaijaLearn Latest Build
+          files: build/app/outputs/flutter-apk/app-release.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
