@@ -25,6 +25,15 @@ import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
 import 'questions_biology.dart';
+import 'questions_commerce.dart';
+import 'questions_crs.dart';
+import 'questions_economics.dart';
+import 'questions_geography.dart';
+import 'questions_government.dart';
+import 'questions_irs.dart';
+import 'questions_literature.dart';
+import 'questions_mathematics.dart';
+import 'questions_physics.dart';
 import 'questions_chemistry.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
