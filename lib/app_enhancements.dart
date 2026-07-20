@@ -511,6 +511,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> recordAnswer(String subject, int score, int total) async {
+    if (total <= 0) return;
     final newScore = (stats.subjectScores[subject] ?? 0) + score;
     final newAttempts = (stats.subjectAttempts[subject] ?? 0) + total;
     _stats = _stats.copyWith(
@@ -598,6 +599,26 @@ class AppProvider extends ChangeNotifier {
     final allQuestions = _getQuestionsForSubject(subject);
     final shuffled = List<Map<String, dynamic>>.from(allQuestions)..shuffle();
     return shuffled.take(count).toList();
+  }
+
+  /// --- Added: generates a combined mock exam pulling questions from
+  /// several subjects at once (e.g. a 4-subject JAMB-style combo).
+  /// Each question is tagged with its originating subject under the
+  /// 'subject' key so results can be scored and recorded per-subject
+  /// once the exam is finished.
+  List<Map<String, dynamic>> generateMockExamMulti(List<String> subjects, int perSubject) {
+    final combined = <Map<String, dynamic>>[];
+    for (final subject in subjects) {
+      final pool = _getQuestionsForSubject(subject);
+      final shuffled = List<Map<String, dynamic>>.from(pool)..shuffle();
+      final picked = shuffled.take(perSubject).map((q) => <String, dynamic>{
+            ...q,
+            'subject': subject,
+          });
+      combined.addAll(picked);
+    }
+    combined.shuffle();
+    return combined;
   }
 
   List<Map<String, dynamic>> _getQuestionsForSubject(String subject) {
@@ -1058,6 +1079,10 @@ class LeaderboardScreen extends StatelessWidget {
 /// =========================================================================
 /// MOCK EXAM SCREEN
 /// =========================================================================
+/// --- Updated: users can now pick up to 4 subjects for a combined exam,
+/// instead of being limited to a single subject. Each subject contributes
+/// the chosen number of questions, and results are recorded per-subject
+/// once the exam is finished.
 
 class MockExamScreen extends StatefulWidget {
   const MockExamScreen({super.key});
@@ -1067,15 +1092,27 @@ class MockExamScreen extends StatefulWidget {
 }
 
 class _MockExamScreenState extends State<MockExamScreen> {
-  String? selectedSubject;
-  int questionCount = 60;
+  final List<String> selectedSubjects = [];
+  int perSubjectCount = 20;
   bool started = false;
+
+  static const int maxSubjects = 4;
+
+  void _toggleSubject(String subject) {
+    setState(() {
+      if (selectedSubjects.contains(subject)) {
+        selectedSubjects.remove(subject);
+      } else if (selectedSubjects.length < maxSubjects) {
+        selectedSubjects.add(subject);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<AppProvider>(context);
-    selectedSubject ??= provider.getAvailableSubjects().first;
     final scheme = Theme.of(context).colorScheme;
+    final subjects = provider.getAvailableSubjects();
 
     return Scaffold(
       appBar: AppBar(title: const Text('📝 Mock Exam')),
@@ -1084,46 +1121,69 @@ class _MockExamScreenState extends State<MockExamScreen> {
           : Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    'Choose up to $maxSubjects subjects (${selectedSubjects.length}/$maxSubjects selected)',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Great for practising subject combinations together.',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: subjects.map((s) {
+                      final isSelected = selectedSubjects.contains(s);
+                      final disabled = !isSelected && selectedSubjects.length >= maxSubjects;
+                      return FilterChip(
+                        label: Text(s),
+                        selected: isSelected,
+                        onSelected: disabled ? null : (_) => _toggleSubject(s),
+                        selectedColor: scheme.primaryContainer,
+                        checkmarkColor: scheme.onPrimaryContainer,
+                        disabledColor: scheme.surfaceContainerHighest.withOpacity(0.5),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 20),
                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Column(
-                      children: [
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedSubject,
-                          items: provider
-                              .getAvailableSubjects()
-                              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                              .toList(),
-                          onChanged: (val) => setState(() => selectedSubject = val),
-                          decoration: const InputDecoration(labelText: 'Choose Subject'),
-                        ),
-                        const SizedBox(height: 20),
-                        DropdownButtonFormField<int>(
-                          initialValue: questionCount,
-                          items: const [
-                            DropdownMenuItem(value: 20, child: Text('20 questions')),
-                            DropdownMenuItem(value: 40, child: Text('40 questions')),
-                            DropdownMenuItem(value: 60, child: Text('60 questions')),
-                            DropdownMenuItem(value: 100, child: Text('100 questions')),
-                          ],
-                          onChanged: (val) => setState(() => questionCount = val!),
-                          decoration: const InputDecoration(labelText: 'Number of Questions'),
-                        ),
+                    child: DropdownButtonFormField<int>(
+                      initialValue: perSubjectCount,
+                      items: const [
+                        DropdownMenuItem(value: 10, child: Text('10 questions per subject')),
+                        DropdownMenuItem(value: 15, child: Text('15 questions per subject')),
+                        DropdownMenuItem(value: 20, child: Text('20 questions per subject')),
+                        DropdownMenuItem(value: 25, child: Text('25 questions per subject')),
                       ],
+                      onChanged: (val) => setState(() => perSubjectCount = val!),
+                      decoration: const InputDecoration(labelText: 'Questions per subject'),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const Spacer(),
+                  if (selectedSubjects.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'Total: ${selectedSubjects.length * perSubjectCount} questions',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   SizedBox(
                     width: double.infinity,
                     height: 52,
                     child: FilledButton.icon(
-                      onPressed: () => setState(() => started = true),
+                      onPressed: selectedSubjects.isEmpty ? null : () => setState(() => started = true),
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: const Text('Start Mock Exam'),
                     ),
@@ -1135,18 +1195,40 @@ class _MockExamScreenState extends State<MockExamScreen> {
   }
 
   Widget _buildExam(BuildContext context, AppProvider provider) {
-    final subject = selectedSubject!;
-    final questions = provider.generateMockExam(subject, questionCount);
+    final questions = provider.generateMockExamMulti(selectedSubjects, perSubjectCount);
+    final subjectsLabel = selectedSubjects.join(' + ');
     return QuizScreen(
       questions: questions,
-      title: 'Mock Exam — $subject',
+      title: 'Mock Exam — $subjectsLabel',
       onComplete: (score) {
-        provider.recordAnswer(subject, score, questions.length);
-        provider.addXP(score * 2);
+        // Fallback path (shouldn't normally be hit since onCompleteDetailed is provided).
+        Navigator.pop(context);
+      },
+      onCompleteDetailed: (gradedQuestions) {
+        // Tally correctness per subject using the 'subject' tag on each question.
+        final Map<String, int> correctBySubject = {};
+        final Map<String, int> totalBySubject = {};
+        int overallScore = 0;
+
+        for (final gq in gradedQuestions) {
+          final subject = gq['subject'] as String? ?? 'Unknown';
+          final wasCorrect = gq['__correct'] as bool? ?? false;
+          totalBySubject[subject] = (totalBySubject[subject] ?? 0) + 1;
+          if (wasCorrect) {
+            correctBySubject[subject] = (correctBySubject[subject] ?? 0) + 1;
+            overallScore++;
+          }
+        }
+
+        for (final subject in selectedSubjects) {
+          provider.recordAnswer(subject, correctBySubject[subject] ?? 0, totalBySubject[subject] ?? 0);
+        }
+        provider.addXP(overallScore * 2);
+
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('You scored $score out of ${questions.length}'),
-          backgroundColor: score >= (questions.length * 0.6) ? Colors.green : Colors.red,
+          content: Text('You scored $overallScore out of ${gradedQuestions.length}'),
+          backgroundColor: overallScore >= (gradedQuestions.length * 0.6) ? Colors.green : Colors.red,
         ));
       },
     );
@@ -1156,13 +1238,24 @@ class _MockExamScreenState extends State<MockExamScreen> {
 /// =========================================================================
 /// QUIZ SCREEN (reusable — for daily challenge and mock exams)
 /// =========================================================================
+/// --- Updated: added an optional onCompleteDetailed callback that returns
+/// each answered question tagged with whether it was answered correctly
+/// (and its 'subject', if present), so callers like the multi-subject
+/// mock exam can score/record results per subject.
 
 class QuizScreen extends StatefulWidget {
   final List<Map<String, dynamic>> questions;
   final String title;
   final void Function(int score) onComplete;
+  final void Function(List<Map<String, dynamic>> gradedQuestions)? onCompleteDetailed;
 
-  const QuizScreen({super.key, required this.questions, required this.title, required this.onComplete});
+  const QuizScreen({
+    super.key,
+    required this.questions,
+    required this.title,
+    required this.onComplete,
+    this.onCompleteDetailed,
+  });
 
   @override
   State<QuizScreen> createState() => _QuizScreenState();
@@ -1174,6 +1267,7 @@ class _QuizScreenState extends State<QuizScreen> {
   int selectedOption = -1;
   bool answered = false;
   late List<Map<String, dynamic>> shuffledQuestions;
+  final List<Map<String, dynamic>> _gradedQuestions = [];
 
   @override
   void initState() {
@@ -1184,7 +1278,12 @@ class _QuizScreenState extends State<QuizScreen> {
   void submitAnswer() {
     if (selectedOption == -1) return;
     final q = shuffledQuestions[currentIndex];
-    if (selectedOption == q['correctIndex']) score++;
+    final isCorrect = selectedOption == q['correctIndex'];
+    if (isCorrect) score++;
+    _gradedQuestions.add({
+      ...q,
+      '__correct': isCorrect,
+    });
     setState(() => answered = true);
   }
 
@@ -1204,7 +1303,11 @@ class _QuizScreenState extends State<QuizScreen> {
         xpEarned: score * 2,
       );
       if (!mounted) return;
-      widget.onComplete(score);
+      if (widget.onCompleteDetailed != null) {
+        widget.onCompleteDetailed!(_gradedQuestions);
+      } else {
+        widget.onComplete(score);
+      }
     }
   }
 
@@ -1239,8 +1342,25 @@ class _QuizScreenState extends State<QuizScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Text('Question ${currentIndex + 1} of ${shuffledQuestions.length}',
-                style: Theme.of(context).textTheme.bodySmall),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Question ${currentIndex + 1} of ${shuffledQuestions.length}',
+                    style: Theme.of(context).textTheme.bodySmall),
+                if (q['subject'] != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      q['subject'] as String,
+                      style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 16),
             Container(
               width: double.infinity,
