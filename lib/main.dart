@@ -25,6 +25,7 @@ import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
 import 'questions_biology.dart';
+import 'questions_chemistry.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
