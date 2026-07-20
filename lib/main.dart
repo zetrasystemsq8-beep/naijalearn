@@ -167,12 +167,6 @@ class QuestionRepository {
 
   static List<Question> getForSubject(String subject) =>
       _questions.where((q) => q.subject == subject).toList();
-
-  static List<Question> getForSubjectAndYear(String subject, int year) {
-    final exact = _questions.where((q) => q.subject == subject && q.year == year).toList();
-    if (exact.isNotEmpty) return exact;
-    return getForSubject(subject);
-  }
 }
 
 /// =========================================================================
@@ -303,21 +297,23 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  Future<void> _pickYearAndStart(BuildContext context, SubjectInfo subject) async {
-    final year = await showModalBottomSheet<int>(
+  Future<void> _pickCountAndStart(BuildContext context, SubjectInfo subject) async {
+    final count = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => YearPickerSheet(subject: subject),
+      builder: (_) => QuestionCountPickerSheet(subject: subject),
     );
-    if (year == null || !context.mounted) return;
+    if (count == null || !context.mounted) return;
 
-    final questions = QuestionRepository.getForSubjectAndYear(subject.name, year);
+    final allQuestions = QuestionRepository.getForSubject(subject.name);
+    final shuffled = List<Question>.from(allQuestions)..shuffle();
+    final questions = (count == -1 || count >= shuffled.length) ? shuffled : shuffled.take(count).toList();
     if (!context.mounted) return;
 
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ExamInstructionsScreen(subject: subject, year: year, questions: questions),
+        builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions),
       ),
     );
   }
@@ -552,7 +548,7 @@ class HomeScreen extends StatelessWidget {
                     return SubjectCard(
                       subject: subject,
                       questionCount: count,
-                      onTap: () => _pickYearAndStart(context, subject),
+                      onTap: () => _pickCountAndStart(context, subject),
                     );
                   },
                   childCount: kSubjects.length,
@@ -658,22 +654,24 @@ class SubjectCard extends StatelessWidget {
 }
 
 /// =========================================================================
-/// YEAR PICKER
+/// QUESTION COUNT PICKER
 /// =========================================================================
 
-class YearPickerSheet extends StatelessWidget {
+class QuestionCountPickerSheet extends StatelessWidget {
   final SubjectInfo subject;
-  const YearPickerSheet({super.key, required this.subject});
+  const QuestionCountPickerSheet({super.key, required this.subject});
+
+  static const List<int> _counts = [10, 20, 40, 60];
 
   @override
   Widget build(BuildContext context) {
-    final years = List.generate(2026 - 2000 + 1, (i) => 2026 - i);
     final scheme = Theme.of(context).colorScheme;
+    final total = QuestionRepository.getForSubject(subject.name).length;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.65,
-      minChildSize: 0.4,
-      maxChildSize: 0.9,
+      initialChildSize: 0.5,
+      minChildSize: 0.35,
+      maxChildSize: 0.75,
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(color: scheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(28))),
@@ -691,34 +689,61 @@ class YearPickerSheet extends StatelessWidget {
                   children: [
                     Icon(subject.icon, color: subject.color),
                     const SizedBox(width: 10),
-                    Text('${subject.name} — Select Year',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    Expanded(
+                      child: Text('${subject.name} — Select Number of Questions',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    ),
                   ],
                 ),
               ),
               Expanded(
-                child: GridView.builder(
+                child: ListView(
                   controller: scrollController,
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 1.6,
-                  ),
-                  itemCount: years.length,
-                  itemBuilder: (context, index) {
-                    final year = years[index];
-                    return Material(
-                      color: scheme.surfaceContainerHighest,
+                  children: [
+                    ..._counts.map((count) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () => Navigator.of(context).pop(count),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              child: Row(
+                                children: [
+                                  Text('$count questions', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  const Spacer(),
+                                  const Icon(Icons.chevron_right_rounded),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    Material(
+                      color: subject.color.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(14),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: () => Navigator.of(context).pop(year),
-                        child: Center(child: Text('$year', style: const TextStyle(fontWeight: FontWeight.w600))),
+                        onTap: () => Navigator.of(context).pop(-1),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                          child: Row(
+                            children: [
+                              Text('All Available ($total questions)',
+                                  style: TextStyle(fontWeight: FontWeight.w600, color: subject.color)),
+                              const Spacer(),
+                              Icon(Icons.chevron_right_rounded, color: subject.color),
+                            ],
+                          ),
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -735,9 +760,8 @@ class YearPickerSheet extends StatelessWidget {
 
 class ExamInstructionsScreen extends StatelessWidget {
   final SubjectInfo subject;
-  final int year;
   final List<Question> questions;
-  const ExamInstructionsScreen({super.key, required this.subject, required this.year, required this.questions});
+  const ExamInstructionsScreen({super.key, required this.subject, required this.questions});
 
   static const int durationMinutes = 20;
 
@@ -763,7 +787,7 @@ class ExamInstructionsScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(subject.name, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                    Text('$year Practice Set', style: Theme.of(context).textTheme.bodyMedium),
+                    Text('Practice Set', style: Theme.of(context).textTheme.bodyMedium),
                   ],
                 ),
               ],
@@ -803,7 +827,6 @@ class ExamInstructionsScreen extends StatelessWidget {
                           MaterialPageRoute(
                             builder: (_) => ExamScreen(
                               subject: subject,
-                              year: year,
                               questions: questions,
                               durationMinutes: durationMinutes,
                             ),
@@ -851,14 +874,12 @@ enum QuestionStatus { unanswered, answered, skipped }
 
 class ExamScreen extends StatefulWidget {
   final SubjectInfo subject;
-  final int year;
   final List<Question> questions;
   final int durationMinutes;
 
   const ExamScreen({
     super.key,
     required this.subject,
-    required this.year,
     required this.questions,
     required this.durationMinutes,
   });
@@ -967,7 +988,6 @@ class _ExamScreenState extends State<ExamScreen> {
       MaterialPageRoute(
         builder: (_) => ResultsScreen(
           subject: widget.subject,
-          year: widget.year,
           questions: widget.questions,
           selectedAnswers: _selectedAnswers,
           correctCount: correct,
@@ -1005,7 +1025,7 @@ class _ExamScreenState extends State<ExamScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.subject.name} • ${widget.year}'),
+        title: Text(widget.subject.name),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 12),
@@ -1264,7 +1284,6 @@ class _LegendDot extends StatelessWidget {
 
 class ResultsScreen extends StatelessWidget {
   final SubjectInfo subject;
-  final int year;
   final List<Question> questions;
   final List<int?> selectedAnswers;
   final int correctCount;
@@ -1274,7 +1293,6 @@ class ResultsScreen extends StatelessWidget {
   const ResultsScreen({
     super.key,
     required this.subject,
-    required this.year,
     required this.questions,
     required this.selectedAnswers,
     required this.correctCount,
@@ -1381,7 +1399,7 @@ class ResultsScreen extends StatelessWidget {
             const SizedBox(height: 8),
             Text(_gradeLabel, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text('${subject.name} • $year Practice Set', style: Theme.of(context).textTheme.bodySmall),
+            Text('${subject.name} • Practice Set', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -1438,7 +1456,7 @@ class ResultsScreen extends StatelessWidget {
                 icon: const Icon(Icons.replay_rounded),
                 label: const Text('Retake Exam'),
                 onPressed: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, year: year, questions: questions)),
+                  MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)),
                 ),
               ),
             ),
