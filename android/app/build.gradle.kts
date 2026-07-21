@@ -19,15 +19,6 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("naijalearn.jks")
-            storePassword = "naijalearn123"
-            keyAlias = "naijalearn"
-            keyPassword = "naijalearn123"
-        }
-    }
-
     defaultConfig {
         applicationId = "com.naijalearn.app"
         minSdk = 21
@@ -40,13 +31,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
