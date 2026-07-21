@@ -1,0 +1,27 @@
+assword(email: email);
+
+    state = false;
+
+    result.fold(
+      (failure) {
+        if (context.mounted) {
+          showToast(
+            context,
+            message: failure.message,
+            status: 'error',
+          );
+        }
+      },
+      (success) {
+        if (context.mounted) {
+          showToast(
+            context,
+            message: 'Password reset link sent successfully',
+            status: 'success',
+          );
+          context.go(AppRoutes.login);
+        }
+      },
+    );
+  }
+}
