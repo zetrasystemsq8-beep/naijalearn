@@ -24,26 +24,22 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            console.log("Scanning repository storage for matching NaijaLearn-debug artifacts...");
 
             const response = await github.rest.actions.listArtifactsForRepo({
-              owner: owner,
-              repo: repo,
+              owner,
+              repo,
               per_page: 100
             });
 
-            const artifacts = response.data.artifacts;
-            for (const artifact of artifacts) {
-              if (artifact.name === 'NaijaLearn-debug') {
-                console.log(`Force deleting artifact: ${artifact.name} (ID: ${artifact.id}) to clear space`);
+            for (const artifact of response.data.artifacts) {
+              if (artifact.name === "NaijaLearn-debug") {
                 await github.rest.actions.deleteArtifact({
-                  owner: owner,
-                  repo: repo,
+                  owner,
+                  repo,
                   artifact_id: artifact.id,
                 });
               }
             }
-            console.log("Storage optimization step completed.");
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -55,11 +51,18 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.4'
-          channel: 'stable'
+          channel: stable
 
       - name: Inject google-services.json
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Create .env
+        run: |
+          cat > .env <<EOF
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          EOF
 
       - name: Fix ALL package names in ALL dart files
         run: |
@@ -72,8 +75,10 @@ jobs:
           mkdir -p android/app/src/main/res/mipmap-xhdpi
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+
           cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher.png
           cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png || true
           cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
           cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
