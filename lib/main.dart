@@ -11,11 +11,11 @@
 // Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
 // Users are NOT created here — they must already have a Zetra account.
 // The user types their ZetraMail address (e.g. user@zetramail.ng). We
-// look that up in the `profiles` table to find the internal `auth_email`
-// (e.g. connectbaba@auth.zetraid.internal), and Supabase Auth OTP is
-// sent/verified using ONLY that internal auth_email — the user never
-// sees or types it. If no profile row matches the entered ZetraMail,
-// we show "No Zetra account found." and never call signInWithOtp.
+// resolve that to the internal auth_email via the resolve_login_email(...)
+// Supabase RPC, and Supabase Auth OTP is sent/verified using ONLY that
+// internal auth_email — the user never sees or types it. If the RPC
+// returns null/empty, we show "This ZetraMail account does not exist."
+// and never call signInWithOtp.
 //
 // Note on backgrounding: Flutter does NOT reload the app or reset widget
 // state when the user switches to another app (ZetraMail) and returns,
@@ -73,7 +73,7 @@ Future<void> main() async {
 }
 
 /// =========================================================================
-/// AUTHENTICATION (Zetra ecosystem client — profiles-backed OTP login)
+/// AUTHENTICATION (Zetra ecosystem client — RPC-backed OTP login)
 /// =========================================================================
 
 /// Minimal read model of a `profiles` row, used to populate the app after
@@ -128,7 +128,7 @@ class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  static const String noAccountMessage = 'No Zetra account found.';
+  static const String noAccountMessage = 'This ZetraMail account does not exist.';
   static const String invalidOtpMessage = 'Invalid verification code.';
 
   SupabaseClient get _client => Supabase.instance.client;
@@ -140,10 +140,18 @@ class AuthService {
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  /// Step 1: look up `profiles` where zetramail == entered email.
-  /// Step 2: read auth_email from that row.
-  /// Step 3: call signInWithOtp() using ONLY auth_email.
-  /// If no profile row exists, throws before ever calling signInWithOtp.
+  /// Step 1: call the resolve_login_email(identifier) RPC with the entered
+  /// ZetraMail address. This RPC lives on the backend and is the ONLY
+  /// approved way to resolve zetramail -> auth_email; we deliberately do
+  /// NOT do a client-side `.from('profiles').select(...)` here, because
+  /// that path is subject to RLS and was silently returning null for
+  /// unauthenticated (pre-login) callers even when a matching profile
+  /// row existed — which was the root cause of the previous
+  /// "No Zetra account found" bug.
+  /// Step 2: if the RPC returns null/empty, throw before ever calling
+  /// signInWithOtp.
+  /// Step 3: otherwise call signInWithOtp() using ONLY the resolved
+  /// auth_email, with shouldCreateUser: false.
   Future<String> requestOtpForZetraMail(String zetramail) async {
     final normalized = zetramail.trim().toLowerCase();
 
@@ -151,44 +159,59 @@ class AuthService {
     debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
 
     if (normalized.isEmpty) {
-      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any DB/Auth call.');
+      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any RPC/Auth call.');
       throw ZetraAuthException(noAccountMessage);
     }
 
-    Map<String, dynamic>? row;
+    dynamic result;
     try {
-      row = await _client
-          .from('profiles')
-          .select('auth_email')
-          .eq('zetramail', normalized)
-          .maybeSingle();
+      result = await _client.rpc(
+        'resolve_login_email',
+        params: {'identifier': normalized},
+      );
     } on PostgrestException catch (e) {
-      // DEBUG 2: profile lookup failed (query-level error)
-      debugPrint('[ZetraAuth] Profile lookup FAILED (PostgrestException): '
+      // DEBUG 2: RPC call failed (query-level error)
+      debugPrint('[ZetraAuth] resolve_login_email RPC FAILED (PostgrestException): '
           'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
       throw ZetraAuthException(noAccountMessage);
     }
 
-    // DEBUG 2: profile lookup succeeded or not
-    debugPrint('[ZetraAuth] Profile lookup succeeded: ${row != null}. Raw row: $row');
+    // DEBUG 2: raw RPC result
+    debugPrint('[ZetraAuth] resolve_login_email RPC result: $result (type: ${result.runtimeType})');
 
-    if (row == null || row['auth_email'] == null) {
-      debugPrint('[ZetraAuth] No profile row found for zetramail="$normalized" '
-          '(or auth_email column was null on the row).');
+    // The RPC may return a plain string, or (depending on how it's
+    // declared) a single-row/single-column result — handle both shapes
+    // defensively without guessing at schema details.
+    String? authEmail;
+    if (result is String && result.isNotEmpty) {
+      authEmail = result;
+    } else if (result is Map && result.values.isNotEmpty) {
+      final first = result.values.first;
+      if (first is String && first.isNotEmpty) authEmail = first;
+    } else if (result is List && result.isNotEmpty) {
+      final row = result.first;
+      if (row is String && row.isNotEmpty) {
+        authEmail = row;
+      } else if (row is Map && row.values.isNotEmpty) {
+        final first = row.values.first;
+        if (first is String && first.isNotEmpty) authEmail = first;
+      }
+    }
+
+    if (authEmail == null || authEmail.isEmpty) {
+      debugPrint('[ZetraAuth] resolve_login_email returned null/empty for '
+          'identifier="$normalized" — no matching Zetra account.');
       throw ZetraAuthException(noAccountMessage);
     }
 
-    final authEmail = row['auth_email'] as String;
-
-    // DEBUG 3: auth_email returned from the database
-    debugPrint('[ZetraAuth] auth_email resolved from DB: "$authEmail"');
+    // DEBUG 3: auth_email resolved via RPC
+    debugPrint('[ZetraAuth] auth_email resolved via RPC: "$authEmail"');
 
     // Sanity check: confirm we are about to call signInWithOtp with
     // auth_email (NOT zetramail), and shouldCreateUser: false.
     debugPrint('[ZetraAuth] About to call signInWithOtp('
         'email: "$authEmail", shouldCreateUser: false) '
-        '— entered zetramail was "$normalized" (must NOT match the email above '
-        'unless auth_email happens to equal zetramail in your data).');
+        '— entered zetramail was "$normalized".');
 
     try {
       await _client.auth.signInWithOtp(
@@ -263,6 +286,10 @@ class AuthService {
   }
 
   /// Loads the `profiles` row for the currently authenticated user.
+  /// This runs AFTER sign-in, so it's a client-side select against the
+  /// user's own row — RLS should permit `auth.uid() == id` reads here,
+  /// which is a different context from the pre-login lookup in
+  /// requestOtpForZetraMail (which now goes through the RPC instead).
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
     if (user == null) {
@@ -449,8 +476,8 @@ class _LoginScreenState extends State<LoginScreen> {
 class VerifyOtpScreen extends StatefulWidget {
   /// The ZetraMail address the user typed — shown on screen.
   final String zetramail;
-  /// The internal auth_email resolved from `profiles` — used for the
-  /// actual Supabase Auth call. Never shown to the user.
+  /// The internal auth_email resolved from resolve_login_email() — used
+  /// for the actual Supabase Auth call. Never shown to the user.
   final String authEmail;
 
   const VerifyOtpScreen({super.key, required this.zetramail, required this.authEmail});
