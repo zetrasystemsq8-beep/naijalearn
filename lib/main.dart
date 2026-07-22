@@ -140,14 +140,24 @@ class AuthService {
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  /// Step 1: call the resolve_login_email(identifier) RPC with the entered
-  /// ZetraMail address. This RPC lives on the backend and is the ONLY
-  /// approved way to resolve zetramail -> auth_email; we deliberately do
-  /// NOT do a client-side `.from('profiles').select(...)` here, because
-  /// that path is subject to RLS and was silently returning null for
+  /// Step 1: call the resolve_login_email(p_identifier) RPC with the
+  /// entered ZetraMail address (or username / Zetra ID / phone number —
+  /// this RPC is the single source of truth for identifier resolution).
+  /// This RPC lives on the backend and is the ONLY approved way to
+  /// resolve an identifier -> auth_email; we deliberately do NOT do a
+  /// client-side `.from('profiles').select(...)` here, because that path
+  /// is subject to RLS and was silently returning null for
   /// unauthenticated (pre-login) callers even when a matching profile
   /// row existed — which was the root cause of the previous
   /// "No Zetra account found" bug.
+  ///
+  /// IMPORTANT: the RPC's Postgres parameter is named `p_identifier`.
+  /// PostgREST matches named RPC parameters exactly — sending any other
+  /// key (e.g. `identifier`) fails to match the function signature and
+  /// comes back as a PostgrestException, which previously got mapped to
+  /// "This ZetraMail account does not exist." even though the backend
+  /// and the row were both fine. That was the actual bug.
+  ///
   /// Step 2: if the RPC returns null/empty, throw before ever calling
   /// signInWithOtp.
   /// Step 3: otherwise call signInWithOtp() using ONLY the resolved
@@ -167,7 +177,7 @@ class AuthService {
     try {
       result = await _client.rpc(
         'resolve_login_email',
-        params: {'identifier': normalized},
+        params: {'p_identifier': normalized},
       );
     } on PostgrestException catch (e) {
       // DEBUG 2: RPC call failed (query-level error)
@@ -289,7 +299,7 @@ class AuthService {
   /// This runs AFTER sign-in, so it's a client-side select against the
   /// user's own row — RLS should permit `auth.uid() == id` reads here,
   /// which is a different context from the pre-login lookup in
-  /// requestOtpForZetraMail (which now goes through the RPC instead).
+  /// requestOtpForZetraMail (which goes through the RPC instead).
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
     if (user == null) {
