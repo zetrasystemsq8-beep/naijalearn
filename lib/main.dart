@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:naijalearn/src/features/auth/presentation/screens/login_screen.dart';
 
 import 'app_enhancements.dart';
 
@@ -242,7 +243,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           transitionDuration: const Duration(milliseconds: 500),
-          pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: const HomeScreen()),
+          pageBuilder: (_, animation, __) => FadeTransition(
+            opacity: animation,
+            child: Supabase.instance.client.auth.currentSession == null
+                ? const LoginScreen()
+                : const HomeScreen(),
+          ),
         ),
       );
     });
