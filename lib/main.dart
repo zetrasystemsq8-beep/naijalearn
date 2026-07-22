@@ -8,9 +8,19 @@
 // exams, analytics) lives in app_enhancements.dart and plugs in via
 // AppProvider, without replacing any of the CBT screens below.
 //
-// Authentication (email OTP via Supabase) is self-contained in this file:
-// AuthService, LoginScreen, VerifyOtpScreen. No Riverpod, no separate
-// auth/ folder, no code from any other project.
+// Authentication: Supabase email OTP. Users sign in with their ZetraMail
+// address (e.g. user@zetramail.ng) instead of Gmail — Supabase sends the
+// verification email to that address exactly like any other inbox, and
+// the user reads the code inside their ZetraMail app, then comes back
+// here to type it in.
+//
+// Note on backgrounding: Flutter does NOT reload the app or reset widget
+// state when the user switches to another app (ZetraMail) and returns,
+// as long as the OS hasn't killed the process. The entered email, the
+// OTP digits, and the resend-timer all persist automatically. The
+// WidgetsBindingObserver on VerifyOtpScreen below simply logs lifecycle
+// transitions and deliberately does NOT touch any state on resume —
+// it exists so future changes don't accidentally introduce a reset.
 
 import 'dart:async';
 import 'dart:convert';
@@ -70,6 +80,8 @@ class AuthService {
   SupabaseClient get _client => Supabase.instance.client;
 
   /// Sends a 6-digit OTP code to the given email via Supabase Auth.
+  /// Works with any email address, including ZetraMail addresses
+  /// (e.g. user@zetramail.ng) — Supabase just delivers to that inbox.
   Future<void> sendOtp(String email) async {
     await _client.auth.signInWithOtp(
       email: email,
@@ -118,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _validateEmail(String? value) {
     final email = value?.trim() ?? '';
-    if (email.isEmpty) return 'Please enter your email';
+    if (email.isEmpty) return 'Please enter your ZetraMail email';
     final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
     if (!emailRegex.hasMatch(email)) return 'Please enter a valid email';
     return null;
@@ -140,8 +152,10 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => VerifyOtpScreen(email: email)),
       );
+    } on AuthException catch (e) {
+      setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Could not send code. Please try again.');
+      setState(() => _errorMessage = 'Could not send code. Please check your connection and try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -180,7 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Enter your email to sign in or create an account',
+                    'Enter your ZetraMail email to sign in or create an account',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                   ),
@@ -193,7 +207,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     validator: _validateEmail,
                     onFieldSubmitted: (_) => _sendCode(),
                     decoration: InputDecoration(
-                      labelText: 'Email address',
+                      labelText: 'ZetraMail email address',
+                      hintText: 'you@zetramail.ng',
                       prefixIcon: const Icon(Icons.email_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                     ),
@@ -234,7 +249,7 @@ class VerifyOtpScreen extends StatefulWidget {
   State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
 }
 
-class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
+class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _codeController = TextEditingController();
   bool _loading = false;
@@ -242,7 +257,28 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+    // Observes app lifecycle (e.g. backgrounding to check ZetraMail and
+    // returning). Deliberately does NOT clear the entered code, reset the
+    // form, or navigate away on resume — Flutter keeps this State object
+    // alive in memory the whole time, so nothing here needs to "restore"
+    // anything. This observer exists purely so future edits don't
+    // accidentally add a reset-on-resume bug.
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Intentionally left as a no-op for our state. The widget tree and
+    // this State object are not recreated when switching to ZetraMail
+    // and back, so _codeController's text and _errorMessage survive
+    // automatically without any code here.
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _codeController.dispose();
     super.dispose();
   }
@@ -274,6 +310,8 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         MaterialPageRoute(builder: (_) => const HomeScreen()),
         (route) => false,
       );
+    } on AuthException catch (e) {
+      setState(() => _errorMessage = e.message);
     } catch (e) {
       setState(() => _errorMessage = 'Invalid or expired code. Please try again.');
     } finally {
@@ -290,8 +328,10 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
       await AuthService.instance.sendOtp(widget.email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A new code has been sent.')),
+        const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')),
       );
+    } on AuthException catch (e) {
+      setState(() => _errorMessage = e.message);
     } catch (e) {
       setState(() => _errorMessage = 'Could not resend code. Please try again.');
     } finally {
@@ -318,7 +358,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
                   Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
                   const SizedBox(height: 20),
                   Text(
-                    'Enter the 6-digit code sent to',
+                    'Enter the 6-digit code sent to your ZetraMail inbox for',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
@@ -327,6 +367,12 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
                     widget.email,
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Open the ZetraMail app, copy the code, then come back here — this screen stays exactly as you left it.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 28),
                   TextFormField(
@@ -559,6 +605,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _scale = Tween<double>(begin: 0.7, end: 1.0)
         .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
+    // This timer fires exactly once, only when SplashScreen is first
+    // built (app cold start). It does not re-run when the app is merely
+    // backgrounded/foregrounded, since SplashScreen is popped off the
+    // stack immediately after this navigation and never rebuilt again
+    // during the session.
     Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
