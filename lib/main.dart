@@ -147,7 +147,11 @@ class AuthService {
   Future<String> requestOtpForZetraMail(String zetramail) async {
     final normalized = zetramail.trim().toLowerCase();
 
+    // DEBUG 1: entered ZetraMail
+    debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
+
     if (normalized.isEmpty) {
+      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any DB/Auth call.');
       throw ZetraAuthException(noAccountMessage);
     }
 
@@ -158,23 +162,49 @@ class AuthService {
           .select('auth_email')
           .eq('zetramail', normalized)
           .maybeSingle();
-    } on PostgrestException catch (_) {
+    } on PostgrestException catch (e) {
+      // DEBUG 2: profile lookup failed (query-level error)
+      debugPrint('[ZetraAuth] Profile lookup FAILED (PostgrestException): '
+          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
       throw ZetraAuthException(noAccountMessage);
     }
 
+    // DEBUG 2: profile lookup succeeded or not
+    debugPrint('[ZetraAuth] Profile lookup succeeded: ${row != null}. Raw row: $row');
+
     if (row == null || row['auth_email'] == null) {
+      debugPrint('[ZetraAuth] No profile row found for zetramail="$normalized" '
+          '(or auth_email column was null on the row).');
       throw ZetraAuthException(noAccountMessage);
     }
 
     final authEmail = row['auth_email'] as String;
+
+    // DEBUG 3: auth_email returned from the database
+    debugPrint('[ZetraAuth] auth_email resolved from DB: "$authEmail"');
+
+    // Sanity check: confirm we are about to call signInWithOtp with
+    // auth_email (NOT zetramail), and shouldCreateUser: false.
+    debugPrint('[ZetraAuth] About to call signInWithOtp('
+        'email: "$authEmail", shouldCreateUser: false) '
+        '— entered zetramail was "$normalized" (must NOT match the email above '
+        'unless auth_email happens to equal zetramail in your data).');
 
     try {
       await _client.auth.signInWithOtp(
         email: authEmail,
         shouldCreateUser: false, // NaijaLearn never creates new accounts
       );
-    } on AuthException catch (_) {
+      debugPrint('[ZetraAuth] signInWithOtp() SUCCEEDED for "$authEmail".');
+    } on AuthException catch (e) {
+      // DEBUG 4: exact Supabase Auth error from signInWithOtp()
+      debugPrint('[ZetraAuth] signInWithOtp() FAILED (AuthException): '
+          'message="${e.message}", statusCode=${e.statusCode}');
       throw ZetraAuthException(noAccountMessage);
+    } catch (e, st) {
+      debugPrint('[ZetraAuth] signInWithOtp() FAILED (non-AuthException, e.g. network): $e');
+      debugPrint('[ZetraAuth] Stack trace: $st');
+      rethrow;
     }
 
     _pendingAuthEmail = authEmail;
@@ -191,7 +221,11 @@ class AuthService {
   }) async {
     final authEmail = authEmailOverride ?? _pendingAuthEmail;
 
+    debugPrint('[ZetraAuth] verifyOTP() called with authEmail="$authEmail", '
+        'token="${token.trim()}"');
+
     if (authEmail == null) {
+      debugPrint('[ZetraAuth] verifyOTP() aborted — no pending authEmail set.');
       throw ZetraAuthException('No pending sign-in request. Please start again.');
     }
 
@@ -201,11 +235,23 @@ class AuthService {
         email: authEmail,
         token: token.trim(),
       );
+      debugPrint('[ZetraAuth] verifyOTP() response: '
+          'session=${res.session != null}, user=${res.user != null}, '
+          'userId=${res.user?.id}');
       if (res.session == null || res.user == null) {
+        debugPrint('[ZetraAuth] verifyOTP() returned null session/user with no thrown '
+            'exception — treating as invalid OTP.');
         throw ZetraAuthException(invalidOtpMessage);
       }
-    } on AuthException catch (_) {
+    } on AuthException catch (e) {
+      // DEBUG 5: exact error from verifyOTP()
+      debugPrint('[ZetraAuth] verifyOTP() FAILED (AuthException): '
+          'message="${e.message}", statusCode=${e.statusCode}');
       throw ZetraAuthException(invalidOtpMessage);
+    } catch (e, st) {
+      debugPrint('[ZetraAuth] verifyOTP() FAILED (non-AuthException): $e');
+      debugPrint('[ZetraAuth] Stack trace: $st');
+      rethrow;
     }
 
     final profile = await loadCurrentProfile();
@@ -226,11 +272,14 @@ class AuthService {
     Map<String, dynamic>? row;
     try {
       row = await _client.from('profiles').select().eq('id', user.id).maybeSingle();
-    } on PostgrestException catch (_) {
+    } on PostgrestException catch (e) {
+      debugPrint('[ZetraAuth] loadCurrentProfile() lookup FAILED (PostgrestException): '
+          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
       throw ZetraAuthException(noAccountMessage);
     }
 
     if (row == null) {
+      debugPrint('[ZetraAuth] loadCurrentProfile(): no profile row for user.id="${user.id}".');
       throw ZetraAuthException(noAccountMessage);
     }
 
@@ -241,12 +290,17 @@ class AuthService {
     if (_pendingAuthEmail == null) {
       throw ZetraAuthException('No pending sign-in request. Please start again.');
     }
+    debugPrint('[ZetraAuth] resendOtp() called for authEmail="$_pendingAuthEmail" '
+        '(shouldCreateUser: false)');
     try {
       await _client.auth.signInWithOtp(
         email: _pendingAuthEmail!,
         shouldCreateUser: false,
       );
-    } on AuthException catch (_) {
+      debugPrint('[ZetraAuth] resendOtp() SUCCEEDED for "$_pendingAuthEmail".');
+    } on AuthException catch (e) {
+      debugPrint('[ZetraAuth] resendOtp() FAILED (AuthException): '
+          'message="${e.message}", statusCode=${e.statusCode}');
       throw ZetraAuthException('Could not resend code. Please try again.');
     }
   }
