@@ -75,6 +75,14 @@ Future<void> main() async {
 /// =========================================================================
 /// AUTHENTICATION (Zetra ecosystem client — RPC-backed OTP login)
 /// =========================================================================
+///
+/// This is the ONLY login flow in this file. There is exactly one
+/// AuthService, one place that calls resolve_login_email, one place
+/// that calls signInWithOtp for the initial code send, and one place
+/// that calls signInWithOtp for resend. There is no signUp call
+/// anywhere in this file. profiles.email is never read or compared —
+/// the only `.from('profiles')` query in this file is the post-login
+/// `loadCurrentProfile()`, which selects by `id`, not by `email`.
 
 /// Minimal read model of a `profiles` row, used to populate the app after
 /// sign-in (username, zetramail, avatar, verified badge, etc).
@@ -140,32 +148,21 @@ class AuthService {
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  /// Step 1: call the resolve_login_email(p_identifier) RPC with the
-  /// entered ZetraMail address (or username / Zetra ID / phone number —
-  /// this RPC is the single source of truth for identifier resolution).
-  /// This RPC lives on the backend and is the ONLY approved way to
-  /// resolve an identifier -> auth_email; we deliberately do NOT do a
-  /// client-side `.from('profiles').select(...)` here, because that path
-  /// is subject to RLS and was silently returning null for
-  /// unauthenticated (pre-login) callers even when a matching profile
-  /// row existed — which was the root cause of the previous
-  /// "No Zetra account found" bug.
+  /// STEP 1 of the ONLY login flow: call the resolve_login_email
+  /// RPC with the entered ZetraMail address (or username / Zetra ID /
+  /// phone number). The Postgres function's named parameter is
+  /// `p_identifier` — PostgREST matches RPC parameters by name, so this
+  /// key must match the function signature exactly.
   ///
-  /// IMPORTANT: the RPC's Postgres parameter is named `p_identifier`.
-  /// PostgREST matches named RPC parameters exactly — sending any other
-  /// key (e.g. `identifier`) fails to match the function signature and
-  /// comes back as a PostgrestException, which previously got mapped to
-  /// "This ZetraMail account does not exist." even though the backend
-  /// and the row were both fine. That was the actual bug.
+  /// STEP 2: if the RPC returns null/empty, throw noAccountMessage
+  /// BEFORE ever calling signInWithOtp.
   ///
-  /// Step 2: if the RPC returns null/empty, throw before ever calling
-  /// signInWithOtp.
-  /// Step 3: otherwise call signInWithOtp() using ONLY the resolved
-  /// auth_email, with shouldCreateUser: false.
+  /// STEP 3: otherwise call signInWithOtp() using ONLY the resolved
+  /// auth_email, with shouldCreateUser: false. profiles.email is never
+  /// queried or compared anywhere in this method.
   Future<String> requestOtpForZetraMail(String zetramail) async {
     final normalized = zetramail.trim().toLowerCase();
 
-    // DEBUG 1: entered ZetraMail
     debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
 
     if (normalized.isEmpty) {
@@ -180,13 +177,11 @@ class AuthService {
         params: {'p_identifier': normalized},
       );
     } on PostgrestException catch (e) {
-      // DEBUG 2: RPC call failed (query-level error)
       debugPrint('[ZetraAuth] resolve_login_email RPC FAILED (PostgrestException): '
           'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
       throw ZetraAuthException(noAccountMessage);
     }
 
-    // DEBUG 2: raw RPC result
     debugPrint('[ZetraAuth] resolve_login_email RPC result: $result (type: ${result.runtimeType})');
 
     // The RPC may return a plain string, or (depending on how it's
@@ -214,11 +209,7 @@ class AuthService {
       throw ZetraAuthException(noAccountMessage);
     }
 
-    // DEBUG 3: auth_email resolved via RPC
     debugPrint('[ZetraAuth] auth_email resolved via RPC: "$authEmail"');
-
-    // Sanity check: confirm we are about to call signInWithOtp with
-    // auth_email (NOT zetramail), and shouldCreateUser: false.
     debugPrint('[ZetraAuth] About to call signInWithOtp('
         'email: "$authEmail", shouldCreateUser: false) '
         '— entered zetramail was "$normalized".');
@@ -230,7 +221,6 @@ class AuthService {
       );
       debugPrint('[ZetraAuth] signInWithOtp() SUCCEEDED for "$authEmail".');
     } on AuthException catch (e) {
-      // DEBUG 4: exact Supabase Auth error from signInWithOtp()
       debugPrint('[ZetraAuth] signInWithOtp() FAILED (AuthException): '
           'message="${e.message}", statusCode=${e.statusCode}');
       throw ZetraAuthException(noAccountMessage);
@@ -240,14 +230,18 @@ class AuthService {
       rethrow;
     }
 
+    // STEP 5 setup: save the resolved internal email so OTP verification
+    // (and resend) reuse it — the user's typed zetramail is never used
+    // for any Supabase Auth call.
     _pendingAuthEmail = authEmail;
     _pendingZetramail = normalized;
 
     return authEmail;
   }
 
-  /// Step 4: verify OTP using auth_email (never the zetramail).
-  /// Step 5: load the profile row so the UI can display it.
+  /// STEP 5 (verification): uses the SAME resolved auth_email saved in
+  /// step 3 above — never the zetramail, never a fresh profiles.email
+  /// lookup. Then loads the profile row so the UI can display it.
   Future<ZetraProfile> verifyOtpAndLoadProfile({
     required String token,
     String? authEmailOverride,
@@ -277,7 +271,6 @@ class AuthService {
         throw ZetraAuthException(invalidOtpMessage);
       }
     } on AuthException catch (e) {
-      // DEBUG 5: exact error from verifyOTP()
       debugPrint('[ZetraAuth] verifyOTP() FAILED (AuthException): '
           'message="${e.message}", statusCode=${e.statusCode}');
       throw ZetraAuthException(invalidOtpMessage);
@@ -297,9 +290,8 @@ class AuthService {
 
   /// Loads the `profiles` row for the currently authenticated user.
   /// This runs AFTER sign-in, so it's a client-side select against the
-  /// user's own row — RLS should permit `auth.uid() == id` reads here,
-  /// which is a different context from the pre-login lookup in
-  /// requestOtpForZetraMail (which goes through the RPC instead).
+  /// user's own row, keyed by `id` — this is the only `.from('profiles')`
+  /// call in the file, and it never reads or compares `email`.
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
     if (user == null) {
@@ -323,6 +315,8 @@ class AuthService {
     return ZetraProfile.fromMap(row);
   }
 
+  /// Resend: reuses the SAME _pendingAuthEmail saved during step 3 — not
+  /// a fresh resolve_login_email call, and not the zetramail.
   Future<void> resendOtp() async {
     if (_pendingAuthEmail == null) {
       throw ZetraAuthException('No pending sign-in request. Please start again.');
@@ -728,9 +722,6 @@ class SubjectInfo {
   const SubjectInfo(this.name, this.icon, this.color);
 }
 
-// Only subjects with a real question file wired in should appear here —
-// otherwise SubjectCard will show "0 questions" for the rest. Add more
-// entries as you wire in each new subject file.
 const List<SubjectInfo> kSubjects = [
   SubjectInfo('English', Icons.menu_book_rounded, Color(0xFF3F51B5)),
   SubjectInfo('Mathematics', Icons.calculate_rounded, Colors.blue),
@@ -852,11 +843,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _scale = Tween<double>(begin: 0.7, end: 1.0)
         .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
-    // This timer fires exactly once, only when SplashScreen is first
-    // built (app cold start). It does not re-run when the app is merely
-    // backgrounded/foregrounded, since SplashScreen is popped off the
-    // stack immediately after this navigation and never rebuilt again
-    // during the session.
     Timer(const Duration(milliseconds: 2000), () async {
       if (!mounted) return;
 
@@ -868,8 +854,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           final profile = await AuthService.instance.loadCurrentProfile();
           destination = HomeScreen(profile: profile);
         } catch (_) {
-          // Session exists but no matching profile row (e.g. deleted
-          // account) — fall back to login rather than crash.
           destination = const LoginScreen();
         }
       } else {
@@ -944,9 +928,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 /// =========================================================================
 
 class HomeScreen extends StatelessWidget {
-  /// The signed-in Zetra profile. Nullable so that any existing internal
-  /// navigation to `HomeScreen()` elsewhere in the app (without a profile
-  /// in hand) still compiles; in that case profile info simply isn't shown.
   final ZetraProfile? profile;
 
   const HomeScreen({super.key, this.profile});
@@ -1126,7 +1107,6 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
             ),
-            // --- Added: Daily Goal progress card ---
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
@@ -1179,7 +1159,6 @@ class HomeScreen extends StatelessWidget {
                       _QuickActionChip(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
                       const SizedBox(width: 10),
                       _QuickActionChip(icon: Icons.person_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
-                      // --- Added: Study Timer and Weekly Stats quick actions ---
                       const SizedBox(width: 10),
                       _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
                       const SizedBox(width: 10),
