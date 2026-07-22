@@ -1,17 +1,16 @@
 // lib/main.dart
 //
 // NaijaLearn — CBT Practice App
-// Material 3. No backend, no auth.
+// Material 3.
 //
 // Question content lives in per-subject files (questions_*.dart).
-// Currently wired: English only. As you add more subject files, tell
-// Claude the filename + variable name and it'll give you the import +
-// spread line to add — don't add imports for files that don't exist yet,
-// that's what broke the build before.
-//
 // Gamification (XP, streak, badges, leaderboard, daily challenge, mock
 // exams, analytics) lives in app_enhancements.dart and plugs in via
 // AppProvider, without replacing any of the CBT screens below.
+//
+// Authentication (email OTP via Supabase) is self-contained in this file:
+// AuthService, LoginScreen, VerifyOtpScreen. No Riverpod, no separate
+// auth/ folder, no code from any other project.
 
 import 'dart:async';
 import 'dart:convert';
@@ -20,7 +19,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:naijalearn/src/features/auth/presentation/screens/login_screen.dart';
 
 import 'app_enhancements.dart';
 
@@ -59,6 +57,329 @@ Future<void> main() async {
       child: const NaijaLearnApp(),
     ),
   );
+}
+
+/// =========================================================================
+/// AUTHENTICATION (self-contained: service + screens)
+/// =========================================================================
+
+class AuthService {
+  AuthService._();
+  static final AuthService instance = AuthService._();
+
+  SupabaseClient get _client => Supabase.instance.client;
+
+  /// Sends a 6-digit OTP code to the given email via Supabase Auth.
+  Future<void> sendOtp(String email) async {
+    await _client.auth.signInWithOtp(
+      email: email,
+      shouldCreateUser: true,
+    );
+  }
+
+  /// Verifies the 6-digit OTP code entered by the user for the given email.
+  /// Throws an [AuthException] if verification fails.
+  Future<void> verifyOtp({
+    required String email,
+    required String token,
+  }) async {
+    await _client.auth.verifyOTP(
+      type: OtpType.email,
+      email: email,
+      token: token,
+    );
+  }
+
+  bool get isSignedIn => _client.auth.currentSession != null;
+
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+  }
+}
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  bool _loading = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  String? _validateEmail(String? value) {
+    final email = value?.trim() ?? '';
+    if (email.isEmpty) return 'Please enter your email';
+    final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
+    if (!emailRegex.hasMatch(email)) return 'Please enter a valid email';
+    return null;
+  }
+
+  Future<void> _sendCode() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    final email = _emailController.text.trim();
+
+    try {
+      await AuthService.instance.sendOtp(email);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VerifyOtpScreen(email: email)),
+      );
+    } catch (e) {
+      setState(() => _errorMessage = 'Could not send code. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 88,
+                    height: 88,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Icon(Icons.school_rounded, size: 46, color: scheme.primary),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Welcome to NaijaLearn',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter your email to sign in or create an account',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 32),
+                  TextFormField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
+                    textInputAction: TextInputAction.done,
+                    validator: _validateEmail,
+                    onFieldSubmitted: (_) => _sendCode(),
+                    decoration: InputDecoration(
+                      labelText: 'Email address',
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
+                  ],
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    height: 52,
+                    child: FilledButton(
+                      onPressed: _loading ? null : _sendCode,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                            )
+                          : const Text('Send Code', style: TextStyle(fontSize: 16)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VerifyOtpScreen extends StatefulWidget {
+  final String email;
+  const VerifyOtpScreen({super.key, required this.email});
+
+  @override
+  State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
+}
+
+class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _codeController = TextEditingController();
+  bool _loading = false;
+  bool _resending = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  String? _validateCode(String? value) {
+    final code = value?.trim() ?? '';
+    if (code.isEmpty) return 'Please enter the code';
+    if (code.length != 6 || int.tryParse(code) == null) {
+      return 'Enter the 6-digit code';
+    }
+    return null;
+  }
+
+  Future<void> _verifyCode() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await AuthService.instance.verifyOtp(
+        email: widget.email,
+        token: _codeController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      setState(() => _errorMessage = 'Invalid or expired code. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _resendCode() async {
+    setState(() {
+      _resending = true;
+      _errorMessage = null;
+    });
+    try {
+      await AuthService.instance.sendOtp(widget.email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A new code has been sent.')),
+      );
+    } catch (e) {
+      setState(() => _errorMessage = 'Could not resend code. Please try again.');
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Verify Your Email')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Enter the 6-digit code sent to',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.email,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 28),
+                  TextFormField(
+                    controller: _codeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
+                    validator: _validateCode,
+                    onFieldSubmitted: (_) => _verifyCode(),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      hintText: '------',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13), textAlign: TextAlign.center),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    height: 52,
+                    child: FilledButton(
+                      onPressed: _loading ? null : _verifyCode,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                            )
+                          : const Text('Verify', style: TextStyle(fontSize: 16)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _resending ? null : _resendCode,
+                    child: _resending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Resend Code'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// =========================================================================
