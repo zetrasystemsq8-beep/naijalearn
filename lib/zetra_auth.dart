@@ -60,7 +60,7 @@ class ZetraAuthException implements Exception {
 class ZetraAuthService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  static const String noAccountMessage = 'No Zetra account found.';
+  static const String noAccountMessage = 'This ZetraMail account does not exist.';
   static const String invalidOtpMessage = 'Invalid verification code.';
 
   String? _pendingAuthEmail;
@@ -70,9 +70,19 @@ class ZetraAuthService {
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  /// Step 1-3: Look up the profile by zetramail, then request an OTP
-  /// using ONLY the internal auth_email. Returns the auth_email used,
-  /// which the OTP screen needs to verify against.
+  /// Step 1: resolve the entered ZetraMail (or other identifier) to the
+  /// internal auth_email via the resolve_login_email(p_identifier) RPC.
+  /// This is the ONLY approved way to resolve an identifier pre-login —
+  /// a direct `.from('profiles').select(...).eq('zetramail', ...)` here
+  /// would be subject to RLS and silently return null for unauthenticated
+  /// callers even when a matching row exists, which was the actual bug
+  /// in the previous version of this file.
+  ///
+  /// Step 2: if the RPC returns null/empty, throw before calling
+  /// signInWithOtp.
+  /// Step 3: otherwise call signInWithOtp() using ONLY the resolved
+  /// auth_email. Returns that auth_email, which the OTP screen needs
+  /// to verify against.
   Future<String> requestOtpForZetraMail(String zetramail) async {
     final normalized = zetramail.trim().toLowerCase();
 
@@ -80,22 +90,38 @@ class ZetraAuthService {
       throw ZetraAuthException(noAccountMessage);
     }
 
-    Map<String, dynamic>? response;
+    dynamic result;
     try {
-      response = await _client
-          .from('profiles')
-          .select('auth_email')
-          .eq('zetramail', normalized)
-          .maybeSingle();
+      result = await _client.rpc(
+        'resolve_login_email',
+        params: {'p_identifier': normalized},
+      );
     } on PostgrestException catch (_) {
       throw ZetraAuthException(noAccountMessage);
     }
 
-    if (response == null || response['auth_email'] == null) {
-      throw ZetraAuthException(noAccountMessage);
+    // The RPC may return a plain string, or (depending on how it's
+    // declared) a single-row/single-column result — handle both shapes
+    // defensively without guessing at schema details.
+    String? authEmail;
+    if (result is String && result.isNotEmpty) {
+      authEmail = result;
+    } else if (result is Map && result.values.isNotEmpty) {
+      final first = result.values.first;
+      if (first is String && first.isNotEmpty) authEmail = first;
+    } else if (result is List && result.isNotEmpty) {
+      final row = result.first;
+      if (row is String && row.isNotEmpty) {
+        authEmail = row;
+      } else if (row is Map && row.values.isNotEmpty) {
+        final first = row.values.first;
+        if (first is String && first.isNotEmpty) authEmail = first;
+      }
     }
 
-    final authEmail = response['auth_email'] as String;
+    if (authEmail == null || authEmail.isEmpty) {
+      throw ZetraAuthException(noAccountMessage);
+    }
 
     try {
       await _client.auth.signInWithOtp(
@@ -146,7 +172,12 @@ class ZetraAuthService {
     return profile;
   }
 
-  /// Loads the profile row for the currently authenticated user.
+  /// Loads the profile row for the currently authenticated user. This
+  /// runs AFTER sign-in, so it's a client-side select against the
+  /// user's own row keyed by `id` — RLS permits `auth.uid() == id`
+  /// reads here, which is a different context from pre-login lookup
+  /// (which now goes through the RPC instead). This never reads or
+  /// filters by `email`.
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
 
