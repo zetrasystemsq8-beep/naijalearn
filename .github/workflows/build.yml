@@ -32,7 +32,7 @@ jobs:
             });
 
             for (const artifact of response.data.artifacts) {
-              if (artifact.name === "NaijaLearn-debug") {
+              if (artifact.name === "NaijaLearn-APK") {
                 await github.rest.actions.deleteArtifact({
                   owner,
                   repo,
@@ -89,12 +89,10 @@ jobs:
       - name: Build APK
         run: flutter build apk --release
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: latest
-          name: NaijaLearn Latest Build
-          files: build/app/outputs/flutter-apk/app-release.apk
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: NaijaLearn-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
