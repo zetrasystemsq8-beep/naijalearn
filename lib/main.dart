@@ -139,84 +139,34 @@ class AuthService {
   bool get isSignedIn => _client.auth.currentSession != null;
 
   Future<String> requestOtpForZetraMail(String zetramail) async {
-    final normalized = zetramail.trim().toLowerCase();
+  final normalized = zetramail.trim().toLowerCase();
 
-    debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
+  debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
 
-    if (normalized.isEmpty) {
-      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any RPC/Auth call.');
-      throw ZetraAuthException(noAccountMessage);
-    }
+  if (normalized.isEmpty) {
+    throw ZetraAuthException(noAccountMessage);
+  }
 
-    dynamic result;
-    try {
-      result = await _client.rpc(
-        'resolve_login_email',
-        params: {'p_identifier': normalized},
-      );
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] resolve_login_email RPC FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
-      throw ZetraAuthException(noAccountMessage);
-    }
+  dynamic result;
+  try {
+    result = await _client.rpc(
+      'resolve_login_email',
+      params: {'p_identifier': normalized},
+    );
+  } on PostgrestException catch (e) {
+    // TEMP DEBUG: surface the real Postgrest error on-screen
+    throw ZetraAuthException(
+      '[DEBUG] RPC error — code=${e.code} message=${e.message} details=${e.details} hint=${e.hint}',
+    );
+  } catch (e) {
+    // TEMP DEBUG: surface any other error on-screen
+    throw ZetraAuthException('[DEBUG] Non-Postgrest error calling RPC: $e');
+  }
 
-    debugPrint('[ZetraAuth] resolve_login_email RPC result: $result (type: ${result.runtimeType})');
-
-    // Robust extraction: recursively search the RPC result for the first non-empty String.
-    String? extractAuthEmail(dynamic res) {
-      if (res == null) return null;
-      if (res is String && res.isNotEmpty) return res;
-      if (res is Map) {
-        for (final v in res.values) {
-          final found = extractAuthEmail(v);
-          if (found != null && found.isNotEmpty) return found;
-        }
-      }
-      if (res is List && res.isNotEmpty) {
-        for (final item in res) {
-          final found = extractAuthEmail(item);
-          if (found != null && found.isNotEmpty) return found;
-        }
-      }
-      return null;
-    }
-
-    final authEmail = extractAuthEmail(result);
-
-    if (authEmail == null || authEmail.isEmpty) {
-      debugPrint('[ZetraAuth] resolve_login_email returned null/empty for '
-          'identifier="$normalized" — no matching Zetra account. RPC result: $result');
-      throw ZetraAuthException(noAccountMessage);
-    }
-
-    debugPrint('[ZetraAuth] auth_email resolved via RPC: "$authEmail"');
-    debugPrint('[ZetraAuth] About to call signInWithOtp('
-        'email: "$authEmail", shouldCreateUser: false) '
-        '— entered zetramail was "$normalized".');
-
-    try {
-      await _client.auth.signInWithOtp(
-        email: authEmail,
-        shouldCreateUser: false, // NaijaLearn never creates new accounts
-      );
-      debugPrint('[ZetraAuth] signInWithOtp() SUCCEEDED for "$authEmail".');
-    } on AuthException catch (e) {
-      debugPrint('[ZetraAuth] signInWithOtp() FAILED (AuthException): '
-          'message="${e.message}", statusCode=${e.statusCode}');
-      throw ZetraAuthException(noAccountMessage);
-    } catch (e, st) {
-      debugPrint('[ZetraAuth] signInWithOtp() FAILED (non-AuthException, e.g. network): $e');
-      debugPrint('[ZetraAuth] Stack trace: $st');
-      rethrow;
-    }
-
-    // STEP 5 setup: save the resolved internal email so OTP verification
-    // (and resend) reuse it — the user's typed zetramail is never used
-    // for any Supabase Auth call.
-    _pendingAuthEmail = authEmail;
-    _pendingZetramail = normalized;
-
-    return authEmail;
+  // TEMP DEBUG: surface the raw RPC result on-screen no matter what it is
+  throw ZetraAuthException(
+    '[DEBUG] identifier="$normalized" rpcResult=$result (type: ${result.runtimeType})',
+  );
   }
 
   Future<ZetraProfile> verifyOtpAndLoadProfile({
