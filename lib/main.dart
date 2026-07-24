@@ -10,20 +10,25 @@
 //
 // Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
 // Users are NOT created here — they must already have a Zetra account.
-// The user types their ZetraMail address (e.g. user@zetramail.ng). We
-// resolve that to the internal auth_email via the resolve_login_email(...)
-// Supabase RPC, and Supabase Auth OTP is sent/verified using ONLY that
-// internal auth_email — the user never sees or types it. If the RPC
-// returns null/empty, we show "This ZetraMail account does not exist."
-// and never call signInWithOtp.
+// Login is email+password (signInWithPassword), matching how the rest of
+// the Zetra ecosystem (NAI) authenticates. The user types their ZetraMail
+// address; it's resolved to the internal auth_email via the
+// resolve_login_email(...) Supabase RPC, and Supabase Auth's password
+// sign-in is called using ONLY that internal auth_email — the user never
+// sees or types it. If the RPC returns null/empty, or the password is
+// wrong, we show "Invalid ZetraMail or password."
+//
+// Verification code step: if the loaded profile is not yet verified, the
+// backend's own request_otp RPC sends a code to the user's ZetraMail
+// inbox, and VerifyOtpScreen checks it via the verify_otp RPC — this
+// mirrors NAI's flow exactly and does NOT use Supabase's built-in
+// signInWithOtp/verifyOTP (which rejects the .internal auth email
+// domain with "Email address is invalid").
 //
 // Note on backgrounding: Flutter does NOT reload the app or reset widget
 // state when the user switches to another app (ZetraMail) and returns,
-// as long as the OS hasn't killed the process. The entered email, the
-// OTP digits, and the resend-timer all persist automatically. The
-// WidgetsBindingObserver on VerifyOtpScreen below simply logs lifecycle
-// transitions and deliberately does NOT touch any state on resume —
-// it exists so future changes don't accidentally introduce a reset.
+// as long as the OS hasn't killed the process. The entered code and the
+// resend-timer persist automatically.
 
 import 'dart:async';
 import 'dart:convert';
@@ -73,13 +78,12 @@ Future<void> main() async {
 }
 
 /// =========================================================================
-/// AUTHENTICATION (Zetra ecosystem client — RPC-backed OTP login)
+/// AUTHENTICATION (Zetra ecosystem client — email+password + custom OTP)
 /// =========================================================================
 
 class ZetraProfile {
   final String id;
   final String zetramail;
-  final String authEmail;
   final String username;
   final bool verified;
   final String? avatarUrl;
@@ -87,7 +91,6 @@ class ZetraProfile {
   ZetraProfile({
     required this.id,
     required this.zetramail,
-    required this.authEmail,
     required this.username,
     required this.verified,
     this.avatarUrl,
@@ -96,8 +99,7 @@ class ZetraProfile {
   factory ZetraProfile.fromMap(Map<String, dynamic> map) {
     return ZetraProfile(
       id: map['id'] as String,
-      zetramail: map['zetramail'] as String,
-      authEmail: map['auth_email'] as String,
+      zetramail: map['zetramail'] as String? ?? '',
       username: map['username'] as String? ?? '',
       verified: map['verified'] as bool? ?? false,
       avatarUrl: map['avatar_url'] as String?,
@@ -107,7 +109,6 @@ class ZetraProfile {
   Map<String, dynamic> toJson() => {
         'id': id,
         'zetramail': zetramail,
-        'auth_email': authEmail,
         'username': username,
         'verified': verified,
         'avatar_url': avatarUrl,
@@ -126,93 +127,87 @@ class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  static const String noAccountMessage = 'This ZetraMail account does not exist.';
-  static const String invalidOtpMessage = 'Invalid verification code.';
+  static const String invalidCredentialsMessage = 'Invalid ZetraMail or password.';
+  static const String invalidOtpMessage = 'Invalid or expired code. Please try again.';
+  static const String profileLoadErrorMessage = 'Could not load your profile. Please try again.';
 
   SupabaseClient get _client => Supabase.instance.client;
 
-  String? _pendingAuthEmail;
-  String? _pendingZetramail;
-
-  String? get pendingZetramail => _pendingZetramail;
-
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  Future<String> requestOtpForZetraMail(String zetramail) async {
-  final normalized = zetramail.trim().toLowerCase();
-
-  dynamic result;
-  try {
-    result = await _client.rpc(
-      'resolve_login_email',
-      params: {'p_identifier': normalized},
-    );
-  } catch (e) {
-    throw ZetraAuthException('[DEBUG] RPC error: $e');
-  }
-
-  final authEmail = result is String ? result : null;
-  if (authEmail == null || authEmail.isEmpty) {
-    throw ZetraAuthException('[DEBUG] RPC returned null/empty');
-  }
-
-  try {
-    await _client.auth.signInWithOtp(
-      email: authEmail,
-      shouldCreateUser: false,
-    );
-    throw ZetraAuthException('[DEBUG] signInWithOtp SUCCEEDED for $authEmail');
-  } on AuthException catch (e) {
-    throw ZetraAuthException(
-      '[DEBUG] signInWithOtp FAILED — message="${e.message}" statusCode=${e.statusCode}',
-    );
-  } catch (e) {
-    throw ZetraAuthException('[DEBUG] signInWithOtp non-Auth error: $e');
-  }
-  }
-
-  Future<ZetraProfile> verifyOtpAndLoadProfile({
-    required String token,
-    String? authEmailOverride,
+  /// Resolves the typed ZetraMail to the internal auth_email via RPC, then
+  /// signs in with email+password against Supabase Auth. If the loaded
+  /// profile isn't verified yet, triggers request_otp so a code is already
+  /// on its way by the time the user reaches VerifyOtpScreen.
+  Future<ZetraProfile> login({
+    required String zetramail,
+    required String password,
   }) async {
-    final authEmail = authEmailOverride ?? _pendingAuthEmail;
+    final normalized = zetramail.trim().toLowerCase();
 
-    debugPrint('[ZetraAuth] verifyOTP() called with authEmail="$authEmail", '
-        'token="${token.trim()}"');
+    debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
 
-    if (authEmail == null) {
-      debugPrint('[ZetraAuth] verifyOTP() aborted — no pending authEmail set.');
-      throw ZetraAuthException('No pending sign-in request. Please start again.');
+    if (normalized.isEmpty) {
+      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any RPC/Auth call.');
+      throw ZetraAuthException(invalidCredentialsMessage);
     }
 
+    String? resolvedEmail;
     try {
-      final res = await _client.auth.verifyOTP(
-        type: OtpType.email,
-        email: authEmail,
-        token: token.trim(),
+      final result = await _client.rpc(
+        'resolve_login_email',
+        params: {'p_identifier': normalized},
       );
-      debugPrint('[ZetraAuth] verifyOTP() response: '
-          'session=${res.session != null}, user=${res.user != null}, '
-          'userId=${res.user?.id}');
-      if (res.session == null || res.user == null) {
-        debugPrint('[ZetraAuth] verifyOTP() returned null session/user with no thrown '
-            'exception — treating as invalid OTP.');
-        throw ZetraAuthException(invalidOtpMessage);
-      }
+      resolvedEmail = result is String ? result : null;
+      debugPrint('[ZetraAuth] resolve_login_email RPC result: $result (type: ${result.runtimeType})');
+    } on PostgrestException catch (e) {
+      debugPrint('[ZetraAuth] resolve_login_email RPC FAILED (PostgrestException): '
+          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
+      throw ZetraAuthException(invalidCredentialsMessage);
+    }
+
+    if (resolvedEmail == null || resolvedEmail.isEmpty) {
+      debugPrint('[ZetraAuth] resolve_login_email returned null/empty for '
+          'identifier="$normalized" — no matching Zetra account.');
+      throw ZetraAuthException(invalidCredentialsMessage);
+    }
+
+    debugPrint('[ZetraAuth] auth_email resolved via RPC: "$resolvedEmail"');
+    debugPrint('[ZetraAuth] About to call signInWithPassword() for resolved auth_email.');
+
+    AuthResponse response;
+    try {
+      response = await _client.auth.signInWithPassword(
+        email: resolvedEmail,
+        password: password,
+      );
+      debugPrint('[ZetraAuth] signInWithPassword() SUCCEEDED.');
     } on AuthException catch (e) {
-      debugPrint('[ZetraAuth] verifyOTP() FAILED (AuthException): '
+      debugPrint('[ZetraAuth] signInWithPassword() FAILED (AuthException): '
           'message="${e.message}", statusCode=${e.statusCode}');
-      throw ZetraAuthException(invalidOtpMessage);
-    } catch (e, st) {
-      debugPrint('[ZetraAuth] verifyOTP() FAILED (non-AuthException): $e');
-      debugPrint('[ZetraAuth] Stack trace: $st');
-      rethrow;
+      throw ZetraAuthException(invalidCredentialsMessage);
+    }
+
+    final user = response.user;
+    if (user == null) {
+      debugPrint('[ZetraAuth] signInWithPassword() returned null user with no thrown exception.');
+      throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     final profile = await loadCurrentProfile();
 
-    _pendingAuthEmail = null;
-    _pendingZetramail = null;
+    if (!profile.verified) {
+      debugPrint('[ZetraAuth] Profile unverified — requesting OTP via request_otp RPC.');
+      try {
+        await _client.rpc('request_otp');
+        debugPrint('[ZetraAuth] request_otp SUCCEEDED.');
+      } on PostgrestException catch (e) {
+        debugPrint('[ZetraAuth] request_otp FAILED (PostgrestException, non-fatal): '
+            'code=${e.code}, message=${e.message}');
+      } catch (e) {
+        debugPrint('[ZetraAuth] request_otp FAILED (non-fatal): $e');
+      }
+    }
 
     return profile;
   }
@@ -229,40 +224,67 @@ class AuthService {
     } on PostgrestException catch (e) {
       debugPrint('[ZetraAuth] loadCurrentProfile() lookup FAILED (PostgrestException): '
           'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
-      throw ZetraAuthException(noAccountMessage);
+      throw ZetraAuthException(profileLoadErrorMessage);
     }
 
     if (row == null) {
       debugPrint('[ZetraAuth] loadCurrentProfile(): no profile row for user.id="${user.id}".');
-      throw ZetraAuthException(noAccountMessage);
+      throw ZetraAuthException(profileLoadErrorMessage);
     }
 
     return ZetraProfile.fromMap(row);
   }
 
-  Future<void> resendOtp() async {
-    if (_pendingAuthEmail == null) {
-      throw ZetraAuthException('No pending sign-in request. Please start again.');
+  /// Verifies the code the user copied from their ZetraMail inbox against
+  /// the backend's own verify_otp RPC (NOT Supabase's verifyOTP — that
+  /// requires the .internal auth email, which Supabase Auth itself rejects
+  /// as an invalid email format). Requires an existing signed-in session,
+  /// since login() already authenticated with email+password.
+  Future<ZetraProfile> verifyCode({required String code}) async {
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      debugPrint('[ZetraAuth] verifyCode() aborted — no active session.');
+      throw ZetraAuthException("You're not signed in. Please log in again.");
     }
-    debugPrint('[ZetraAuth] resendOtp() called for authEmail="$_pendingAuthEmail" '
-        '(shouldCreateUser: false)');
+
+    debugPrint('[ZetraAuth] verify_otp() called with code="${code.trim()}"');
+
+    dynamic result;
     try {
-      await _client.auth.signInWithOtp(
-        email: _pendingAuthEmail!,
-        shouldCreateUser: false,
-      );
-      debugPrint('[ZetraAuth] resendOtp() SUCCEEDED for "$_pendingAuthEmail".');
-    } on AuthException catch (e) {
-      debugPrint('[ZetraAuth] resendOtp() FAILED (AuthException): '
-          'message="${e.message}", statusCode=${e.statusCode}');
+      result = await _client.rpc('verify_otp', params: {'p_code': code.trim()});
+      debugPrint('[ZetraAuth] verify_otp RPC result: $result');
+    } on PostgrestException catch (e) {
+      debugPrint('[ZetraAuth] verify_otp FAILED (PostgrestException): '
+          'code=${e.code}, message=${e.message}');
+      throw ZetraAuthException(invalidOtpMessage);
+    }
+
+    if (result != true) {
+      debugPrint('[ZetraAuth] verify_otp returned falsy result — treating as invalid code.');
+      throw ZetraAuthException(invalidOtpMessage);
+    }
+
+    return loadCurrentProfile();
+  }
+
+  Future<void> resendCode() async {
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      throw ZetraAuthException("You're not signed in. Please log in again.");
+    }
+    debugPrint('[ZetraAuth] resendCode() called via request_otp RPC.');
+    try {
+      await _client.rpc('request_otp');
+      debugPrint('[ZetraAuth] resendCode() SUCCEEDED.');
+    } on PostgrestException catch (e) {
+      debugPrint('[ZetraAuth] resendCode() FAILED (PostgrestException): '
+          'code=${e.code}, message=${e.message}');
       throw ZetraAuthException('Could not resend code. Please try again.');
     }
   }
 
   Future<void> signOut() async {
     await _client.auth.signOut();
-    _pendingAuthEmail = null;
-    _pendingZetramail = null;
   }
 }
 
@@ -276,12 +298,15 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _zetramailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
   bool _loading = false;
   String? _errorMessage;
 
   @override
   void dispose() {
     _zetramailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -290,6 +315,13 @@ class _LoginScreenState extends State<LoginScreen> {
     if (email.isEmpty) return 'Please enter your ZetraMail address';
     final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
     if (!emailRegex.hasMatch(email)) return 'Please enter a valid email';
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    final password = value ?? '';
+    if (password.isEmpty) return 'Please enter your password';
+    if (password.length < 8) return 'Password must be at least 8 characters';
     return null;
   }
 
@@ -302,19 +334,26 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     final zetramail = _zetramailController.text.trim();
+    final password = _passwordController.text.trim();
 
     try {
-      final authEmail = await AuthService.instance.requestOtpForZetraMail(zetramail);
+      final profile = await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => VerifyOtpScreen(zetramail: zetramail, authEmail: authEmail),
-        ),
-      );
+
+      if (profile.verified) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
+          (route) => false,
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+        );
+      }
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Could not send code. Please check your connection and try again.');
+      setState(() => _errorMessage = 'Could not sign in. Please check your connection and try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -362,13 +401,30 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _zetramailController,
                     keyboardType: TextInputType.emailAddress,
                     autofillHints: const [AutofillHints.email],
-                    textInputAction: TextInputAction.done,
+                    textInputAction: TextInputAction.next,
                     validator: _validateZetraMail,
-                    onFieldSubmitted: (_) => _continue(),
                     decoration: InputDecoration(
                       labelText: 'ZetraMail address',
                       hintText: 'you@zetramail.ng',
                       prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    autofillHints: const [AutofillHints.password],
+                    textInputAction: TextInputAction.done,
+                    validator: _validatePassword,
+                    onFieldSubmitted: (_) => _continue(),
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: const Icon(Icons.lock_outline_rounded),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                      ),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                   ),
@@ -387,7 +443,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               height: 22,
                               child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
                             )
-                          : const Text('Send Code', style: TextStyle(fontSize: 16)),
+                          : const Text('Log In', style: TextStyle(fontSize: 16)),
                     ),
                   ),
                 ],
@@ -401,10 +457,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 class VerifyOtpScreen extends StatefulWidget {
-  final String zetramail;
-  final String authEmail;
-
-  const VerifyOtpScreen({super.key, required this.zetramail, required this.authEmail});
+  const VerifyOtpScreen({super.key});
 
   @override
   State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
@@ -436,9 +489,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   String? _validateCode(String? value) {
     final code = value?.trim() ?? '';
     if (code.isEmpty) return 'Please enter the code';
-    if (code.length != 6 || int.tryParse(code) == null) {
-      return 'Enter the 6-digit code';
-    }
+    if (code.length < 4) return 'Enter the code from your ZetraMail';
     return null;
   }
 
@@ -451,10 +502,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
     });
 
     try {
-      final profile = await AuthService.instance.verifyOtpAndLoadProfile(
-        token: _codeController.text.trim(),
-        authEmailOverride: widget.authEmail,
-      );
+      final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
@@ -475,7 +523,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       _errorMessage = null;
     });
     try {
-      await AuthService.instance.resendOtp();
+      await AuthService.instance.resendCode();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')),
@@ -489,12 +537,21 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
     }
   }
 
+  Future<void> _useDifferentAccount() async {
+    await AuthService.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Verify Your Email')),
+      appBar: AppBar(title: const Text('Verify Your Zetra ID')),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -508,21 +565,9 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                   Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
                   const SizedBox(height: 20),
                   Text(
-                    'Enter the 6-digit code sent to your ZetraMail inbox for',
+                    'Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.zetramail,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Open the ZetraMail app, copy the code, then come back here — this screen stays exactly as you left it.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 28),
                   TextFormField(
@@ -566,7 +611,11 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Resend Code'),
+                        : const Text("Didn't get a code? Resend"),
+                  ),
+                  TextButton(
+                    onPressed: _useDifferentAccount,
+                    child: const Text('Use a different account'),
                   ),
                 ],
               ),
@@ -761,7 +810,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (hasSession) {
         try {
           final profile = await AuthService.instance.loadCurrentProfile();
-          destination = HomeScreen(profile: profile);
+          destination = profile.verified ? HomeScreen(profile: profile) : const VerifyOtpScreen();
         } catch (_) {
           destination = const LoginScreen();
         }
