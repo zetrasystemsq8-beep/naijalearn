@@ -7,6 +7,7 @@
 // Gamification (XP, streak, badges, leaderboard, daily challenge, mock
 // exams, analytics) lives in app_enhancements.dart and plugs in via
 // AppProvider, without replacing any of the CBT screens below.
+// Certification eligibility tracking lives in certification.dart.
 //
 // Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
 // Users are NOT created here — they must already have a Zetra account.
@@ -52,6 +53,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_enhancements.dart';
+import 'certification.dart';
 
 import 'questions_english.dart';
 import 'questions_accounting.dart';
@@ -400,90 +402,98 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    width: 88,
-                    height: 88,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Icon(Icons.school_rounded, size: 46, color: scheme.primary),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Welcome to NaijaLearn',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Sign in with your ZetraMail address',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 32),
-                  TextFormField(
-                    controller: _zetramailController,
-                    keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
-                    textInputAction: TextInputAction.next,
-                    validator: _validateZetraMail,
-                    decoration: InputDecoration(
-                      labelText: 'ZetraMail address',
-                      hintText: 'you@zetramail.ng',
-                      prefixIcon: const Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    autofillHints: const [AutofillHints.password],
-                    textInputAction: TextInputAction.done,
-                    validator: _validatePassword,
-                    onFieldSubmitted: (_) => _continue(),
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline_rounded),
-                      suffixIcon: IconButton(
-                        icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
-                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              // Scrollable content up top — grows/shrinks with keyboard,
+              // but the primary action stays docked at the bottom below.
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        width: 88,
+                        height: 88,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Icon(Icons.school_rounded, size: 46, color: scheme.primary),
                       ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Welcome to NaijaLearn',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Sign in with your ZetraMail address',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 32),
+                      TextFormField(
+                        controller: _zetramailController,
+                        keyboardType: TextInputType.emailAddress,
+                        autofillHints: const [AutofillHints.email],
+                        textInputAction: TextInputAction.next,
+                        validator: _validateZetraMail,
+                        decoration: InputDecoration(
+                          labelText: 'ZetraMail address',
+                          hintText: 'you@zetramail.ng',
+                          prefixIcon: const Icon(Icons.email_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
+                        validator: _validatePassword,
+                        onFieldSubmitted: (_) => _continue(),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
+                      ],
+                    ],
                   ),
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 12),
-                    Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
-                  ],
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 52,
-                    child: FilledButton(
-                      onPressed: _loading ? null : _continue,
-                      child: _loading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                            )
-                          : const Text('Log In', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+              // Primary action pinned to the bottom of the screen.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: SizedBox(
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: _loading ? null : _continue,
+                    child: _loading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                          )
+                        : const Text('Log In', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -614,77 +624,88 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
     return Scaffold(
       appBar: AppBar(title: const Text('Verify Your Zetra ID')),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 28),
+                      TextFormField(
+                        controller: _codeController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
+                        validator: _validateCode,
+                        onFieldSubmitted: (_) => _verifyCode(),
+                        decoration: InputDecoration(
+                          counterText: '',
+                          hintText: '------',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13), textAlign: TextAlign.center),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 28),
-                  TextFormField(
-                    controller: _codeController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
-                    validator: _validateCode,
-                    onFieldSubmitted: (_) => _verifyCode(),
-                    decoration: InputDecoration(
-                      counterText: '',
-                      hintText: '------',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13), textAlign: TextAlign.center),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 52,
-                    child: FilledButton(
-                      onPressed: _loading ? null : _verifyCode,
-                      child: _loading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                            )
-                          : const Text('Verify', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
-                    child: _resending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(
-                            _resendSecondsLeft > 0
-                                ? 'Resend code in ${_resendSecondsLeft}s'
-                                : "Didn't get a code? Resend",
-                          ),
-                  ),
-                  TextButton(
-                    onPressed: _useDifferentAccount,
-                    child: const Text('Use a different account'),
-                  ),
-                ],
+                ),
               ),
-            ),
+              // Verify button + secondary links pinned to the bottom.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: _loading ? null : _verifyCode,
+                        child: _loading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                              )
+                            : const Text('Verify', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
+                      child: _resending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(
+                              _resendSecondsLeft > 0
+                                  ? 'Resend code in ${_resendSecondsLeft}s'
+                                  : "Didn't get a code? Resend",
+                            ),
+                    ),
+                    TextButton(
+                      onPressed: _useDifferentAccount,
+                      child: const Text('Use a different account'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -962,10 +983,32 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 /// HOME SCREEN
 /// =========================================================================
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final ZetraProfile? profile;
 
   const HomeScreen({super.key, this.profile});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    if (profile != null) {
+      // Sync the real Zetra username into the gamification layer, and push
+      // an initial leaderboard entry so a fresh account shows up right away
+      // instead of only appearing after their first XP-earning action.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final appProvider = context.read<AppProvider>();
+        appProvider.setUserName(profile.username);
+        appProvider.syncLeaderboardNow();
+      });
+    }
+  }
 
   Future<void> _pickCountAndStart(BuildContext context, SubjectInfo subject) async {
     final count = await showModalBottomSheet<int>(
@@ -988,8 +1031,29 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _pickCertificationSubject(BuildContext context) async {
+    final subject = await showModalBottomSheet<SubjectInfo>(
+      context: context,
+      builder: (_) => ListView(
+        children: kSubjects
+            .map((s) => ListTile(
+                  leading: Icon(s.icon, color: s.color),
+                  title: Text(s.name),
+                  onTap: () => Navigator.pop(context, s),
+                ))
+            .toList(),
+      ),
+    );
+    if (subject != null && context.mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => CertificationHomeScreen(subject: subject)),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final profile = widget.profile;
     final scheme = Theme.of(context).colorScheme;
     final provider = context.watch<AppProvider>();
     final stats = provider.stats;
@@ -1017,7 +1081,7 @@ class HomeScreen extends StatelessWidget {
                         children: [
                           Text('NaijaLearn', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                           Text(
-                            profile != null ? 'Welcome, ${profile!.username}' : 'Choose a subject to practice',
+                            profile != null ? 'Welcome, ${profile.username}' : 'Choose a subject to practice',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -1044,7 +1108,12 @@ class HomeScreen extends StatelessWidget {
                       children: [
                         _StatPill(icon: Icons.local_fire_department_rounded, color: Colors.deepOrange, value: '${stats.streak}', label: 'Streak'),
                         _StatPill(icon: Icons.star_rounded, color: Colors.amber, value: '${stats.xp}', label: 'XP'),
-                        _StatPill(icon: Icons.military_tech_rounded, color: scheme.primary, value: '${stats.level}', label: 'Level'),
+                        _StatPill(
+                          icon: Icons.military_tech_rounded,
+                          color: rankColor(stats.level),
+                          value: rankTitleForLevel(stats.level),
+                          label: 'Rank',
+                        ),
                       ],
                     ),
                   ),
@@ -1198,6 +1267,8 @@ class HomeScreen extends StatelessWidget {
                       _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
                       const SizedBox(width: 10),
                       _QuickActionChip(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
+                      const SizedBox(width: 10),
+                      _QuickActionChip(icon: Icons.workspace_premium_rounded, label: 'Certification', onTap: () => _pickCertificationSubject(context)),
                     ],
                   ),
                 ),
@@ -1247,7 +1318,7 @@ class _StatPill extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 22),
           const SizedBox(height: 4),
-          Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+          Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: color), textAlign: TextAlign.center),
           Text(label, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
@@ -1654,6 +1725,13 @@ class _ExamScreenState extends State<ExamScreen> {
     final provider = context.read<AppProvider>();
     provider.recordAnswer(widget.subject.name, correct, widget.questions.length);
     provider.addXP(correct * 10);
+
+    CertificationService.instance.recordPracticeSession(
+      subject: widget.subject.name,
+      questionsAnswered: widget.questions.length,
+      correctAnswers: correct,
+      questionIdsCovered: widget.questions.map((q) => q.id).toSet(),
+    );
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
