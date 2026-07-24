@@ -141,32 +141,34 @@ class AuthService {
   Future<String> requestOtpForZetraMail(String zetramail) async {
   final normalized = zetramail.trim().toLowerCase();
 
-  debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
-
-  if (normalized.isEmpty) {
-    throw ZetraAuthException(noAccountMessage);
-  }
-
   dynamic result;
   try {
     result = await _client.rpc(
       'resolve_login_email',
       params: {'p_identifier': normalized},
     );
-  } on PostgrestException catch (e) {
-    // TEMP DEBUG: surface the real Postgrest error on-screen
-    throw ZetraAuthException(
-      '[DEBUG] RPC error — code=${e.code} message=${e.message} details=${e.details} hint=${e.hint}',
-    );
   } catch (e) {
-    // TEMP DEBUG: surface any other error on-screen
-    throw ZetraAuthException('[DEBUG] Non-Postgrest error calling RPC: $e');
+    throw ZetraAuthException('[DEBUG] RPC error: $e');
   }
 
-  // TEMP DEBUG: surface the raw RPC result on-screen no matter what it is
-  throw ZetraAuthException(
-    '[DEBUG] identifier="$normalized" rpcResult=$result (type: ${result.runtimeType})',
-  );
+  final authEmail = result is String ? result : null;
+  if (authEmail == null || authEmail.isEmpty) {
+    throw ZetraAuthException('[DEBUG] RPC returned null/empty');
+  }
+
+  try {
+    await _client.auth.signInWithOtp(
+      email: authEmail,
+      shouldCreateUser: false,
+    );
+    throw ZetraAuthException('[DEBUG] signInWithOtp SUCCEEDED for $authEmail');
+  } on AuthException catch (e) {
+    throw ZetraAuthException(
+      '[DEBUG] signInWithOtp FAILED — message="${e.message}" statusCode=${e.statusCode}',
+    );
+  } catch (e) {
+    throw ZetraAuthException('[DEBUG] signInWithOtp non-Auth error: $e');
+  }
   }
 
   Future<ZetraProfile> verifyOtpAndLoadProfile({
