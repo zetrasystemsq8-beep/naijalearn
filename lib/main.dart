@@ -23,16 +23,25 @@
 // is a deliberate second factor: knowing the ZetraMail + password alone is
 // not enough to get in, since the code only shows up in the account
 // owner's ZetraMail inbox (via the Zetra ID app). request_otp is called
-// right after signInWithPassword succeeds, and VerifyOtpScreen is shown
-// unconditionally before HomeScreen. This mirrors NAI's own request_otp/
-// verify_otp RPCs and does NOT use Supabase's built-in signInWithOtp/
-// verifyOTP (which rejects the .internal auth email domain with
-// "Email address is invalid").
+// exactly once, right after signInWithPassword succeeds.
 //
-// Note on backgrounding: Flutter does NOT reload the app or reset widget
-// state when the user switches to another app (ZetraMail) and returns,
-// as long as the OS hasn't killed the process. The entered code and the
-// resend-timer persist automatically.
+// Session-vs-verified tracking: Supabase creates a valid session the
+// instant signInWithPassword succeeds — BEFORE the OTP step runs. So a
+// bare "is there a session?" check is not enough to know someone has
+// fully logged in; if the app process is killed while the user is
+// fetching their code from the ZetraMail app, a naive check would send
+// them straight into HomeScreen on relaunch, skipping the code entirely.
+// To prevent that, AuthService stores a `nl_otp_verified` flag in
+// Supabase Auth's own per-user metadata: reset to false at the start of
+// every login(), set to true only once verifyCode() succeeds. SplashScreen
+// checks this flag (not just session presence) to decide whether to route
+// to HomeScreen or back to VerifyOtpScreen — and does NOT re-request a
+// code in that second case, since the one already sent is still valid.
+//
+// This does NOT use Supabase's built-in signInWithOtp/verifyOTP (which
+// rejects the .internal auth email domain with "Email address is
+// invalid") — it uses the backend's own request_otp/verify_otp RPCs,
+// the same ones NAI uses.
 
 import 'dart:async';
 import 'dart:convert';
@@ -135,16 +144,23 @@ class AuthService {
   static const String invalidOtpMessage = 'Invalid or expired code. Please try again.';
   static const String profileLoadErrorMessage = 'Could not load your profile. Please try again.';
 
+  static const String _otpVerifiedMetaKey = 'nl_otp_verified';
+
   SupabaseClient get _client => Supabase.instance.client;
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
+  /// True only once the CURRENT session has completed the mandatory
+  /// verification-code step. Backed by Supabase Auth's own per-user
+  /// metadata so it survives the app process being killed and relaunched.
+  bool get isOtpVerifiedForCurrentSession =>
+      _client.auth.currentUser?.userMetadata?[_otpVerifiedMetaKey] == true;
+
   /// Resolves the typed ZetraMail to the internal auth_email via RPC, then
-  /// signs in with email+password against Supabase Auth. A verification
-  /// code is ALWAYS requested afterward — regardless of the profile's
-  /// verified status — so password alone never fully logs someone in.
-  /// The caller (LoginScreen) is expected to always route to
-  /// VerifyOtpScreen next, never straight to HomeScreen.
+  /// signs in with email+password against Supabase Auth. Immediately
+  /// invalidates any stale "verified" flag from a previous login, then
+  /// requests a fresh code exactly once. The caller (LoginScreen) is
+  /// expected to always route to VerifyOtpScreen next.
   Future<ZetraProfile> login({
     required String zetramail,
     required String password,
@@ -200,10 +216,16 @@ class AuthService {
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
+    // Every login must redo the OTP step — clear any leftover "verified"
+    // flag from a previous session before requesting the new code.
+    try {
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
+    } catch (e) {
+      debugPrint('[ZetraAuth] Could not reset otp-verified flag (non-fatal): $e');
+    }
+
     final profile = await loadCurrentProfile();
 
-    // Mandatory second factor on every login — not conditional on
-    // profile.verified. Password alone must never be sufficient.
     debugPrint('[ZetraAuth] Requesting mandatory login OTP via request_otp RPC.');
     try {
       await _client.rpc('request_otp');
@@ -243,8 +265,9 @@ class AuthService {
   /// Verifies the code the user copied from their ZetraMail inbox against
   /// the backend's own verify_otp RPC (NOT Supabase's verifyOTP — that
   /// requires the .internal auth email, which Supabase Auth itself rejects
-  /// as an invalid email format). Requires an existing signed-in session,
-  /// since login() already authenticated with email+password.
+  /// as an invalid email format). On success, marks this session verified
+  /// via Supabase Auth user metadata so a killed-and-relaunched app knows
+  /// this step is already done.
   Future<ZetraProfile> verifyCode({required String code}) async {
     final session = _client.auth.currentSession;
     if (session == null) {
@@ -269,6 +292,13 @@ class AuthService {
       throw ZetraAuthException(invalidOtpMessage);
     }
 
+    try {
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
+      debugPrint('[ZetraAuth] otp-verified flag persisted for this session.');
+    } catch (e) {
+      debugPrint('[ZetraAuth] Could not persist otp-verified flag (non-fatal): $e');
+    }
+
     return loadCurrentProfile();
   }
 
@@ -289,6 +319,11 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    try {
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
+    } catch (_) {
+      // non-fatal — signing out below still clears the session either way
+    }
     await _client.auth.signOut();
   }
 }
@@ -342,9 +377,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     try {
-      // login() always requests an OTP after a successful password check —
-      // so every successful login lands here, on VerifyOtpScreen, never
-      // straight into HomeScreen. Password alone is never enough.
+      // login() always requests a fresh OTP after a successful password
+      // check — so every successful login lands here, on VerifyOtpScreen,
+      // never straight into HomeScreen. Password alone is never enough.
       await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
       Navigator.of(context).push(
@@ -470,18 +505,41 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   bool _resending = false;
   String? _errorMessage;
 
+  static const int _resendCooldownSeconds = 30;
+  int _resendSecondsLeft = _resendCooldownSeconds;
+  Timer? _resendTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startResendCooldown();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {}
 
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSecondsLeft = _resendCooldownSeconds);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendSecondsLeft <= 1) {
+        timer.cancel();
+        setState(() => _resendSecondsLeft = 0);
+      } else {
+        setState(() => _resendSecondsLeft--);
+      }
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _resendTimer?.cancel();
     _codeController.dispose();
     super.dispose();
   }
@@ -518,6 +576,8 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   }
 
   Future<void> _resendCode() async {
+    if (_resendSecondsLeft > 0) return;
+
     setState(() {
       _resending = true;
       _errorMessage = null;
@@ -528,6 +588,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')),
       );
+      _startResendCooldown();
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -604,14 +665,18 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                   ),
                   const SizedBox(height: 12),
                   TextButton(
-                    onPressed: _resending ? null : _resendCode,
+                    onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
                     child: _resending
                         ? const SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text("Didn't get a code? Resend"),
+                        : Text(
+                            _resendSecondsLeft > 0
+                                ? 'Resend code in ${_resendSecondsLeft}s'
+                                : "Didn't get a code? Resend",
+                          ),
                   ),
                   TextButton(
                     onPressed: _useDifferentAccount,
@@ -793,6 +858,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late final Animation<double> _fade;
   late final Animation<double> _scale;
 
+  static const Duration _splashDuration = Duration(seconds: 5);
+
   @override
   void initState() {
     super.initState();
@@ -801,24 +868,28 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _scale = Tween<double>(begin: 0.7, end: 1.0)
         .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
-    Timer(const Duration(milliseconds: 2000), () async {
+    Timer(_splashDuration, () async {
       if (!mounted) return;
 
-      // A persisted session from a previous fully-completed login (password
-      // + OTP) is trusted as-is — re-running OTP on every cold start of an
-      // already-authenticated device would defeat auto-login entirely and
-      // isn't what was asked for here; the mandatory OTP guards the *login*
-      // step itself (someone else typing in the password), not app restarts
-      // on the legitimate owner's own device.
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       Widget destination;
 
       if (hasSession) {
-        try {
-          final profile = await AuthService.instance.loadCurrentProfile();
-          destination = HomeScreen(profile: profile);
-        } catch (_) {
-          destination = const LoginScreen();
+        if (AuthService.instance.isOtpVerifiedForCurrentSession) {
+          try {
+            final profile = await AuthService.instance.loadCurrentProfile();
+            destination = HomeScreen(profile: profile);
+          } catch (_) {
+            destination = const LoginScreen();
+          }
+        } else {
+          // A Supabase session already exists (the password step already
+          // succeeded) but the mandatory OTP step was never completed —
+          // most likely the OS killed the app while the user was in the
+          // ZetraMail app copying their code. Send them straight back to
+          // the code screen WITHOUT requesting a new code; the one
+          // already sitting in their inbox is still valid.
+          destination = const VerifyOtpScreen();
         }
       } else {
         destination = const LoginScreen();
