@@ -4,6 +4,13 @@
 //
 // This file does NOT define its own app shell, HomeScreen, or MaterialApp —
 // it plugs into main.dart's existing NaijaLearnApp via AppProvider.
+//
+// Leaderboard is backed by Supabase (table: leaderboard_entries) so it's
+// a real shared leaderboard across users, not on-device-only storage.
+// Every user's own row is upserted automatically whenever their XP
+// changes (see AppProvider._syncLeaderboard), keyed by their Supabase
+// user id — not by display name, so duplicate/changed names never cause
+// duplicate rows or a broken "Your Rank" lookup.
 
 import 'dart:convert';
 import 'dart:async';
@@ -11,6 +18,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'questions_english.dart';
 import 'questions_mathematics.dart';
 import 'questions_physics.dart';
@@ -39,7 +47,6 @@ class UserStats {
   final List<String> badges;
   final DateTime lastActive;
 
-  // --- Added: daily goals / study timer / weekly stats tracking ---
   final int dailyGoalQuestions;
   final int questionsToday;
   final String lastProgressDate;
@@ -162,20 +169,26 @@ class UserStats {
 }
 
 class LeaderboardEntry {
+  final String userId;
   final String name;
   final int xp;
   final int level;
   final int streak;
 
-  LeaderboardEntry({required this.name, required this.xp, required this.level, required this.streak});
+  LeaderboardEntry({
+    required this.userId,
+    required this.name,
+    required this.xp,
+    required this.level,
+    required this.streak,
+  });
 
-  Map<String, dynamic> toJson() => {'name': name, 'xp': xp, 'level': level, 'streak': streak};
-
-  factory LeaderboardEntry.fromJson(Map<String, dynamic> json) => LeaderboardEntry(
-        name: json['name'] ?? 'Anonymous',
-        xp: json['xp'] ?? 0,
-        level: json['level'] ?? 1,
-        streak: json['streak'] ?? 0,
+  factory LeaderboardEntry.fromMap(Map<String, dynamic> map) => LeaderboardEntry(
+        userId: map['user_id'] as String? ?? '',
+        name: map['username'] as String? ?? 'Anonymous',
+        xp: (map['xp'] as num?)?.toInt() ?? 0,
+        level: (map['level'] as num?)?.toInt() ?? 1,
+        streak: (map['streak'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -246,6 +259,28 @@ Color masteryColor(MasteryTier tier) {
   }
 }
 
+/// Competitive rank title for a given level — shown instead of a bare
+/// "Level N" so progress feels more like climbing ranks in a game.
+/// The numeric level is still shown alongside it as a small subtitle
+/// wherever this is displayed.
+String rankTitleForLevel(int level) {
+  if (level >= 50) return 'Legend';
+  if (level >= 25) return 'Grandmaster';
+  if (level >= 15) return 'Master';
+  if (level >= 10) return 'Ace';
+  if (level >= 5) return 'Scholar';
+  return 'Rookie';
+}
+
+Color rankColor(int level) {
+  if (level >= 50) return const Color(0xFFFFD700);
+  if (level >= 25) return const Color(0xFF9C27B0);
+  if (level >= 15) return const Color(0xFFE91E63);
+  if (level >= 10) return const Color(0xFF2196F3);
+  if (level >= 5) return const Color(0xFF4CAF50);
+  return Colors.grey;
+}
+
 /// =========================================================================
 /// SERVICES
 /// =========================================================================
@@ -273,22 +308,6 @@ class StorageService {
       } catch (_) {}
     }
     return UserStats();
-  }
-
-  Future<void> saveLeaderboard(List<LeaderboardEntry> entries) async {
-    final list = entries.map((e) => e.toJson()).toList();
-    await _prefs.setString('leaderboard', jsonEncode(list));
-  }
-
-  List<LeaderboardEntry> loadLeaderboard() {
-    final data = _prefs.getString('leaderboard');
-    if (data != null) {
-      try {
-        final list = jsonDecode(data) as List;
-        return list.map((e) => LeaderboardEntry.fromJson(e)).toList();
-      } catch (_) {}
-    }
-    return [];
   }
 
   Future<void> saveDailyChallenge(DailyChallenge challenge) async {
@@ -336,7 +355,6 @@ class StreakService {
   }
 
   /// Checks all badge conditions and returns the updated badge list.
-  /// Also returns (via out-param pattern) which badge, if any, is new.
   List<String> checkBadges(UserStats stats) {
     final badges = <String>[...stats.badges];
 
@@ -368,7 +386,6 @@ class StreakService {
       badges.add('Well Rounded');
     }
 
-    // --- Added: extra achievements for goals / study timer / quizzes ---
     if (stats.goalsMetCount >= 7 && !badges.contains('Goal Getter')) badges.add('Goal Getter');
     if (stats.goalsMetCount >= 30 && !badges.contains('Goal Crusher')) badges.add('Goal Crusher');
 
@@ -418,20 +435,43 @@ class QuoteService {
   }
 }
 
+/// Real, shared leaderboard backed by Supabase — replaces the old
+/// on-device-only version, which could never show anyone else's scores
+/// and was never actually being written to.
 class LeaderboardService {
-  final StorageService storage = StorageService();
+  SupabaseClient get _client => Supabase.instance.client;
 
-  List<LeaderboardEntry> getTopEntries({int limit = 20}) {
-    final list = storage.loadLeaderboard();
-    list.sort((a, b) => b.xp.compareTo(a.xp));
-    return list.take(limit).toList();
+  Future<List<LeaderboardEntry>> getTopEntries({int limit = 50}) async {
+    try {
+      final rows = await _client
+          .from('leaderboard_entries')
+          .select()
+          .order('xp', ascending: false)
+          .limit(limit);
+      return (rows as List<dynamic>)
+          .map((r) => LeaderboardEntry.fromMap(r as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('[Leaderboard] getTopEntries failed: $e');
+      return [];
+    }
   }
 
-  Future<void> addEntry(String name, UserStats stats) async {
-    final list = storage.loadLeaderboard();
-    final entry = LeaderboardEntry(name: name, xp: stats.xp, level: stats.level, streak: stats.streak);
-    list.add(entry);
-    await storage.saveLeaderboard(list);
+  Future<void> upsertEntry({required String name, required UserStats stats}) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await _client.from('leaderboard_entries').upsert({
+        'user_id': user.id,
+        'username': name,
+        'xp': stats.xp,
+        'level': stats.level,
+        'streak': stats.streak,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[Leaderboard] upsertEntry failed: $e');
+    }
   }
 }
 
@@ -495,11 +535,22 @@ class AppProvider extends ChangeNotifier {
     if (name.trim().isEmpty) return;
     _userName = name.trim();
     notifyListeners();
+    _syncLeaderboard();
   }
+
+  /// Pushes the current XP/level/streak/name to the shared Supabase
+  /// leaderboard. Fire-and-forget — failures are logged, never surfaced
+  /// to the user, since this should never block normal app usage.
+  Future<void> _syncLeaderboard() async {
+    await _leaderboard.upsertEntry(name: _userName, stats: _stats);
+  }
+
+  /// Public trigger for an immediate leaderboard sync — call once after
+  /// login so a fresh account shows up right away.
+  Future<void> syncLeaderboardNow() => _syncLeaderboard();
 
   Future<void> addXP(int amount) async {
     _stats = _streak.addXP(_stats, amount);
-    // --- Added: track XP per-day for weekly stats ---
     final key = todayKey();
     final xpMap = Map<String, int>.from(_stats.dailyXp);
     xpMap[key] = (xpMap[key] ?? 0) + amount;
@@ -508,6 +559,7 @@ class AppProvider extends ChangeNotifier {
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
+    _syncLeaderboard();
   }
 
   Future<void> recordAnswer(String subject, int score, int total) async {
@@ -523,6 +575,7 @@ class AppProvider extends ChangeNotifier {
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
+    _syncLeaderboard();
   }
 
   double getSubjectScore(String subject) {
@@ -536,12 +589,6 @@ class AppProvider extends ChangeNotifier {
     final attempted = stats.subjectAttempts[subject] ?? 0;
     return masteryTierFor(getSubjectScore(subject), attempted);
   }
-
-  Future<void> submitLeaderboard() async {
-    await _leaderboard.addEntry(_userName, _stats);
-  }
-
-  List<LeaderboardEntry> getLeaderboard() => _leaderboard.getTopEntries();
 
   void _loadOrGenerateDailyChallenge() {
     final loaded = _storage.loadDailyChallengeFromDisk();
@@ -601,11 +648,6 @@ class AppProvider extends ChangeNotifier {
     return shuffled.take(count).toList();
   }
 
-  /// --- Added: generates a combined mock exam pulling questions from
-  /// several subjects at once (e.g. a 4-subject JAMB-style combo).
-  /// Each question is tagged with its originating subject under the
-  /// 'subject' key so results can be scored and recorded per-subject
-  /// once the exam is finished.
   List<Map<String, dynamic>> generateMockExamMulti(List<String> subjects, int perSubject) {
     final combined = <Map<String, dynamic>>[];
     for (final subject in subjects) {
@@ -663,7 +705,7 @@ class AppProvider extends ChangeNotifier {
       ];
 
   // =========================================================================
-  // --- Added: daily goals, study timer, weekly stats helpers ---
+  // Daily goals, study timer, weekly stats helpers
   // =========================================================================
 
   String todayKey() {
@@ -682,9 +724,6 @@ class AppProvider extends ChangeNotifier {
     map.removeWhere((k, _) => !validKeys.contains(k));
   }
 
-  /// Resets today's question/study counters if the stored date has rolled
-  /// over to a new day. Weekly/history maps (dailyXp, dailyAccuracy) are
-  /// never reset here — only the "today" counters.
   UserStats _rolloverDailyIfNeeded(UserStats s) {
     final key = todayKey();
     var result = s;
@@ -731,7 +770,6 @@ class AppProvider extends ChangeNotifier {
     map.removeWhere((k, _) => !validKeys.contains(k));
   }
 
-  /// Sets the daily goal (in number of questions answered per day).
   Future<void> setDailyGoal(int questions) async {
     _stats = _rolloverDailyIfNeeded(_stats).copyWith(dailyGoalQuestions: questions);
     await _storage.saveUserStats(_stats);
@@ -753,7 +791,10 @@ class AppProvider extends ChangeNotifier {
 
   bool get dailyGoalMet => questionsToday >= _stats.dailyGoalQuestions;
 
-  /// Adds completed study time (in seconds) from the study timer.
+  /// Adds completed study time (in seconds) from the study timer. Note:
+  /// this only tracks time — XP for studying is awarded separately by
+  /// StudyTimerScreen calling addXP(), so the timer actually contributes
+  /// to Rank/XP progress instead of just sitting there as a number.
   Future<void> addStudySeconds(int seconds) async {
     if (seconds <= 0) return;
     var s = _rolloverDailyIfNeeded(_stats);
@@ -775,7 +816,6 @@ class AppProvider extends ChangeNotifier {
 
   int get totalStudyMinutes => _stats.totalStudySeconds ~/ 60;
 
-  /// Last 7 days of XP earned, oldest first. Each entry is (label, xp).
   List<MapEntry<String, int>> getWeeklyXp() {
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final entries = <MapEntry<String, int>>[];
@@ -788,7 +828,6 @@ class AppProvider extends ChangeNotifier {
     return entries;
   }
 
-  /// Last 7 days of accuracy %, oldest first. Days with no attempts show 0.
   List<MapEntry<String, double>> getWeeklyAccuracy() {
     const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final entries = <MapEntry<String, double>>[];
@@ -834,7 +873,7 @@ void showBadgeAnnouncementIfAny(BuildContext context, AppProvider provider) {
 }
 
 /// =========================================================================
-/// CELEBRATION DIALOG (added — shown after quiz completion)
+/// CELEBRATION DIALOG (shown after quiz/exam completion)
 /// =========================================================================
 
 Future<void> showCelebrationDialog(
@@ -954,123 +993,158 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
 /// LEADERBOARD SCREEN
 /// =========================================================================
 
-class LeaderboardScreen extends StatelessWidget {
+class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context);
-    final entries = provider.getLeaderboard();
-    final scheme = Theme.of(context).colorScheme;
+  State<LeaderboardScreen> createState() => _LeaderboardScreenState();
+}
 
-    // --- Added: find current user's best rank/entry for a "Your Rank" card ---
-    int? myRank;
-    LeaderboardEntry? myEntry;
-    for (int i = 0; i < entries.length; i++) {
-      if (entries[i].name == provider.userName) {
-        myRank = i + 1;
-        myEntry = entries[i];
-        break;
-      }
-    }
+class _LeaderboardScreenState extends State<LeaderboardScreen> {
+  late Future<List<LeaderboardEntry>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = LeaderboardService().getTopEntries();
+  }
+
+  Future<void> _refresh() async {
+    final next = LeaderboardService().getTopEntries();
+    setState(() => _future = next);
+    await next;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final myUserId = Supabase.instance.client.auth.currentUser?.id;
 
     return Scaffold(
       appBar: AppBar(title: const Text('🏆 Leaderboard')),
-      body: Column(
-        children: [
-          if (myEntry != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [scheme.primary, scheme.primary.withOpacity(0.75)]),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.person_pin_circle_rounded, color: Colors.white, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<LeaderboardEntry>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final entries = snapshot.data ?? [];
+            int? myRank;
+            LeaderboardEntry? myEntry;
+            for (int i = 0; i < entries.length; i++) {
+              if (entries[i].userId == myUserId) {
+                myRank = i + 1;
+                myEntry = entries[i];
+                break;
+              }
+            }
+
+            return Column(
+              children: [
+                if (myEntry != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(colors: [scheme.primary, scheme.primary.withOpacity(0.75)]),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
                         children: [
-                          const Text('Your Rank', style: TextStyle(color: Colors.white, fontSize: 12)),
-                          Text('#$myRank of ${entries.length}',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                          const Icon(Icons.person_pin_circle_rounded, color: Colors.white, size: 28),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Your Rank', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                Text('#$myRank of ${entries.length}',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                              ],
+                            ),
+                          ),
+                          Text('${myEntry.xp} XP', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
-                    Text('${myEntry.xp} XP', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ),
-          Expanded(
-            child: entries.isEmpty
-                ? Center(
-                    child: Text('No entries yet. Be the first!',
-                        style: TextStyle(color: scheme.onSurfaceVariant)),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: entries.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (ctx, i) {
-                      final e = entries[i];
-                      final isTop3 = i < 3;
-                      final isMe = e.name == provider.userName && myRank == i + 1;
-                      final medalColors = [Colors.amber, Colors.grey, Colors.brown];
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(16),
-                          border: isTop3 ? Border.all(color: medalColors[i], width: 1.6) : null,
-                        ),
-                        child: Row(
+                  ),
+                Expanded(
+                  child: entries.isEmpty
+                      ? ListView(
                           children: [
-                            CircleAvatar(
-                              backgroundColor: isTop3 ? medalColors[i] : scheme.primaryContainer,
-                              child: Text('${i + 1}',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
+                            SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+                            Center(
+                              child: Text('No entries yet. Be the first!',
+                                  style: TextStyle(color: scheme.onSurfaceVariant)),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          ],
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: entries.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (ctx, i) {
+                            final e = entries[i];
+                            final isTop3 = i < 3;
+                            final isMe = e.userId == myUserId;
+                            final medalColors = [Colors.amber, Colors.grey, Colors.brown];
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(16),
+                                border: isTop3 ? Border.all(color: medalColors[i], width: 1.6) : null,
+                              ),
+                              child: Row(
                                 children: [
-                                  Row(
-                                    children: [
-                                      Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                                      if (isMe) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                          decoration: BoxDecoration(
-                                              color: scheme.primary, borderRadius: BorderRadius.circular(8)),
-                                          child: const Text('You',
-                                              style: TextStyle(fontSize: 10, color: Colors.white)),
-                                        ),
-                                      ],
-                                    ],
+                                  CircleAvatar(
+                                    backgroundColor: isTop3 ? medalColors[i] : scheme.primaryContainer,
+                                    child: Text('${i + 1}',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
                                   ),
-                                  Text('Level ${e.level} • Streak ${e.streak} days',
-                                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                            if (isMe) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                                decoration: BoxDecoration(
+                                                    color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+                                                child: const Text('You',
+                                                    style: TextStyle(fontSize: 10, color: Colors.white)),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        Text('${rankTitleForLevel(e.level)} (Lv. ${e.level}) • Streak ${e.streak} days',
+                                            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                      ],
+                                    ),
+                                  ),
+                                  Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
                                 ],
                               ),
-                            ),
-                            Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
-                          ],
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -1079,10 +1153,6 @@ class LeaderboardScreen extends StatelessWidget {
 /// =========================================================================
 /// MOCK EXAM SCREEN
 /// =========================================================================
-/// --- Updated: users can now pick up to 4 subjects for a combined exam,
-/// instead of being limited to a single subject. Each subject contributes
-/// the chosen number of questions, and results are recorded per-subject
-/// once the exam is finished.
 
 class MockExamScreen extends StatefulWidget {
   const MockExamScreen({super.key});
@@ -1201,11 +1271,9 @@ class _MockExamScreenState extends State<MockExamScreen> {
       questions: questions,
       title: 'Mock Exam — $subjectsLabel',
       onComplete: (score) {
-        // Fallback path (shouldn't normally be hit since onCompleteDetailed is provided).
         Navigator.pop(context);
       },
       onCompleteDetailed: (gradedQuestions) {
-        // Tally correctness per subject using the 'subject' tag on each question.
         final Map<String, int> correctBySubject = {};
         final Map<String, int> totalBySubject = {};
         int overallScore = 0;
@@ -1238,10 +1306,10 @@ class _MockExamScreenState extends State<MockExamScreen> {
 /// =========================================================================
 /// QUIZ SCREEN (reusable — for daily challenge and mock exams)
 /// =========================================================================
-/// --- Updated: added an optional onCompleteDetailed callback that returns
-/// each answered question tagged with whether it was answered correctly
-/// (and its 'subject', if present), so callers like the multi-subject
-/// mock exam can score/record results per subject.
+/// Redesigned to match the regular subject practice exams: selecting an
+/// answer never reveals whether it's right or wrong, and Previous/Next
+/// let you move freely between questions. Grading only happens once, when
+/// "Finish" is tapped on the last question — nothing is graded early.
 
 class QuizScreen extends StatefulWidget {
   final List<Map<String, dynamic>> questions;
@@ -1262,52 +1330,52 @@ class QuizScreen extends StatefulWidget {
 }
 
 class _QuizScreenState extends State<QuizScreen> {
-  int currentIndex = 0;
-  int score = 0;
-  int selectedOption = -1;
-  bool answered = false;
   late List<Map<String, dynamic>> shuffledQuestions;
-  final List<Map<String, dynamic>> _gradedQuestions = [];
+  late List<int?> _selectedAnswers;
+  int _currentIndex = 0;
+  bool _finishing = false;
 
   @override
   void initState() {
     super.initState();
     shuffledQuestions = List<Map<String, dynamic>>.from(widget.questions)..shuffle();
+    _selectedAnswers = List<int?>.filled(shuffledQuestions.length, null);
   }
 
-  void submitAnswer() {
-    if (selectedOption == -1) return;
-    final q = shuffledQuestions[currentIndex];
-    final isCorrect = selectedOption == q['correctIndex'];
-    if (isCorrect) score++;
-    _gradedQuestions.add({
-      ...q,
-      '__correct': isCorrect,
-    });
-    setState(() => answered = true);
+  void _selectOption(int i) {
+    setState(() => _selectedAnswers[_currentIndex] = i);
   }
 
-  Future<void> nextQuestion() async {
-    if (currentIndex < shuffledQuestions.length - 1) {
-      setState(() {
-        currentIndex++;
-        selectedOption = -1;
-        answered = false;
-      });
+  void _goTo(int index) {
+    if (index < 0 || index >= shuffledQuestions.length) return;
+    setState(() => _currentIndex = index);
+  }
+
+  Future<void> _finish() async {
+    if (_finishing) return;
+    setState(() => _finishing = true);
+
+    int score = 0;
+    final graded = <Map<String, dynamic>>[];
+    for (int i = 0; i < shuffledQuestions.length; i++) {
+      final q = shuffledQuestions[i];
+      final isCorrect = _selectedAnswers[i] != null && _selectedAnswers[i] == q['correctIndex'];
+      if (isCorrect) score++;
+      graded.add({...q, '__correct': isCorrect});
+    }
+
+    await showCelebrationDialog(
+      context,
+      score: score,
+      total: shuffledQuestions.length,
+      xpEarned: score * 2,
+    );
+    if (!mounted) return;
+
+    if (widget.onCompleteDetailed != null) {
+      widget.onCompleteDetailed!(graded);
     } else {
-      // --- Added: celebration dialog before reporting completion ---
-      await showCelebrationDialog(
-        context,
-        score: score,
-        total: shuffledQuestions.length,
-        xpEarned: score * 2,
-      );
-      if (!mounted) return;
-      if (widget.onCompleteDetailed != null) {
-        widget.onCompleteDetailed!(_gradedQuestions);
-      } else {
-        widget.onComplete(score);
-      }
+      widget.onComplete(score);
     }
   }
 
@@ -1322,132 +1390,137 @@ class _QuizScreenState extends State<QuizScreen> {
       );
     }
 
-    final q = shuffledQuestions[currentIndex];
+    final q = shuffledQuestions[_currentIndex];
     final options = List<String>.from(q['options']);
-    final correctIndex = q['correctIndex'] as int;
+    final answeredCount = _selectedAnswers.where((a) => a != null).length;
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.title), leading: const CloseButton()),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: (currentIndex + 1) / shuffledQuestions.length,
-                minHeight: 8,
-                backgroundColor: scheme.surfaceContainerHighest,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Column(
               children: [
-                Text('Question ${currentIndex + 1} of ${shuffledQuestions.length}',
-                    style: Theme.of(context).textTheme.bodySmall),
-                if (q['subject'] != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      q['subject'] as String,
-                      style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600),
-                    ),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: answeredCount / shuffledQuestions.length,
+                    minHeight: 8,
+                    backgroundColor: scheme.surfaceContainerHighest,
                   ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(q['question'] as String,
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4)),
-            ),
-            const SizedBox(height: 18),
-            Expanded(
-              child: ListView.builder(
-                itemCount: options.length,
-                itemBuilder: (context, i) {
-                  final isSelected = selectedOption == i;
-                  final isCorrectOption = i == correctIndex;
-                  Color? bg;
-                  Color borderColor = scheme.outlineVariant;
-                  if (answered) {
-                    if (isCorrectOption) {
-                      bg = Colors.green.withOpacity(0.15);
-                      borderColor = Colors.green;
-                    } else if (isSelected) {
-                      bg = Colors.red.withOpacity(0.15);
-                      borderColor = Colors.red;
-                    }
-                  } else if (isSelected) {
-                    bg = scheme.primaryContainer;
-                    borderColor = scheme.primary;
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Material(
-                      color: bg ?? scheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: answered ? null : () => setState(() => selectedOption = i),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: borderColor, width: isSelected || (answered && isCorrectOption) ? 2 : 1),
-                          ),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 14,
-                                backgroundColor: isSelected || (answered && isCorrectOption)
-                                    ? borderColor
-                                    : scheme.surfaceContainerHighest,
-                                child: Text(String.fromCharCode(65 + i),
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: isSelected || (answered && isCorrectOption)
-                                            ? Colors.white
-                                            : scheme.onSurfaceVariant)),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(child: Text(options[i], style: const TextStyle(fontSize: 15))),
-                            ],
-                          ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Question ${_currentIndex + 1} of ${shuffledQuestions.length}',
+                        style: Theme.of(context).textTheme.bodySmall),
+                    if (q['subject'] != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          q['subject'] as String,
+                          style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer, fontWeight: FontWeight.w600),
                         ),
                       ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: SingleChildScrollView(
+                key: ValueKey(_currentIndex),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+                      child: Text(q['question'] as String,
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4)),
                     ),
-                  );
-                },
+                    const SizedBox(height: 18),
+                    ...List.generate(options.length, (i) {
+                      final isSelected = _selectedAnswers[_currentIndex] == i;
+                      final letter = String.fromCharCode(65 + i);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Material(
+                          color: isSelected ? scheme.primaryContainer : scheme.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => _selectOption(i),
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isSelected ? scheme.primary : scheme.outlineVariant, width: isSelected ? 2 : 1),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 14,
+                                    backgroundColor: isSelected ? scheme.primary : scheme.surfaceContainerHighest,
+                                    child: Text(letter,
+                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant)),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(child: Text(options[i], style: const TextStyle(fontSize: 15))),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
               ),
             ),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: !answered
-                  ? FilledButton(
-                      onPressed: selectedOption == -1 ? null : submitAnswer,
-                      child: const Text('Submit Answer'),
-                    )
-                  : FilledButton(
-                      onPressed: nextQuestion,
-                      child: Text(currentIndex == shuffledQuestions.length - 1 ? 'Finish' : 'Next'),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _currentIndex > 0 ? () => _goTo(_currentIndex - 1) : null,
+                      icon: const Icon(Icons.chevron_left_rounded),
+                      label: const Text('Previous'),
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _currentIndex == shuffledQuestions.length - 1
+                        ? FilledButton.icon(
+                            onPressed: _finishing ? null : _finish,
+                            icon: const Icon(Icons.check_rounded),
+                            label: const Text('Finish'),
+                          )
+                        : FilledButton.icon(
+                            onPressed: () => _goTo(_currentIndex + 1),
+                            icon: const Icon(Icons.chevron_right_rounded),
+                            label: const Text('Next'),
+                          ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1495,7 +1568,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Marathoner': 'Answered 500 questions',
     'Iron Will': 'Answered 2,000 questions',
     'Well Rounded': 'Practiced every subject at least once',
-    // --- Added descriptions for new badges ---
     'Goal Getter': 'Met your daily goal 7 times',
     'Goal Crusher': 'Met your daily goal 30 times',
     'Study Buddy': 'Studied 60+ minutes with the timer',
@@ -1540,14 +1612,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 24),
           Row(
             children: [
-              _ProfileStat(label: 'Level', value: '${stats.level}', color: scheme.primary),
+              _ProfileStat(
+                label: 'Rank',
+                value: rankTitleForLevel(stats.level),
+                subtitle: 'Lv. ${stats.level}',
+                color: rankColor(stats.level),
+              ),
               const SizedBox(width: 10),
               _ProfileStat(label: 'XP', value: '${stats.xp}', color: Colors.amber),
               const SizedBox(width: 10),
               _ProfileStat(label: 'Streak', value: '${stats.streak}', color: Colors.deepOrange),
             ],
           ),
-          // --- Added: second row of profile stat cards (study + goal) ---
           const SizedBox(height: 10),
           Row(
             children: [
@@ -1558,7 +1634,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _ProfileStat(label: 'Goals Met', value: '${stats.goalsMetCount}', color: Colors.pink),
             ],
           ),
-          // --- Added: daily goal progress card ---
           const SizedBox(height: 20),
           Container(
             width: double.infinity,
@@ -1687,7 +1762,8 @@ class _ProfileStat extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  const _ProfileStat({required this.label, required this.value, required this.color});
+  final String? subtitle;
+  const _ProfileStat({required this.label, required this.value, required this.color, this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -1697,7 +1773,9 @@ class _ProfileStat extends StatelessWidget {
         decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
         child: Column(
           children: [
-            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color), textAlign: TextAlign.center),
+            if (subtitle != null)
+              Text(subtitle!, style: TextStyle(fontSize: 10, color: color.withOpacity(0.85))),
             const SizedBox(height: 2),
             Text(label, style: TextStyle(fontSize: 12, color: color), textAlign: TextAlign.center),
           ],
@@ -1737,17 +1815,15 @@ class AnalyticsScreen extends StatelessWidget {
                 const Text('Overall Performance', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 Text('Total XP: ${stats.xp}'),
-                Text('Level: ${stats.level}'),
+                Text('Rank: ${rankTitleForLevel(stats.level)} (Lv. ${stats.level})'),
                 Text('Streak: ${stats.streak} days'),
                 Text('Badges earned: ${stats.badges.length}'),
                 Text('Total questions attempted: ${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
-                // --- Added ---
                 Text('Total study time: ${provider.totalStudyMinutes} minutes'),
                 Text('Quizzes completed: ${stats.quizzesCompleted}'),
               ],
             ),
           ),
-          // --- Added: weekly XP + accuracy section ---
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(18),
@@ -1840,7 +1916,6 @@ class AnalyticsScreen extends StatelessWidget {
                       color: score >= 70 ? Colors.green : Colors.orange,
                     ),
                   ),
-                  // --- Added: subject progress bar ---
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: ClipRRect(
@@ -1864,7 +1939,7 @@ class AnalyticsScreen extends StatelessWidget {
 }
 
 /// =========================================================================
-/// GOAL SELECTOR SHEET (added)
+/// GOAL SELECTOR SHEET
 /// =========================================================================
 
 class GoalSelectorSheet extends StatelessWidget {
@@ -1919,8 +1994,13 @@ class GoalSelectorSheet extends StatelessWidget {
 }
 
 /// =========================================================================
-/// STUDY TIMER SCREEN (added)
+/// STUDY TIMER SCREEN
 /// =========================================================================
+/// Now actually contributes to progress: saving a session awards XP
+/// (2 XP per minute studied, capped at 120 counted minutes per single
+/// session so leaving the timer running indefinitely can't be abused for
+/// unlimited XP), in addition to tracking total study time and unlocking
+/// the Study Buddy / Study Master badges as before.
 
 class StudyTimerScreen extends StatefulWidget {
   const StudyTimerScreen({super.key});
@@ -1934,6 +2014,8 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
   int _elapsedSeconds = 0;
   bool _running = false;
   final String _quote = QuoteService.getRandomQuote();
+
+  static const int _maxXpEligibleMinutesPerSession = 120;
 
   void _toggle() {
     if (_running) {
@@ -1951,12 +2033,22 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
     _ticker?.cancel();
     final seconds = _elapsedSeconds;
     if (seconds > 0) {
-      await context.read<AppProvider>().addStudySeconds(seconds);
+      final provider = context.read<AppProvider>();
+      await provider.addStudySeconds(seconds);
+
+      final minutes = (seconds / 60).ceil();
+      final xpEligibleMinutes = minutes > _maxXpEligibleMinutesPerSession ? _maxXpEligibleMinutesPerSession : minutes;
+      final xpEarned = xpEligibleMinutes * 2;
+      if (xpEarned > 0) {
+        await provider.addXP(xpEarned);
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved $minutes minute${seconds >= 120 ? 's' : ''} of study time (+$xpEarned XP).')),
+      );
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Saved ${(seconds / 60).ceil()} minute${seconds >= 120 ? 's' : ''} of study time.')),
-    );
     setState(() {
       _elapsedSeconds = 0;
       _running = false;
@@ -2002,7 +2094,10 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
               child: Text('Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min',
                   style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 12),
+            Text('Earn 2 XP per minute studied (up to 120 min per session)',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+            const SizedBox(height: 28),
             Text(_formatted,
                 style: const TextStyle(fontSize: 56, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
             const SizedBox(height: 40),
@@ -2052,7 +2147,7 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
 }
 
 /// =========================================================================
-/// WEEKLY STATS SCREEN (added)
+/// WEEKLY STATS SCREEN
 /// =========================================================================
 
 class WeeklyStatsScreen extends StatelessWidget {
