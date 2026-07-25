@@ -54,6 +54,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_enhancements.dart';
 import 'certification.dart';
+import 'career_features.dart';
 
 import 'questions_english.dart';
 import 'questions_accounting.dart';
@@ -1096,6 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+            const SliverToBoxAdapter(child: StreakSaverBanner()),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -1241,7 +1243,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text('${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
+                      Text(dailyGoalStatusText(provider),
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ),
@@ -1251,26 +1253,27 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: SizedBox(
-                  height: 44,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      _QuickActionChip(icon: Icons.leaderboard_rounded, label: 'Leaderboard', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.school_rounded, label: 'Mock Exam', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.person_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
-                      const SizedBox(width: 10),
-                      _QuickActionChip(icon: Icons.workspace_premium_rounded, label: 'Certification', onTap: () => _pickCertificationSubject(context)),
-                    ],
-                  ),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _QuickActionChip(icon: Icons.leaderboard_rounded, label: 'Leaderboard', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
+                    _QuickActionChip(icon: Icons.school_rounded, label: 'Mock Exam', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
+                    _QuickActionChip(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
+                    _QuickActionChip(icon: Icons.person_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
+                    _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
+                    _QuickActionChip(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
+                    _QuickActionChip(icon: Icons.workspace_premium_rounded, label: 'Certification', onTap: () => _pickCertificationSubject(context)),
+                    _QuickActionChip(icon: Icons.psychology_alt_rounded, label: 'Study Coach', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
+                    _QuickActionChip(icon: Icons.insights_rounded, label: 'Score Predictor', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
+                    _QuickActionChip(icon: Icons.military_tech_rounded, label: 'Career Mode', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
+                    _QuickActionChip(icon: Icons.bolt_rounded, label: 'Quiz Battle', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
+                    _QuickActionChip(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
+                    _QuickActionChip(icon: Icons.auto_stories_rounded, label: 'Mistakes Vault', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
+                    _QuickActionChip(icon: Icons.star_rounded, label: 'Bookmarks', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BookmarksScreen()))),
+                    _QuickActionChip(icon: Icons.assignment_rounded, label: 'Report Card', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
+                  ],
                 ),
               ),
             ),
@@ -1726,6 +1729,16 @@ class _ExamScreenState extends State<ExamScreen> {
     provider.recordAnswer(widget.subject.name, correct, widget.questions.length);
     provider.addXP(correct * 10);
 
+    final wrongIds = <String>[];
+    for (int i = 0; i < widget.questions.length; i++) {
+      if (_selectedAnswers[i] == null || _selectedAnswers[i] != widget.questions[i].correctIndex) {
+        wrongIds.add(widget.questions[i].id);
+      }
+    }
+    if (wrongIds.isNotEmpty) {
+      MistakeVaultService.instance.recordWrongAnswers(subject: widget.subject.name, questionIds: wrongIds);
+    }
+
     CertificationService.instance.recordPracticeSession(
       subject: widget.subject.name,
       questionsAnswered: widget.questions.length,
@@ -1815,6 +1828,12 @@ class _ExamScreenState extends State<ExamScreen> {
                       label: const Text('Navigator'),
                     ),
                   ],
+                ),
+                PaceMeter(
+                  answeredCount: answeredCount,
+                  totalQuestions: widget.questions.length,
+                  remainingSeconds: _remainingSeconds,
+                  totalSeconds: widget.durationMinutes * 60,
                 ),
               ],
             ),
@@ -2300,6 +2319,16 @@ class ReviewScreen extends StatelessWidget {
                     Text(
                       !wasAnswered ? 'Skipped' : (isCorrect ? 'Correct' : 'Wrong'),
                       style: TextStyle(fontWeight: FontWeight.w600, color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.star_border_rounded),
+                      tooltip: 'Bookmark for later',
+                      onPressed: () async {
+                        await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
+                        }
+                      },
                     ),
                   ],
                 ),
