@@ -33,6 +33,7 @@ import 'questions_commerce.dart';
 import 'questions_geography.dart';
 import 'questions_irs.dart';
 import 'questions_arabic.dart';
+import 'career_features.dart' show dailyGoalStatusText;
 
 /// =========================================================================
 /// DATA MODELS
@@ -58,6 +59,7 @@ class UserStats {
   final int quizzesCompleted;
   final Map<String, int> dailyXp;
   final Map<String, List<int>> dailyAccuracy;
+  final int battlesWon;
 
   UserStats({
     this.xp = 0,
@@ -78,6 +80,7 @@ class UserStats {
     this.quizzesCompleted = 0,
     this.dailyXp = const {},
     this.dailyAccuracy = const {},
+    this.battlesWon = 0,
   }) : lastActive = lastActive ?? DateTime.now();
 
   UserStats copyWith({
@@ -99,6 +102,7 @@ class UserStats {
     int? quizzesCompleted,
     Map<String, int>? dailyXp,
     Map<String, List<int>>? dailyAccuracy,
+    int? battlesWon,
   }) {
     return UserStats(
       xp: xp ?? this.xp,
@@ -119,6 +123,7 @@ class UserStats {
       quizzesCompleted: quizzesCompleted ?? this.quizzesCompleted,
       dailyXp: dailyXp ?? this.dailyXp,
       dailyAccuracy: dailyAccuracy ?? this.dailyAccuracy,
+      battlesWon: battlesWon ?? this.battlesWon,
     );
   }
 
@@ -141,6 +146,7 @@ class UserStats {
         'quizzesCompleted': quizzesCompleted,
         'dailyXp': dailyXp,
         'dailyAccuracy': dailyAccuracy,
+        'battlesWon': battlesWon,
       };
 
   factory UserStats.fromJson(Map<String, dynamic> json) => UserStats(
@@ -165,6 +171,7 @@ class UserStats {
               (key, value) => MapEntry(key, List<int>.from(value as List)),
             ) ??
             {},
+        battlesWon: json['battlesWon'] ?? 0,
       );
 }
 
@@ -174,6 +181,7 @@ class LeaderboardEntry {
   final int xp;
   final int level;
   final int streak;
+  final String? avatarEmoji;
 
   LeaderboardEntry({
     required this.userId,
@@ -181,6 +189,7 @@ class LeaderboardEntry {
     required this.xp,
     required this.level,
     required this.streak,
+    this.avatarEmoji,
   });
 
   factory LeaderboardEntry.fromMap(Map<String, dynamic> map) => LeaderboardEntry(
@@ -189,6 +198,7 @@ class LeaderboardEntry {
         xp: (map['xp'] as num?)?.toInt() ?? 0,
         level: (map['level'] as num?)?.toInt() ?? 1,
         streak: (map['streak'] as num?)?.toInt() ?? 0,
+        avatarEmoji: map['avatar_emoji'] as String?,
       );
 }
 
@@ -331,6 +341,14 @@ class StorageService {
   bool loadDarkMode() {
     return _prefs.getBool('darkMode') ?? false;
   }
+
+  Future<void> saveAvatarEmoji(String emoji) async {
+    await _prefs.setString('avatarEmoji', emoji);
+  }
+
+  String loadAvatarEmoji() {
+    return _prefs.getString('avatarEmoji') ?? '🙂';
+  }
 }
 
 class StreakService {
@@ -404,6 +422,9 @@ class StreakService {
     }).length;
     if (perfectSubjects >= 1 && !badges.contains('Perfectionist')) badges.add('Perfectionist');
 
+    if (stats.battlesWon >= 1 && !badges.contains('Battle Winner')) badges.add('Battle Winner');
+    if (stats.battlesWon >= 10 && !badges.contains('Battle Champion')) badges.add('Battle Champion');
+
     return badges;
   }
 }
@@ -457,7 +478,7 @@ class LeaderboardService {
     }
   }
 
-  Future<void> upsertEntry({required String name, required UserStats stats}) async {
+  Future<void> upsertEntry({required String name, required UserStats stats, String? avatarEmoji}) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
     try {
@@ -467,6 +488,7 @@ class LeaderboardService {
         'xp': stats.xp,
         'level': stats.level,
         'streak': stats.streak,
+        'avatar_emoji': avatarEmoji,
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -487,12 +509,14 @@ class AppProvider extends ChangeNotifier {
   UserStats _stats = UserStats();
   bool _darkMode = false;
   String _userName = 'Student';
+  String _avatarEmoji = '🙂';
   DailyChallenge? _dailyChallenge;
   String? _pendingBadgeAnnouncement;
 
   UserStats get stats => _stats;
   bool get darkMode => _darkMode;
   String get userName => _userName;
+  String get avatarEmoji => _avatarEmoji;
   DailyChallenge? get dailyChallenge => _dailyChallenge;
   String? get pendingBadgeAnnouncement => _pendingBadgeAnnouncement;
 
@@ -504,6 +528,7 @@ class AppProvider extends ChangeNotifier {
     await _storage.init();
     _stats = _storage.loadUserStats();
     _darkMode = _storage.loadDarkMode();
+    _avatarEmoji = _storage.loadAvatarEmoji();
     _stats = _streak.checkStreak(_stats);
     _stats = _rolloverDailyIfNeeded(_stats);
     await _storage.saveUserStats(_stats);
@@ -538,16 +563,60 @@ class AppProvider extends ChangeNotifier {
     _syncLeaderboard();
   }
 
-  /// Pushes the current XP/level/streak/name to the shared Supabase
+  /// Pushes the current XP/level/streak/name/avatar to the shared Supabase
   /// leaderboard. Fire-and-forget — failures are logged, never surfaced
   /// to the user, since this should never block normal app usage.
   Future<void> _syncLeaderboard() async {
-    await _leaderboard.upsertEntry(name: _userName, stats: _stats);
+    await _leaderboard.upsertEntry(name: _userName, stats: _stats, avatarEmoji: _avatarEmoji);
   }
 
   /// Public trigger for an immediate leaderboard sync — call once after
   /// login so a fresh account shows up right away.
   Future<void> syncLeaderboardNow() => _syncLeaderboard();
+
+  /// Sets and persists the player's chosen avatar emoji (unlocked via
+  /// Career Mode), and syncs it to the shared leaderboard.
+  Future<void> setAvatarEmoji(String emoji) async {
+    _avatarEmoji = emoji;
+    await _storage.saveAvatarEmoji(emoji);
+    notifyListeners();
+    _syncLeaderboard();
+  }
+
+  /// Pushes this subject's current best accuracy to the shared, per-subject
+  /// Hall of Fame leaderboard. Skipped below 5 attempts to avoid noisy,
+  /// low-sample entries. Fire-and-forget, like the main leaderboard sync.
+  Future<void> _syncSubjectLeaderboard(String subject) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final attempts = _stats.subjectAttempts[subject] ?? 0;
+    if (attempts < 5) return;
+    try {
+      await Supabase.instance.client.from('subject_leaderboard').upsert({
+        'user_id': user.id,
+        'subject': subject,
+        'username': _userName,
+        'best_score': getSubjectScore(subject),
+        'attempts': attempts,
+        'avatar_emoji': _avatarEmoji,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[SubjectLeaderboard] sync failed: $e');
+    }
+  }
+
+  /// Records a Live Quiz Battle outcome — increments the win counter (which
+  /// feeds the Battle Winner / Battle Champion badges) when the battle was
+  /// won. XP for the battle is awarded separately by the caller.
+  Future<void> recordBattleResult({required bool won}) async {
+    if (won) {
+      _stats = _stats.copyWith(battlesWon: _stats.battlesWon + 1);
+      _applyBadgeCheck();
+      await _storage.saveUserStats(_stats);
+      notifyListeners();
+    }
+  }
 
   Future<void> addXP(int amount) async {
     _stats = _streak.addXP(_stats, amount);
@@ -576,6 +645,7 @@ class AppProvider extends ChangeNotifier {
     await _storage.saveUserStats(_stats);
     notifyListeners();
     _syncLeaderboard();
+    _syncSubjectLeaderboard(subject);
   }
 
   double getSubjectScore(String subject) {
@@ -1116,6 +1186,8 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                                       children: [
                                         Row(
                                           children: [
+                                            Text(e.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 14)),
+                                            const SizedBox(width: 6),
                                             Text(e.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                                             if (isMe) ...[
                                               const SizedBox(width: 6),
@@ -1670,7 +1742,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text('${provider.questionsToday} / ${provider.dailyGoalQuestions} questions today',
+                Text(dailyGoalStatusText(provider),
                     style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
               ],
             ),
