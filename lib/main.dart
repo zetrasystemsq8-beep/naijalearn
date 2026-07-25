@@ -8,6 +8,10 @@
 // exams, analytics) lives in app_enhancements.dart and plugs in via
 // AppProvider, without replacing any of the CBT screens below.
 // Certification eligibility tracking lives in certification.dart.
+// AI Study Coach, Score Predictor, Career Mode, Hall of Fame, Live Quiz
+// Battles, Mistakes Vault, Bookmarks, Report Card, and small shared
+// widgets (StreakSaverBanner, PaceMeter, dailyGoalStatusText) live in
+// career_features.dart.
 //
 // Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
 // Users are NOT created here — they must already have a Zetra account.
@@ -981,7 +985,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 }
 
 /// =========================================================================
-/// HOME SCREEN
+/// HOME SCREEN (root shell — bottom navigation, 5 tabs)
 /// =========================================================================
 
 class HomeScreen extends StatefulWidget {
@@ -994,19 +998,19 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  int _tabIndex = 0;
+
   @override
   void initState() {
     super.initState();
     final profile = widget.profile;
     if (profile != null) {
-      // Sync the real Zetra username into the gamification layer, and push
-      // an initial leaderboard entry so a fresh account shows up right away
-      // instead of only appearing after their first XP-earning action.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         final appProvider = context.read<AppProvider>();
         appProvider.setUserName(profile.username);
         appProvider.syncLeaderboardNow();
+        showBadgeAnnouncementIfAny(context, appProvider);
       });
     }
   }
@@ -1054,12 +1058,53 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = widget.profile;
+    final tabs = [
+      _HomeTab(profile: widget.profile, onPracticeSubject: (s) => _pickCountAndStart(context, s)),
+      _StudyTab(onPracticeSubject: (s) => _pickCountAndStart(context, s)),
+      const _CommunityTab(),
+      _ProgressTab(onPickCertificationSubject: () => _pickCertificationSubject(context)),
+      const _ProfileTab(),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(index: _tabIndex, children: tabs),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book_rounded), label: 'Study'),
+          NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: 'Community'),
+          NavigationDestination(icon: Icon(Icons.trending_up_rounded), selectedIcon: Icon(Icons.trending_up_rounded), label: 'Progress'),
+          NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// HOME TAB
+/// =========================================================================
+
+class _HomeTab extends StatelessWidget {
+  final ZetraProfile? profile;
+  final void Function(SubjectInfo) onPracticeSubject;
+  const _HomeTab({required this.profile, required this.onPracticeSubject});
+
+  @override
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final provider = context.watch<AppProvider>();
     final stats = provider.stats;
     final daily = provider.dailyChallenge;
     provider.refreshDailyChallengeIfNeeded();
+
+    SubjectInfo? lastSubject;
+    if (provider.lastPracticedSubject.isNotEmpty) {
+      final matches = kSubjects.where((s) => s.name == provider.lastPracticedSubject);
+      lastSubject = matches.isEmpty ? null : matches.first;
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -1082,16 +1127,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Text('NaijaLearn', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                           Text(
-                            profile != null ? 'Welcome, ${profile.username}' : 'Choose a subject to practice',
+                            profile != null ? 'Welcome back, ${profile.username}' : 'Practice. Prepare. Pass.',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Toggle dark mode',
-                      onPressed: provider.toggleDarkMode,
-                      icon: Icon(provider.darkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
                     ),
                   ],
                 ),
@@ -1101,57 +1141,14 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: GestureDetector(
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen())),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
-                    child: Row(
-                      children: [
-                        _StatPill(icon: Icons.local_fire_department_rounded, color: Colors.deepOrange, value: '${stats.streak}', label: 'Streak'),
-                        _StatPill(icon: Icons.star_rounded, color: Colors.amber, value: '${stats.xp}', label: 'XP'),
-                        _StatPill(
-                          icon: Icons.military_tech_rounded,
-                          color: rankColor(stats.level),
-                          value: rankTitleForLevel(stats.level),
-                          label: 'Rank',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
                 child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    gradient: LinearGradient(
-                      colors: [scheme.primary, scheme.primary.withOpacity(0.75)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
                   child: Row(
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('CBT Practice Mode',
-                                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Simulate real exam conditions with a timer,\nquestion navigator and instant results.',
-                              style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12.5, height: 1.4),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.bolt_rounded, color: Colors.white.withOpacity(0.85), size: 42),
+                      _StatPill(icon: Icons.local_fire_department_rounded, color: Colors.deepOrange, value: '${stats.streak}', label: 'Streak'),
+                      _StatPill(icon: Icons.star_rounded, color: Colors.amber, value: '${stats.xp}', label: 'XP'),
+                      _StatPill(icon: Icons.military_tech_rounded, color: rankColor(stats.level), value: rankTitleForLevel(stats.level), label: 'Rank'),
                     ],
                   ),
                 ),
@@ -1159,7 +1156,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
@@ -1213,15 +1210,49 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
+            if (lastSubject != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Material(
                     color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => onPracticeSubject(lastSubject!),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(color: lastSubject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
+                              child: Icon(lastSubject.icon, color: lastSubject.color),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Continue Studying', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  Text(lastSubject.name, style: Theme.of(context).textTheme.bodySmall),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right_rounded),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
+                ),
+              ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1243,8 +1274,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(dailyGoalStatusText(provider),
-                          style: Theme.of(context).textTheme.bodySmall),
+                      Text(dailyGoalStatusText(provider), style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ),
                 ),
@@ -1253,50 +1283,70 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _QuickActionChip(icon: Icons.leaderboard_rounded, label: 'Leaderboard', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-                    _QuickActionChip(icon: Icons.school_rounded, label: 'Mock Exam', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
-                    _QuickActionChip(icon: Icons.bar_chart_rounded, label: 'Analytics', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
-                    _QuickActionChip(icon: Icons.person_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
-                    _QuickActionChip(icon: Icons.timer_rounded, label: 'Study Timer', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
-                    _QuickActionChip(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
-                    _QuickActionChip(icon: Icons.workspace_premium_rounded, label: 'Certification', onTap: () => _pickCertificationSubject(context)),
-                    _QuickActionChip(icon: Icons.psychology_alt_rounded, label: 'Study Coach', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
-                    _QuickActionChip(icon: Icons.insights_rounded, label: 'Score Predictor', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
-                    _QuickActionChip(icon: Icons.military_tech_rounded, label: 'Career Mode', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
-                    _QuickActionChip(icon: Icons.bolt_rounded, label: 'Quiz Battle', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
-                    _QuickActionChip(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
-                    _QuickActionChip(icon: Icons.auto_stories_rounded, label: 'Mistakes Vault', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
-                    _QuickActionChip(icon: Icons.star_rounded, label: 'Bookmarks', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BookmarksScreen()))),
-                    _QuickActionChip(icon: Icons.assignment_rounded, label: 'Report Card', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
-                  ],
+                child: Text('Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 96,
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: kSubjects.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final subject = kSubjects[i];
+                    return Material(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(18),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: () => onPracticeSubject(subject),
+                        child: Container(
+                          width: 84,
+                          padding: const EdgeInsets.all(10),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(subject.icon, color: subject.color, size: 26),
+                              const SizedBox(height: 6),
+                              Text(subject.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                  textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 14,
-                  crossAxisSpacing: 14,
-                  childAspectRatio: 1.15,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final subject = kSubjects[index];
-                    final count = QuestionRepository.getForSubject(subject.name).length;
-                    return SubjectCard(
-                      subject: subject,
-                      questionCount: count,
-                      onTap: () => _pickCountAndStart(context, subject),
-                    );
-                  },
-                  childCount: kSubjects.length,
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _HomeQuickCard(
+                        icon: Icons.school_rounded,
+                        label: 'Mock Exam',
+                        color: scheme.primary,
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen())),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _HomeQuickCard(
+                        icon: Icons.psychology_alt_rounded,
+                        label: 'AI Study Coach',
+                        color: Colors.deepPurple,
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen())),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1306,6 +1356,270 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
+class _HomeQuickCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _HomeQuickCard({required this.icon, required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(height: 8),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// STUDY TAB
+/// =========================================================================
+
+class _StudyTab extends StatelessWidget {
+  final void Function(SubjectInfo) onPracticeSubject;
+  const _StudyTab({required this.onPracticeSubject});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('📚 Study'), automaticallyImplyLeading: false),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _MenuTile(icon: Icons.school_rounded, label: 'Mock Exam', subtitle: 'JAMB-style, up to 4 subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
+                  _MenuTile(icon: Icons.psychology_alt_rounded, label: 'AI Study Coach', subtitle: 'Personalized focus plan', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
+                  _MenuTile(icon: Icons.auto_stories_rounded, label: 'Mistakes Vault', subtitle: 'Review questions you got wrong', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
+                  _MenuTile(icon: Icons.star_rounded, label: 'Bookmarks', subtitle: 'Your saved questions', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BookmarksScreen()))),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              child: Text('All Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 14,
+                crossAxisSpacing: 14,
+                childAspectRatio: 1.15,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final subject = kSubjects[index];
+                  final count = QuestionRepository.getForSubject(subject.name).length;
+                  return SubjectCard(
+                    subject: subject,
+                    questionCount: count,
+                    onTap: () => onPracticeSubject(subject),
+                  );
+                },
+                childCount: kSubjects.length,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// COMMUNITY TAB
+/// =========================================================================
+
+class _CommunityTab extends StatelessWidget {
+  const _CommunityTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('🏆 Community'), automaticallyImplyLeading: false),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _MenuTile(icon: Icons.leaderboard_rounded, label: 'Leaderboard', subtitle: 'See how you rank', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
+          _MenuTile(icon: Icons.bolt_rounded, label: 'Quiz Battle', subtitle: 'Live head-to-head challenge', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
+          _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// PROGRESS TAB (includes Achievements sub-section)
+/// =========================================================================
+
+class _ProgressTab extends StatelessWidget {
+  final VoidCallback onPickCertificationSubject;
+  const _ProgressTab({required this.onPickCertificationSubject});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('🎓 Progress'), automaticallyImplyLeading: false),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _MenuTile(icon: Icons.bar_chart_rounded, label: 'Analytics', subtitle: 'Overall performance breakdown', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
+          _MenuTile(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', subtitle: 'XP and accuracy this week', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
+          _MenuTile(icon: Icons.assignment_rounded, label: 'Report Card', subtitle: 'Shareable summary', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
+          _MenuTile(icon: Icons.insights_rounded, label: 'Score Predictor', subtitle: 'Estimated JAMB score', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Achievements', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          _MenuTile(icon: Icons.workspace_premium_rounded, label: 'Certification', subtitle: 'Earn a verified certificate', onTap: onPickCertificationSubject),
+          _MenuTile(icon: Icons.military_tech_rounded, label: 'Career Mode', subtitle: 'Ranks, tiers & avatars', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// PROFILE TAB
+/// =========================================================================
+
+class _ProfileTab extends StatelessWidget {
+  const _ProfileTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppProvider>();
+    final stats = provider.stats;
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('👤 Profile'), automaticallyImplyLeading: false),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Material(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen())),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: scheme.primaryContainer,
+                      child: Text(provider.avatarEmoji, style: const TextStyle(fontSize: 26)),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(provider.userName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text('${rankTitleForLevel(stats.level)} • ${stats.xp} XP', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
+          _MenuTile(icon: Icons.timer_rounded, label: 'Study Timer', subtitle: 'Track focused study sessions', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyTimerScreen()))),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          Container(
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
+            child: SwitchListTile(
+              secondary: Icon(provider.darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded),
+              title: const Text('Dark Mode'),
+              value: provider.darkMode,
+              onChanged: (_) => provider.toggleDarkMode(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Material(
+            color: scheme.errorContainer.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Sign Out?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sign Out')),
+                    ],
+                  ),
+                );
+                if (confirmed == true) {
+                  await AuthService.instance.signOut();
+                  if (context.mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (route) => false,
+                    );
+                  }
+                }
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.logout_rounded, color: Colors.red),
+                    SizedBox(width: 12),
+                    Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// SHARED WIDGETS
+/// =========================================================================
 
 class _StatPill extends StatelessWidget {
   final IconData icon;
@@ -1329,29 +1643,46 @@ class _StatPill extends StatelessWidget {
   }
 }
 
-class _QuickActionChip extends StatelessWidget {
+class _MenuTile extends StatelessWidget {
   final IconData icon;
   final String label;
+  final String subtitle;
   final VoidCallback onTap;
-  const _QuickActionChip({required this.icon, required this.label, required this.onTap});
+  const _MenuTile({required this.icon, required this.label, required this.subtitle, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(22),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Icon(icon, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-            ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: scheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+                  child: Icon(icon, color: scheme.primary),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                      Text(subtitle, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded),
+              ],
+            ),
           ),
         ),
       ),
@@ -2356,7 +2687,7 @@ class ReviewScreen extends StatelessWidget {
                       children: [
                         CircleAvatar(radius: 12, backgroundColor: scheme.surface, child: Text(String.fromCharCode(65 + i), style: const TextStyle(fontSize: 12))),
                         const SizedBox(width: 10),
-                        Expanded(child: Text(question.options[i], style: const TextStyle(fontSize: 13.5))),
+                        Expanded(child: Text(options[i], style: const TextStyle(fontSize: 13.5))),
                         if (isCorrectOption) const Icon(Icons.check_rounded, color: Colors.green, size: 18),
                         if (isSelectedOption && !isCorrectOption) const Icon(Icons.close_rounded, color: Colors.red, size: 18),
                       ],
