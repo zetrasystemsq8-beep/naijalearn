@@ -1,18 +1,18 @@
 // lib/career_features.dart
 //
-// AI Study Coach, JAMB Score Predictor, Career Mode, Hall of Fame,
-// Live Quiz Battles, Mistakes Vault, Bookmarks, Report Card, Streak
-// Saver banner, and the exam Pace Meter.
+// AI Study Coach, JAMB Score Predictor, Career Mode, Hall of Fame, Live
+// Quiz Battles, Mistakes Vault, Bookmarks, Report Card, Streak Saver
+// banner, and the exam Pace Meter.
 //
 // Weak-topic detection is SUBJECT-level, not sub-topic-level — the
-// question data has no topic tags (see certification.dart's own
-// comment on this), so "focus on Quadratic Equations" style output
-// would be fabricated. This coach instead says "focus on Mathematics"
-// honestly, based on real accuracy numbers.
+// question data has no topic tags (see certification.dart's own comment
+// on this), so "focus on Quadratic Equations" style output would be
+// fabricated. This coach instead says "focus on Mathematics" honestly,
+// based on real accuracy numbers.
 //
-// Score Predictor, and the "predicted marks gained" figures are
-// explicitly heuristic estimates from practice accuracy — not
-// official JAMB scoring — and are labelled as such in the UI.
+// Score Predictor's "predicted marks" figures are explicitly heuristic
+// estimates from practice accuracy — not official JAMB scoring — and are
+// labelled as such in the UI.
 
 import 'dart:async';
 import 'dart:math';
@@ -1171,7 +1171,7 @@ class _ScoreChip extends StatelessWidget {
 }
 
 /// =========================================================================
-/// 6. MISTAKES VAULT (bonus feature #1)
+/// 6. MISTAKES VAULT
 /// =========================================================================
 
 class MistakeVaultService {
@@ -1329,7 +1329,7 @@ class _MistakesVaultScreenState extends State<MistakesVaultScreen> {
 }
 
 /// =========================================================================
-/// 7. BOOKMARKS (bonus feature #2)
+/// 7. BOOKMARKS
 /// =========================================================================
 
 class BookmarkService {
@@ -1449,7 +1449,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
 }
 
 /// =========================================================================
-/// 8. SHAREABLE REPORT CARD (bonus feature #3)
+/// 8. SHAREABLE REPORT CARD
 /// =========================================================================
 
 class ReportCardScreen extends StatelessWidget {
@@ -1523,7 +1523,7 @@ Practice. Prepare. Pass. — NaijaLearn
 }
 
 /// =========================================================================
-/// 9. STREAK SAVER BANNER (bonus feature #4)
+/// 9. STREAK SAVER BANNER
 /// =========================================================================
 
 class StreakSaverBanner extends StatelessWidget {
@@ -1559,7 +1559,7 @@ class StreakSaverBanner extends StatelessWidget {
 }
 
 /// =========================================================================
-/// 10. LIVE PACE METER (bonus feature #5) — drop into any timed exam screen
+/// 10. LIVE PACE METER
 /// =========================================================================
 
 class PaceMeter extends StatelessWidget {
