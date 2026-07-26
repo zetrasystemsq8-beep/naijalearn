@@ -60,6 +60,7 @@ class UserStats {
   final Map<String, int> dailyXp;
   final Map<String, List<int>> dailyAccuracy;
   final int battlesWon;
+  final String lastPracticedSubject;
 
   UserStats({
     this.xp = 0,
@@ -81,6 +82,7 @@ class UserStats {
     this.dailyXp = const {},
     this.dailyAccuracy = const {},
     this.battlesWon = 0,
+    this.lastPracticedSubject = '',
   }) : lastActive = lastActive ?? DateTime.now();
 
   UserStats copyWith({
@@ -103,6 +105,7 @@ class UserStats {
     Map<String, int>? dailyXp,
     Map<String, List<int>>? dailyAccuracy,
     int? battlesWon,
+    String? lastPracticedSubject,
   }) {
     return UserStats(
       xp: xp ?? this.xp,
@@ -124,6 +127,7 @@ class UserStats {
       dailyXp: dailyXp ?? this.dailyXp,
       dailyAccuracy: dailyAccuracy ?? this.dailyAccuracy,
       battlesWon: battlesWon ?? this.battlesWon,
+      lastPracticedSubject: lastPracticedSubject ?? this.lastPracticedSubject,
     );
   }
 
@@ -147,6 +151,7 @@ class UserStats {
         'dailyXp': dailyXp,
         'dailyAccuracy': dailyAccuracy,
         'battlesWon': battlesWon,
+        'lastPracticedSubject': lastPracticedSubject,
       };
 
   factory UserStats.fromJson(Map<String, dynamic> json) => UserStats(
@@ -172,6 +177,7 @@ class UserStats {
             ) ??
             {},
         battlesWon: json['battlesWon'] ?? 0,
+        lastPracticedSubject: json['lastPracticedSubject'] ?? '',
       );
 }
 
@@ -517,6 +523,7 @@ class AppProvider extends ChangeNotifier {
   bool get darkMode => _darkMode;
   String get userName => _userName;
   String get avatarEmoji => _avatarEmoji;
+  String get lastPracticedSubject => _stats.lastPracticedSubject;
   DailyChallenge? get dailyChallenge => _dailyChallenge;
   String? get pendingBadgeAnnouncement => _pendingBadgeAnnouncement;
 
@@ -638,6 +645,7 @@ class AppProvider extends ChangeNotifier {
     _stats = _stats.copyWith(
       subjectScores: Map.from(_stats.subjectScores)..[subject] = newScore,
       subjectAttempts: Map.from(_stats.subjectAttempts)..[subject] = newAttempts,
+      lastPracticedSubject: subject,
     );
     _stats = _streak.checkStreak(_stats);
     _stats = _trackDailyProgress(correct: score, total: total);
@@ -1647,6 +1655,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Quiz Regular': 'Completed 10 quizzes',
     'Quiz Champion': 'Completed 50 quizzes',
     'Perfectionist': '100% accuracy in a subject (10+ attempts)',
+    'Battle Winner': 'Won a Live Quiz Battle',
+    'Battle Champion': 'Won 10 Live Quiz Battles',
   };
 
   @override
@@ -1669,10 +1679,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 shape: BoxShape.circle,
               ),
               child: Center(
-                child: Text(
-                  provider.userName.isNotEmpty ? provider.userName[0].toUpperCase() : '?',
-                  style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold),
-                ),
+                child: Text(provider.avatarEmoji, style: const TextStyle(fontSize: 40)),
               ),
             ),
           ),
