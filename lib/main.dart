@@ -1127,7 +1127,7 @@ class _HomeTab extends StatelessWidget {
                         children: [
                           Text('NaijaLearn', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                           Text(
-                            profile != null ? 'Welcome back, ${profile.username}' : 'Practice. Prepare. Pass.',
+                            profile != null ? 'Welcome back, ${profile!.username}' : 'Practice. Prepare. Pass.',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
