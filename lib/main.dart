@@ -2687,7 +2687,7 @@ class ReviewScreen extends StatelessWidget {
                       children: [
                         CircleAvatar(radius: 12, backgroundColor: scheme.surface, child: Text(String.fromCharCode(65 + i), style: const TextStyle(fontSize: 12))),
                         const SizedBox(width: 10),
-                        Expanded(child: Text(options[i], style: const TextStyle(fontSize: 13.5))),
+                        Expanded(child: Text(question.options[i], style: const TextStyle(fontSize: 13.5))),
                         if (isCorrectOption) const Icon(Icons.check_rounded, color: Colors.green, size: 18),
                         if (isSelectedOption && !isCorrectOption) const Icon(Icons.close_rounded, color: Colors.red, size: 18),
                       ],
