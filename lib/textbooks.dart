@@ -6,7 +6,7 @@
 // it only imports this one file and uses `allTextbooks`.
 
 import 'package:flutter/material.dart';
-
+import 'main.dart';
 import 'lessons_english.dart';
 import 'lessons_biology.dart';
 import 'lessons_physics.dart';
