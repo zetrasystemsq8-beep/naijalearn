@@ -12,6 +12,9 @@
 // Battles, Mistakes Vault, Bookmarks, Report Card, and small shared
 // widgets (StreakSaverBanner, PaceMeter, dailyGoalStatusText) live in
 // career_features.dart.
+// Textbooks (multi-subject lesson shelf) live in textbooks.dart.
+// Flashcards, Coin Shop, Spin Wheel, Exam Countdown, and Topic Mastery
+// live in features5.dart.
 //
 // Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
 // Users are NOT created here — they must already have a Zetra account.
@@ -59,6 +62,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_enhancements.dart';
 import 'certification.dart';
 import 'career_features.dart';
+import 'textbooks.dart';
+import 'features5.dart';
 
 import 'questions_english.dart';
 import 'questions_accounting.dart';
@@ -75,6 +80,7 @@ import 'questions_mathematics.dart';
 import 'questions_physics.dart';
 import 'questions_chemistry.dart';
 import 'lessons_english.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -90,8 +96,13 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppProvider()),
+        ChangeNotifierProvider.value(value: CoinService.instance),
+        ChangeNotifierProvider.value(value: FlashcardService.instance),
+        ChangeNotifierProvider.value(value: MasteryService.instance),
+      ],
       child: const NaijaLearnApp(),
     ),
   );
@@ -1387,64 +1398,7 @@ class _HomeQuickCard extends StatelessWidget {
     );
   }
 }
-/// =========================================================================
-/// LESSONS SCREEN
-/// =========================================================================
 
-class LessonsScreen extends StatelessWidget {
-  final String subject;
-  final List<Map<String, dynamic>> lessons;
-  const LessonsScreen({super.key, required this.subject, required this.lessons});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text('$subject Lessons')),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: lessons.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          final lesson = lessons[index];
-          return Material(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              title: Text(lesson['chapterTitle'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => LessonDetailScreen(
-                    title: lesson['chapterTitle'] as String,
-                    body: lesson['body'] as String,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class LessonDetailScreen extends StatelessWidget {
-  final String title;
-  final String body;
-  const LessonDetailScreen({super.key, required this.title, required this.body});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Text(body, style: const TextStyle(fontSize: 15, height: 1.6)),
-      ),
-    );
-  }
-}
 /// =========================================================================
 /// STUDY TAB
 /// =========================================================================
@@ -1465,6 +1419,8 @@ class _StudyTab extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _MenuTile(icon: Icons.library_books_rounded, label: 'Textbooks', subtitle: 'All subject lessons and notes', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TextbookShelfScreen()))),
+                  _MenuTile(icon: Icons.style_rounded, label: 'Flashcards', subtitle: 'Spaced-repetition revision cards', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlashcardsScreen()))),
                   _MenuTile(icon: Icons.school_rounded, label: 'Mock Exam', subtitle: 'JAMB-style, up to 4 subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
                   _MenuTile(icon: Icons.psychology_alt_rounded, label: 'AI Study Coach', subtitle: 'Personalized focus plan', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
                   _MenuTile(icon: Icons.auto_stories_rounded, label: 'Mistakes Vault', subtitle: 'Review questions you got wrong', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
@@ -1558,6 +1514,15 @@ class _ProgressTab extends StatelessWidget {
           _MenuTile(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', subtitle: 'XP and accuracy this week', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
           _MenuTile(icon: Icons.assignment_rounded, label: 'Report Card', subtitle: 'Shareable summary', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
           _MenuTile(icon: Icons.insights_rounded, label: 'Score Predictor', subtitle: 'Estimated JAMB score', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
+          _MenuTile(icon: Icons.track_changes_rounded, label: 'Topic Mastery', subtitle: 'Your mastery level by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TopicMasteryScreen()))),
+          _MenuTile(icon: Icons.hourglass_bottom_rounded, label: 'Exam Countdown', subtitle: 'Days left to your WAEC/WASSCE', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExamCountdownScreen()))),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Rewards', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          _MenuTile(icon: Icons.casino_rounded, label: 'Daily Spin', subtitle: 'Spin once a day for coins and XP', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SpinWheelScreen()))),
+          _MenuTile(icon: Icons.storefront_rounded, label: 'Coin Shop', subtitle: 'Spend coins on frames and titles', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CoinShopScreen()))),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2140,6 +2105,12 @@ class _ExamScreenState extends State<ExamScreen> {
       questionsAnswered: widget.questions.length,
       correctAnswers: correct,
       questionIdsCovered: widget.questions.map((q) => q.id).toSet(),
+    );
+
+    MasteryService.instance.recordSession(
+      subject: widget.subject.name,
+      correct: correct,
+      total: widget.questions.length,
     );
 
     Navigator.of(context).pushReplacement(
