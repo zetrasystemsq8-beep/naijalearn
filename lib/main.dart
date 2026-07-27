@@ -1398,7 +1398,64 @@ class _HomeQuickCard extends StatelessWidget {
     );
   }
 }
+/// =========================================================================
+/// LESSONS SCREEN
+/// =========================================================================
 
+class LessonsScreen extends StatelessWidget {
+  final String subject;
+  final List<Map<String, dynamic>> lessons;
+  const LessonsScreen({super.key, required this.subject, required this.lessons});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('$subject Lessons')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: lessons.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final lesson = lessons[index];
+          return Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              title: Text(lesson['chapterTitle'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LessonDetailScreen(
+                    title: lesson['chapterTitle'] as String,
+                    body: lesson['body'] as String,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class LessonDetailScreen extends StatelessWidget {
+  final String title;
+  final String body;
+  const LessonDetailScreen({super.key, required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Text(body, style: const TextStyle(fontSize: 15, height: 1.6)),
+      ),
+    );
+  }
+}
 /// =========================================================================
 /// STUDY TAB
 /// =========================================================================
