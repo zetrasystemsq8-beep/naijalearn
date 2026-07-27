@@ -1,20 +1,30 @@
 // lib/features5.dart
 //
 // Five new features bundled together so main.dart only needs one import:
-// 1. Flashcards + Spaced Repetition
-// 2. Coin Shop
+// 1. Flashcards + Spaced Repetition (Supabase-backed)
+// 2. Coin Shop (Supabase-backed) + Daily Login Bonus + Streak Freeze
 // 3. Spin Wheel Rewards (spends into Coin Shop, awards XP via AppProvider)
-// 4. Exam Countdown
-// 5. Topic Mastery Tracker
+// 4. Multi-Exam Countdown (Supabase-backed, tracks several exams at once)
+// 5. Topic Mastery Tracker (Supabase-backed) + Focus Mode
 //
 // Each feature has its own lightweight ChangeNotifier service so state is
 // shared and reactive across screens. Register CoinService, FlashcardService
 // and MasteryService as providers in main() alongside AppProvider.
+//
+// PERSISTENCE: CoinService, FlashcardService, ExamCountdownService, and
+// MasteryService all pull their data from Supabase the moment they're
+// first constructed (which happens at app launch, since main.dart
+// registers them via ChangeNotifierProvider.value(value: X.instance)),
+// and push every mutation back up the same fire-and-forget way the rest
+// of the app already does. Each has an `isLoaded` flag so screens can
+// show a spinner during that first fetch instead of flashing an empty
+// state.
 
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_enhancements.dart';
 
@@ -55,12 +65,17 @@ class Flashcard {
 }
 
 class FlashcardService extends ChangeNotifier {
-  FlashcardService._();
+  FlashcardService._() {
+    _init();
+  }
   static final FlashcardService instance = FlashcardService._();
 
-  final List<Flashcard> _cards = [];
-  int _nextId = 1;
+  SupabaseClient get _client => Supabase.instance.client;
 
+  final List<Flashcard> _cards = [];
+  bool _loaded = false;
+
+  bool get isLoaded => _loaded;
   List<Flashcard> get all => List.unmodifiable(_cards);
 
   List<Flashcard> forSubject(String subject) =>
@@ -72,23 +87,95 @@ class FlashcardService extends ChangeNotifier {
   List<String> get subjectsWithCards =>
       _cards.map((c) => c.subject).toSet().toList()..sort();
 
-  void addCard({required String subject, required String front, required String back}) {
-    _cards.add(Flashcard(id: 'fc${_nextId++}', subject: subject, front: front, back: back));
+  Future<void> _init() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _loaded = true;
+      notifyListeners();
+      return;
+    }
+    try {
+      final rows = await _client.from('flashcards').select().eq('user_id', user.id);
+      _cards
+        ..clear()
+        ..addAll((rows as List<dynamic>).map((r) {
+          final row = r as Map<String, dynamic>;
+          return Flashcard(
+            id: row['id'] as String,
+            subject: row['subject'] as String,
+            front: row['front'] as String,
+            back: row['back'] as String,
+            boxLevel: (row['box_level'] as num?)?.toInt() ?? 1,
+            nextReview: DateTime.tryParse(row['next_review'] as String? ?? '') ?? DateTime.now(),
+          );
+        }));
+    } catch (e) {
+      debugPrint('[FlashcardService] init failed: $e');
+    }
+    _loaded = true;
     notifyListeners();
   }
 
-  void deleteCard(String id) {
+  Future<void> addCard({required String subject, required String front, required String back}) async {
+    final user = _client.auth.currentUser;
+    final tempId = 'fc_local_${DateTime.now().microsecondsSinceEpoch}';
+    final card = Flashcard(id: tempId, subject: subject, front: front, back: back);
+    _cards.add(card);
+    notifyListeners();
+
+    if (user == null) return;
+    try {
+      final row = await _client.from('flashcards').insert({
+        'user_id': user.id,
+        'subject': subject,
+        'front': front,
+        'back': back,
+        'box_level': 1,
+        'next_review': DateTime.now().toIso8601String(),
+      }).select().single();
+
+      final idx = _cards.indexWhere((c) => c.id == tempId);
+      if (idx != -1) {
+        _cards[idx] = Flashcard(
+          id: row['id'] as String,
+          subject: subject,
+          front: front,
+          back: back,
+          boxLevel: 1,
+          nextReview: card.nextReview,
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[FlashcardService] addCard failed: $e');
+    }
+  }
+
+  Future<void> deleteCard(String id) async {
     _cards.removeWhere((c) => c.id == id);
     notifyListeners();
+    try {
+      await _client.from('flashcards').delete().eq('id', id);
+    } catch (e) {
+      debugPrint('[FlashcardService] deleteCard failed: $e');
+    }
   }
 
-  void recordResult(Flashcard card, bool correct) {
+  Future<void> recordResult(Flashcard card, bool correct) async {
     if (correct) {
       card.markCorrect();
     } else {
       card.markWrong();
     }
     notifyListeners();
+    try {
+      await _client.from('flashcards').update({
+        'box_level': card.boxLevel,
+        'next_review': card.nextReview.toIso8601String(),
+      }).eq('id', card.id);
+    } catch (e) {
+      debugPrint('[FlashcardService] recordResult push failed: $e');
+    }
   }
 }
 
@@ -98,6 +185,14 @@ class FlashcardsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final service = context.watch<FlashcardService>();
+
+    if (!service.isLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Flashcards')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final subjects = service.subjectsWithCards;
 
     return Scaffold(
@@ -330,7 +425,7 @@ class _FlashcardReviewScreenState extends State<FlashcardReviewScreen> {
 }
 
 /// =========================================================================
-/// 2. COIN SHOP
+/// 2. COIN SHOP + DAILY LOGIN BONUS + STREAK FREEZE
 /// =========================================================================
 
 class ShopItem {
@@ -342,14 +437,27 @@ class ShopItem {
 }
 
 class CoinService extends ChangeNotifier {
-  CoinService._();
+  CoinService._() {
+    _init();
+  }
   static final CoinService instance = CoinService._();
 
+  SupabaseClient get _client => Supabase.instance.client;
+
+  static const int _dailyLoginBonusCoins = 15;
+
   int _coins = 0;
+  int _streakFreezeCount = 0;
   final Set<String> _ownedItemIds = {};
+  String? _lastLoginBonusDate;
+  int? _pendingLoginBonusCoins;
+  bool _loaded = false;
 
   int get coins => _coins;
+  int get streakFreezeCount => _streakFreezeCount;
   Set<String> get ownedItemIds => Set.unmodifiable(_ownedItemIds);
+  int? get pendingLoginBonusCoins => _pendingLoginBonusCoins;
+  bool get isLoaded => _loaded;
 
   static const List<ShopItem> shopItems = [
     ShopItem(id: 'frame_gold', name: 'Gold Avatar Frame', emoji: '🖼️', cost: 100),
@@ -360,29 +468,153 @@ class CoinService extends ChangeNotifier {
     ShopItem(id: 'streak_freeze', name: 'Streak Freeze', emoji: '🧊', cost: 50),
   ];
 
-  void addCoins(int amount) {
-    _coins += amount;
+  String _todayKey() {
+    final d = DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _init() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _loaded = true;
+      notifyListeners();
+      return;
+    }
+    try {
+      final row = await _client.from('coin_wallets').select().eq('user_id', user.id).maybeSingle();
+      if (row != null) {
+        _coins = (row['coins'] as num?)?.toInt() ?? 0;
+        final owned = ((row['owned_items'] as List?) ?? []).cast<String>();
+        _ownedItemIds
+          ..clear()
+          ..addAll(owned.where((id) => id != 'streak_freeze'));
+        _streakFreezeCount = owned.where((id) => id == 'streak_freeze').length;
+        _lastLoginBonusDate = row['last_login_bonus_date'] as String?;
+      } else {
+        await _push();
+      }
+    } catch (e) {
+      debugPrint('[CoinService] init failed: $e');
+    }
+    _claimDailyLoginBonusIfNeeded();
+    _loaded = true;
     notifyListeners();
   }
 
+  void _claimDailyLoginBonusIfNeeded() {
+    final today = _todayKey();
+    if (_lastLoginBonusDate == today) return;
+    _coins += _dailyLoginBonusCoins;
+    _lastLoginBonusDate = today;
+    _pendingLoginBonusCoins = _dailyLoginBonusCoins;
+    _push();
+  }
+
+  /// Call once the bonus banner has been shown so it doesn't reappear
+  /// for the rest of the day.
+  void clearPendingLoginBonus() {
+    _pendingLoginBonusCoins = null;
+  }
+
+  List<String> _ownedItemsForStorage() => [
+        ..._ownedItemIds,
+        ...List.filled(_streakFreezeCount, 'streak_freeze'),
+      ];
+
+  Future<void> _push() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await _client.from('coin_wallets').upsert({
+        'user_id': user.id,
+        'coins': _coins,
+        'owned_items': _ownedItemsForStorage(),
+        'last_login_bonus_date': _lastLoginBonusDate,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[CoinService] push failed: $e');
+    }
+  }
+
+  void addCoins(int amount) {
+    _coins += amount;
+    notifyListeners();
+    _push();
+  }
+
+  /// Streak Freeze is consumable and stackable — buying it repeatedly
+  /// increases the count instead of being a one-time unlock like the
+  /// other shop items.
   bool purchase(ShopItem item) {
-    if (_ownedItemIds.contains(item.id)) return false;
     if (_coins < item.cost) return false;
+
+    if (item.id == 'streak_freeze') {
+      _coins -= item.cost;
+      _streakFreezeCount += 1;
+      notifyListeners();
+      _push();
+      return true;
+    }
+
+    if (_ownedItemIds.contains(item.id)) return false;
     _coins -= item.cost;
     _ownedItemIds.add(item.id);
     notifyListeners();
+    _push();
     return true;
   }
 
   bool owns(String id) => _ownedItemIds.contains(id);
+
+  /// Consumes one Streak Freeze to protect the current streak from
+  /// resetting after a missed day. Called from AppProvider when it
+  /// detects a gap — see the note in app_enhancements.dart. Returns
+  /// true if a freeze was available and consumed.
+  bool consumeStreakFreeze() {
+    if (_streakFreezeCount <= 0) return false;
+    _streakFreezeCount -= 1;
+    notifyListeners();
+    _push();
+    return true;
+  }
 }
 
-class CoinShopScreen extends StatelessWidget {
+class CoinShopScreen extends StatefulWidget {
   const CoinShopScreen({super.key});
+
+  @override
+  State<CoinShopScreen> createState() => _CoinShopScreenState();
+}
+
+class _CoinShopScreenState extends State<CoinShopScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final coinService = context.read<CoinService>();
+      final bonus = coinService.pendingLoginBonusCoins;
+      if (bonus != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Welcome back! +$bonus coins daily login bonus 🎁')),
+        );
+        coinService.clearPendingLoginBonus();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final coinService = context.watch<CoinService>();
+
+    if (!coinService.isLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Coin Shop')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Coin Shop'),
@@ -407,7 +639,35 @@ class CoinShopScreen extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final item = CoinService.shopItems[index];
+          final isStreakFreeze = item.id == 'streak_freeze';
           final owned = coinService.owns(item.id);
+
+          String subtitle;
+          if (isStreakFreeze) {
+            subtitle = '${coinService.streakFreezeCount} owned • ${item.cost} coins each — protects your streak on a missed day';
+          } else {
+            subtitle = owned ? 'Owned' : '${item.cost} coins';
+          }
+
+          Widget trailing;
+          if (!isStreakFreeze && owned) {
+            trailing = const Icon(Icons.check_circle_rounded, color: Colors.green);
+          } else {
+            trailing = FilledButton(
+              onPressed: coinService.coins >= item.cost
+                  ? () {
+                      final success = coinService.purchase(item);
+                      if (success) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('${item.name} purchased!')),
+                        );
+                      }
+                    }
+                  : null,
+              child: const Text('Buy'),
+            );
+          }
+
           return Material(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(16),
@@ -415,22 +675,8 @@ class CoinShopScreen extends StatelessWidget {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               leading: Text(item.emoji, style: const TextStyle(fontSize: 28)),
               title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(owned ? 'Owned' : '${item.cost} coins'),
-              trailing: owned
-                  ? const Icon(Icons.check_circle_rounded, color: Colors.green)
-                  : FilledButton(
-                      onPressed: coinService.coins >= item.cost
-                          ? () {
-                              final success = coinService.purchase(item);
-                              if (success) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('${item.name} purchased!')),
-                                );
-                              }
-                            }
-                          : null,
-                      child: const Text('Buy'),
-                    ),
+              subtitle: Text(subtitle),
+              trailing: trailing,
             ),
           );
         },
@@ -573,24 +819,109 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
 }
 
 /// =========================================================================
-/// 4. EXAM COUNTDOWN
+/// 4. MULTI-EXAM COUNTDOWN
 /// =========================================================================
 
+class ExamCountdownEntry {
+  final String id;
+  String examName;
+  DateTime examDate;
+  ExamCountdownEntry({required this.id, required this.examName, required this.examDate});
+}
+
 class ExamCountdownService extends ChangeNotifier {
-  ExamCountdownService._();
+  ExamCountdownService._() {
+    _init();
+  }
   static final ExamCountdownService instance = ExamCountdownService._();
 
-  String examName = 'WAEC/WASSCE';
-  DateTime? examDate;
+  SupabaseClient get _client => Supabase.instance.client;
 
-  void setExam({required String name, required DateTime date}) {
-    examName = name;
-    examDate = date;
+  final List<ExamCountdownEntry> _exams = [];
+  bool _loaded = false;
+
+  bool get isLoaded => _loaded;
+
+  List<ExamCountdownEntry> get exams {
+    final sorted = List<ExamCountdownEntry>.from(_exams);
+    sorted.sort((a, b) => a.examDate.compareTo(b.examDate));
+    return sorted;
+  }
+
+  Future<void> _init() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _loaded = true;
+      notifyListeners();
+      return;
+    }
+    try {
+      final rows = await _client.from('exam_countdowns').select().eq('user_id', user.id);
+      _exams
+        ..clear()
+        ..addAll((rows as List<dynamic>).map((r) {
+          final row = r as Map<String, dynamic>;
+          return ExamCountdownEntry(
+            id: row['id'] as String,
+            examName: row['exam_name'] as String,
+            examDate: DateTime.parse(row['exam_date'] as String),
+          );
+        }));
+    } catch (e) {
+      debugPrint('[ExamCountdownService] init failed: $e');
+    }
+    _loaded = true;
     notifyListeners();
   }
 
-  Duration? get timeRemaining =>
-      examDate == null ? null : examDate!.difference(DateTime.now());
+  Future<void> addExam({required String name, required DateTime date}) async {
+    final user = _client.auth.currentUser;
+    final tempId = 'exam_local_${DateTime.now().microsecondsSinceEpoch}';
+    final entry = ExamCountdownEntry(id: tempId, examName: name, examDate: date);
+    _exams.add(entry);
+    notifyListeners();
+
+    if (user == null) return;
+    try {
+      final row = await _client.from('exam_countdowns').insert({
+        'user_id': user.id,
+        'exam_name': name,
+        'exam_date': date.toIso8601String().split('T').first,
+      }).select().single();
+
+      final idx = _exams.indexWhere((e) => e.id == tempId);
+      if (idx != -1) {
+        _exams[idx] = ExamCountdownEntry(id: row['id'] as String, examName: name, examDate: date);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[ExamCountdownService] addExam failed: $e');
+    }
+  }
+
+  Future<void> removeExam(String id) async {
+    _exams.removeWhere((e) => e.id == id);
+    notifyListeners();
+    try {
+      await _client.from('exam_countdowns').delete().eq('id', id);
+    } catch (e) {
+      debugPrint('[ExamCountdownService] removeExam failed: $e');
+    }
+  }
+
+  Future<void> updateExamDate(String id, DateTime newDate) async {
+    final idx = _exams.indexWhere((e) => e.id == id);
+    if (idx == -1) return;
+    _exams[idx].examDate = newDate;
+    notifyListeners();
+    try {
+      await _client.from('exam_countdowns').update({
+        'exam_date': newDate.toIso8601String().split('T').first,
+      }).eq('id', id);
+    } catch (e) {
+      debugPrint('[ExamCountdownService] updateExamDate failed: $e');
+    }
+  }
 }
 
 class ExamCountdownScreen extends StatefulWidget {
@@ -617,73 +948,138 @@ class _ExamCountdownScreenState extends State<ExamCountdownScreen> {
     super.dispose();
   }
 
-  Future<void> _pickDate(BuildContext context) async {
-    final picked = await showDatePicker(
+  Future<void> _addExamDialog(BuildContext context) async {
+    final nameController = TextEditingController();
+    DateTime? pickedDate;
+
+    final confirmed = await showDialog<bool>(
       context: context,
-      initialDate: DateTime.now().add(const Duration(days: 90)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add Exam'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Exam name (e.g. WAEC, JAMB)'),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.calendar_month_rounded),
+                    label: Text(pickedDate == null
+                        ? 'Choose date'
+                        : '${pickedDate!.year}-${pickedDate!.month.toString().padLeft(2, '0')}-${pickedDate!.day.toString().padLeft(2, '0')}'),
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: DateTime.now().add(const Duration(days: 90)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => pickedDate = picked);
+                      }
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+                FilledButton(
+                  onPressed: (nameController.text.trim().isEmpty || pickedDate == null)
+                      ? null
+                      : () => Navigator.pop(dialogContext, true),
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
-    if (picked != null) {
-      ExamCountdownService.instance.setExam(name: ExamCountdownService.instance.examName, date: picked);
-      setState(() {});
+
+    if (confirmed == true && pickedDate != null) {
+      await ExamCountdownService.instance.addExam(name: nameController.text.trim(), date: pickedDate!);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final service = ExamCountdownService.instance;
-    final remaining = service.timeRemaining;
+    final service = context.watch<ExamCountdownService>();
     final scheme = Theme.of(context).colorScheme;
+
+    if (!service.isLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Exam Countdown')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final exams = service.exams;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Exam Countdown')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(service.examName,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 24),
-            if (remaining == null || remaining.isNegative)
-              Column(
-                children: [
-                  const Text('No exam date set yet.', textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: () => _pickDate(context),
-                    icon: const Icon(Icons.calendar_month_rounded),
-                    label: const Text('Set Exam Date'),
+      body: exams.isEmpty
+          ? const _EmptyState(
+              icon: Icons.hourglass_bottom_rounded,
+              title: 'No exams added yet',
+              subtitle: 'Tap + to add WAEC, JAMB, NECO, or any exam you\'re preparing for.',
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(20),
+              itemCount: exams.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 16),
+              itemBuilder: (context, index) {
+                final exam = exams[index];
+                final remaining = exam.examDate.difference(DateTime.now());
+                final isPast = remaining.isNegative;
+
+                return Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: isPast ? scheme.errorContainer.withOpacity(0.4) : scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ],
-              )
-            else
-              Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _CountdownUnit(value: remaining.inDays, label: 'Days'),
-                        _CountdownUnit(value: remaining.inHours % 24, label: 'Hours'),
-                        _CountdownUnit(value: remaining.inMinutes % 60, label: 'Min'),
-                        _CountdownUnit(value: remaining.inSeconds % 60, label: 'Sec'),
-                      ],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(exam.examName,
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            onPressed: () => ExamCountdownService.instance.removeExam(exam.id),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (isPast)
+                        const Text('This exam date has passed.', textAlign: TextAlign.center)
+                      else
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _CountdownUnit(value: remaining.inDays, label: 'Days'),
+                            _CountdownUnit(value: remaining.inHours % 24, label: 'Hours'),
+                            _CountdownUnit(value: remaining.inMinutes % 60, label: 'Min'),
+                            _CountdownUnit(value: remaining.inSeconds % 60, label: 'Sec'),
+                          ],
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  TextButton(onPressed: () => _pickDate(context), child: const Text('Change Date')),
-                ],
-              ),
-          ],
-        ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _addExamDialog(context),
+        child: const Icon(Icons.add_rounded),
       ),
     );
   }
@@ -710,7 +1106,7 @@ class _CountdownUnit extends StatelessWidget {
 }
 
 /// =========================================================================
-/// 5. TOPIC MASTERY TRACKER
+/// 5. TOPIC MASTERY TRACKER + FOCUS MODE
 /// =========================================================================
 
 class _MasteryTally {
@@ -719,16 +1115,63 @@ class _MasteryTally {
 }
 
 class MasteryService extends ChangeNotifier {
-  MasteryService._();
+  MasteryService._() {
+    _init();
+  }
   static final MasteryService instance = MasteryService._();
 
+  SupabaseClient get _client => Supabase.instance.client;
+
   final Map<String, _MasteryTally> _bySubject = {};
+  bool _loaded = false;
+
+  bool get isLoaded => _loaded;
+
+  Future<void> _init() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _loaded = true;
+      notifyListeners();
+      return;
+    }
+    try {
+      final rows = await _client.from('subject_mastery').select().eq('user_id', user.id);
+      _bySubject.clear();
+      for (final r in (rows as List<dynamic>)) {
+        final row = r as Map<String, dynamic>;
+        final tally = _MasteryTally();
+        tally.correct = (row['correct'] as num?)?.toInt() ?? 0;
+        tally.total = (row['total'] as num?)?.toInt() ?? 0;
+        _bySubject[row['subject'] as String] = tally;
+      }
+    } catch (e) {
+      debugPrint('[MasteryService] init failed: $e');
+    }
+    _loaded = true;
+    notifyListeners();
+  }
 
   void recordSession({required String subject, required int correct, required int total}) {
     final tally = _bySubject.putIfAbsent(subject, () => _MasteryTally());
     tally.correct += correct;
     tally.total += total;
     notifyListeners();
+    _push(subject, tally);
+  }
+
+  Future<void> _push(String subject, _MasteryTally tally) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await _client.from('subject_mastery').upsert({
+        'user_id': user.id,
+        'subject': subject,
+        'correct': tally.correct,
+        'total': tally.total,
+      });
+    } catch (e) {
+      debugPrint('[MasteryService] push failed: $e');
+    }
   }
 
   double masteryFor(String subject) {
@@ -752,6 +1195,14 @@ class TopicMasteryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final service = context.watch<MasteryService>();
+
+    if (!service.isLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Topic Mastery')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final subjects = service.trackedSubjects;
 
     return Scaffold(
@@ -801,6 +1252,123 @@ class TopicMasteryScreen extends StatelessWidget {
                   ),
                 );
               },
+            ),
+    );
+  }
+}
+
+/// Ranks the user's weakest subjects (from AppProvider's already-synced
+/// subjectScores/subjectAttempts) and offers a single tap into a mock
+/// exam targeting exactly those subjects.
+class FocusModeScreen extends StatelessWidget {
+  const FocusModeScreen({super.key});
+
+  static const int _minAttemptsToRank = 5;
+  static const int _questionsPerSubject = 15;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppProvider>();
+    final scheme = Theme.of(context).colorScheme;
+
+    final ranked = provider
+        .getAvailableSubjects()
+        .where((s) => (provider.stats.subjectAttempts[s] ?? 0) >= _minAttemptsToRank)
+        .map((s) => MapEntry(s, provider.getSubjectScore(s)))
+        .toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final weakest = ranked.take(3).toList();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('🎯 Focus Mode')),
+      body: weakest.isEmpty
+          ? _EmptyState(
+              icon: Icons.track_changes_rounded,
+              title: 'Not enough data yet',
+              subtitle: 'Practice at least $_minAttemptsToRank questions in a subject to see your weakest areas here.',
+            )
+          : ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                Text(
+                  'Your weakest subjects right now — a focused mock exam targeting these will help the most.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                ...weakest.map((e) => Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 6),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: LinearProgressIndicator(
+                                    value: (e.value / 100).clamp(0.0, 1.0),
+                                    minHeight: 8,
+                                    backgroundColor: scheme.surface,
+                                    valueColor: const AlwaysStoppedAnimation(Colors.orange),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text('${e.value.toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    )),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Start Focus Practice'),
+                    onPressed: () {
+                      final subjects = weakest.map((e) => e.key).toList();
+                      final questions = provider.generateMockExamMulti(subjects, _questionsPerSubject);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => QuizScreen(
+                            questions: questions,
+                            title: 'Focus Practice',
+                            onComplete: (score) => Navigator.pop(context),
+                            onCompleteDetailed: (graded) {
+                              final Map<String, int> correctBySubject = {};
+                              final Map<String, int> totalBySubject = {};
+                              int overall = 0;
+                              for (final gq in graded) {
+                                final subject = gq['subject'] as String? ?? 'Unknown';
+                                final wasCorrect = gq['__correct'] as bool? ?? false;
+                                totalBySubject[subject] = (totalBySubject[subject] ?? 0) + 1;
+                                if (wasCorrect) {
+                                  correctBySubject[subject] = (correctBySubject[subject] ?? 0) + 1;
+                                  overall++;
+                                }
+                              }
+                              for (final subject in subjects) {
+                                provider.recordAnswer(subject, correctBySubject[subject] ?? 0, totalBySubject[subject] ?? 0);
+                              }
+                              provider.addXP(overall * 2);
+                              Navigator.pop(context);
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
     );
   }
