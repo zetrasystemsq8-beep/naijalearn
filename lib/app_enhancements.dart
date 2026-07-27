@@ -11,6 +11,19 @@
 // changes (see AppProvider._syncLeaderboard), keyed by their Supabase
 // user id — not by display name, so duplicate/changed names never cause
 // duplicate rows or a broken "Your Rank" lookup.
+//
+// UserStats itself (XP, streak, badges, daily goal, study time, dark
+// mode, avatar) is now ALSO backed by Supabase (table: user_stats), via
+// UserStatsSyncService. SharedPreferences is kept as a fast local cache
+// so the UI has something to show instantly on launch, but Supabase is
+// the source of truth: on startup, AppProvider pulls the remote row (if
+// one exists) and overwrites the local cache with it; every mutation
+// (addXP, recordAnswer, dark mode toggle, avatar change, daily goal,
+// study seconds, battle wins) pushes the updated stats back up,
+// fire-and-forget, the same way the leaderboard sync already works.
+// If no remote row exists yet (brand-new account, or first launch after
+// this feature shipped), the current local data is pushed up instead so
+// the remote row gets seeded rather than silently staying empty.
 
 import 'dart:convert';
 import 'dart:async';
@@ -503,6 +516,48 @@ class LeaderboardService {
   }
 }
 
+/// Persists the full UserStats blob (plus dark mode + avatar) to Supabase
+/// (table: user_stats) so progress follows the user across devices
+/// instead of staying stuck on-device in SharedPreferences. Mirrors the
+/// same fire-and-forget pattern already used for the leaderboard sync —
+/// failures are logged, never surfaced to the user, since this must
+/// never block normal app usage.
+class UserStatsSyncService {
+  SupabaseClient get _client => Supabase.instance.client;
+
+  Future<Map<String, dynamic>?> fetchRemote() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return null;
+    try {
+      final row = await _client.from('user_stats').select().eq('user_id', user.id).maybeSingle();
+      return row;
+    } catch (e) {
+      debugPrint('[UserStatsSync] fetchRemote failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> pushRemote({
+    required UserStats stats,
+    required bool darkMode,
+    required String avatarEmoji,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await _client.from('user_stats').upsert({
+        'user_id': user.id,
+        'data': stats.toJson(),
+        'dark_mode': darkMode,
+        'avatar_emoji': avatarEmoji,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[UserStatsSync] pushRemote failed: $e');
+    }
+  }
+}
+
 /// =========================================================================
 /// APP PROVIDER (state management)
 /// =========================================================================
@@ -511,6 +566,7 @@ class AppProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
   final StreakService _streak = StreakService();
   final LeaderboardService _leaderboard = LeaderboardService();
+  final UserStatsSyncService _statsSync = UserStatsSyncService();
 
   UserStats _stats = UserStats();
   bool _darkMode = false;
@@ -539,8 +595,43 @@ class AppProvider extends ChangeNotifier {
     _stats = _streak.checkStreak(_stats);
     _stats = _rolloverDailyIfNeeded(_stats);
     await _storage.saveUserStats(_stats);
+
+    // Local cache is loaded above so the UI has something to show right
+    // away. Now reconcile with Supabase — the real source of truth.
+    await _pullFromSupabase();
+
     _loadOrGenerateDailyChallenge();
     notifyListeners();
+  }
+
+  /// Pulls this user's stats/dark-mode/avatar from Supabase on startup so
+  /// progress follows them across devices. If no remote row exists yet
+  /// (brand-new account, or first launch after this feature shipped),
+  /// the current local data is pushed up instead so the remote row gets
+  /// seeded rather than silently staying empty.
+  Future<void> _pullFromSupabase() async {
+    final remote = await _statsSync.fetchRemote();
+    final remoteData = remote?['data'];
+    if (remote != null && remoteData != null) {
+      try {
+        _stats = UserStats.fromJson(Map<String, dynamic>.from(remoteData as Map));
+        _darkMode = remote['dark_mode'] as bool? ?? _darkMode;
+        _avatarEmoji = remote['avatar_emoji'] as String? ?? _avatarEmoji;
+        await _storage.saveUserStats(_stats);
+        await _storage.saveDarkMode(_darkMode);
+        await _storage.saveAvatarEmoji(_avatarEmoji);
+      } catch (e) {
+        debugPrint('[AppProvider] Failed to parse remote stats, keeping local: $e');
+      }
+    } else {
+      await _pushToSupabase();
+    }
+  }
+
+  /// Fire-and-forget push of the current stats/dark-mode/avatar to
+  /// Supabase. Called after every mutation below.
+  Future<void> _pushToSupabase() async {
+    await _statsSync.pushRemote(stats: _stats, darkMode: _darkMode, avatarEmoji: _avatarEmoji);
   }
 
   void _applyBadgeCheck() {
@@ -561,6 +652,7 @@ class AppProvider extends ChangeNotifier {
     _darkMode = !_darkMode;
     _storage.saveDarkMode(_darkMode);
     notifyListeners();
+    _pushToSupabase();
   }
 
   void setUserName(String name) {
@@ -582,12 +674,13 @@ class AppProvider extends ChangeNotifier {
   Future<void> syncLeaderboardNow() => _syncLeaderboard();
 
   /// Sets and persists the player's chosen avatar emoji (unlocked via
-  /// Career Mode), and syncs it to the shared leaderboard.
+  /// Career Mode), and syncs it to the shared leaderboard and stats table.
   Future<void> setAvatarEmoji(String emoji) async {
     _avatarEmoji = emoji;
     await _storage.saveAvatarEmoji(emoji);
     notifyListeners();
     _syncLeaderboard();
+    _pushToSupabase();
   }
 
   /// Pushes this subject's current best accuracy to the shared, per-subject
@@ -622,6 +715,7 @@ class AppProvider extends ChangeNotifier {
       _applyBadgeCheck();
       await _storage.saveUserStats(_stats);
       notifyListeners();
+      _pushToSupabase();
     }
   }
 
@@ -636,6 +730,7 @@ class AppProvider extends ChangeNotifier {
     await _storage.saveUserStats(_stats);
     notifyListeners();
     _syncLeaderboard();
+    _pushToSupabase();
   }
 
   Future<void> recordAnswer(String subject, int score, int total) async {
@@ -654,6 +749,7 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
     _syncLeaderboard();
     _syncSubjectLeaderboard(subject);
+    _pushToSupabase();
   }
 
   double getSubjectScore(String subject) {
@@ -852,6 +948,7 @@ class AppProvider extends ChangeNotifier {
     _stats = _rolloverDailyIfNeeded(_stats).copyWith(dailyGoalQuestions: questions);
     await _storage.saveUserStats(_stats);
     notifyListeners();
+    _pushToSupabase();
   }
 
   int get dailyGoalQuestions => _stats.dailyGoalQuestions;
@@ -885,6 +982,7 @@ class AppProvider extends ChangeNotifier {
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
     notifyListeners();
+    _pushToSupabase();
   }
 
   int get studyMinutesToday {
