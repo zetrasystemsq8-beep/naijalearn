@@ -24,6 +24,12 @@
 // If no remote row exists yet (brand-new account, or first launch after
 // this feature shipped), the current local data is pushed up instead so
 // the remote row gets seeded rather than silently staying empty.
+//
+// STREAK FREEZE: StreakService.checkStreak now consults CoinService
+// (features5.dart) before resetting a streak after a missed day. If the
+// user owns at least one Streak Freeze, one is consumed and the streak
+// is preserved instead of reset to zero — making the Coin Shop's Streak
+// Freeze item actually functional instead of a no-op purchase.
 
 import 'dart:convert';
 import 'dart:async';
@@ -47,6 +53,7 @@ import 'questions_geography.dart';
 import 'questions_irs.dart';
 import 'questions_arabic.dart';
 import 'career_features.dart' show dailyGoalStatusText;
+import 'features5.dart' show CoinService;
 
 /// =========================================================================
 /// DATA MODELS
@@ -371,7 +378,12 @@ class StorageService {
 }
 
 class StreakService {
-  UserStats checkStreak(UserStats stats) {
+  /// Advances or resets the streak based on how many days have passed
+  /// since lastActive. On a missed day (gap > 1 day), a Streak Freeze
+  /// (CoinService) is consumed automatically if the user owns one —
+  /// preserving the current streak count instead of resetting it to
+  /// zero. If no freeze is available, the streak resets as before.
+  Future<UserStats> checkStreak(UserStats stats) async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final last = DateTime(stats.lastActive.year, stats.lastActive.month, stats.lastActive.day);
@@ -381,6 +393,12 @@ class StreakService {
     } else if (today.difference(last).inDays == 1) {
       return stats.copyWith(streak: stats.streak + 1, lastActive: now);
     } else {
+      final freezeUsed = CoinService.instance.consumeStreakFreeze();
+      if (freezeUsed) {
+        // Streak preserved — just bump lastActive so we don't re-check
+        // (and re-consume another freeze) on the very next launch today.
+        return stats.copyWith(lastActive: now);
+      }
       return stats.copyWith(streak: 0, lastActive: now);
     }
   }
@@ -592,7 +610,7 @@ class AppProvider extends ChangeNotifier {
     _stats = _storage.loadUserStats();
     _darkMode = _storage.loadDarkMode();
     _avatarEmoji = _storage.loadAvatarEmoji();
-    _stats = _streak.checkStreak(_stats);
+    _stats = await _streak.checkStreak(_stats);
     _stats = _rolloverDailyIfNeeded(_stats);
     await _storage.saveUserStats(_stats);
 
@@ -742,7 +760,7 @@ class AppProvider extends ChangeNotifier {
       subjectAttempts: Map.from(_stats.subjectAttempts)..[subject] = newAttempts,
       lastPracticedSubject: subject,
     );
-    _stats = _streak.checkStreak(_stats);
+    _stats = await _streak.checkStreak(_stats);
     _stats = _trackDailyProgress(correct: score, total: total);
     _applyBadgeCheck();
     await _storage.saveUserStats(_stats);
