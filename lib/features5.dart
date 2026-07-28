@@ -2,23 +2,20 @@
 //
 // Five new features bundled together so main.dart only needs one import:
 // 1. Flashcards + Spaced Repetition (Supabase-backed)
-// 2. Coin Shop (Supabase-backed) + Daily Login Bonus + Streak Freeze
+// 2. Coin Shop (Supabase-backed): Daily Login Bonus, Streak Freeze,
+//    equippable Avatar Frames, equippable Titles, and an activatable
+//    Ocean Theme — all now actually functional, not just cosmetic
+//    placeholders.
 // 3. Spin Wheel Rewards (spends into Coin Shop, awards XP via AppProvider)
+//    — "already spun today" is now persisted via CoinService instead of
+//    a static in-memory variable, so it survives app restarts.
 // 4. Multi-Exam Countdown (Supabase-backed, tracks several exams at once)
 // 5. Topic Mastery Tracker (Supabase-backed) + Focus Mode
 //
 // Each feature has its own lightweight ChangeNotifier service so state is
-// shared and reactive across screens. Register CoinService, FlashcardService
-// and MasteryService as providers in main() alongside AppProvider.
-//
-// PERSISTENCE: CoinService, FlashcardService, ExamCountdownService, and
-// MasteryService all pull their data from Supabase the moment they're
-// first constructed (which happens at app launch, since main.dart
-// registers them via ChangeNotifierProvider.value(value: X.instance)),
-// and push every mutation back up the same fire-and-forget way the rest
-// of the app already does. Each has an `isLoaded` flag so screens can
-// show a spinner during that first fetch instead of flashing an empty
-// state.
+// shared and reactive across screens. Register CoinService, FlashcardService,
+// MasteryService, and ExamCountdownService as providers in main() alongside
+// AppProvider.
 
 import 'dart:async';
 import 'dart:math';
@@ -425,7 +422,7 @@ class _FlashcardReviewScreenState extends State<FlashcardReviewScreen> {
 }
 
 /// =========================================================================
-/// 2. COIN SHOP + DAILY LOGIN BONUS + STREAK FREEZE
+/// 2. COIN SHOP + DAILY LOGIN BONUS + STREAK FREEZE + EQUIPPABLE ITEMS
 /// =========================================================================
 
 class ShopItem {
@@ -433,7 +430,16 @@ class ShopItem {
   final String name;
   final String emoji;
   final int cost;
-  const ShopItem({required this.id, required this.name, required this.emoji, required this.cost});
+  final String category; // 'frame' | 'title' | 'theme' | 'consumable'
+  final String usefulness;
+  const ShopItem({
+    required this.id,
+    required this.name,
+    required this.emoji,
+    required this.cost,
+    required this.category,
+    required this.usefulness,
+  });
 }
 
 class CoinService extends ChangeNotifier {
@@ -449,23 +455,72 @@ class CoinService extends ChangeNotifier {
   int _coins = 0;
   int _streakFreezeCount = 0;
   final Set<String> _ownedItemIds = {};
+  String? _equippedFrameId;
+  String? _equippedTitleId;
+  bool _oceanThemeActive = false;
   String? _lastLoginBonusDate;
+  String? _lastSpinDate;
   int? _pendingLoginBonusCoins;
   bool _loaded = false;
 
   int get coins => _coins;
   int get streakFreezeCount => _streakFreezeCount;
   Set<String> get ownedItemIds => Set.unmodifiable(_ownedItemIds);
+  String? get equippedFrameId => _equippedFrameId;
+  String? get equippedTitleId => _equippedTitleId;
+  bool get oceanThemeActive => _oceanThemeActive;
   int? get pendingLoginBonusCoins => _pendingLoginBonusCoins;
   bool get isLoaded => _loaded;
 
   static const List<ShopItem> shopItems = [
-    ShopItem(id: 'frame_gold', name: 'Gold Avatar Frame', emoji: '🖼️', cost: 100),
-    ShopItem(id: 'frame_fire', name: 'Fire Avatar Frame', emoji: '🔥', cost: 150),
-    ShopItem(id: 'title_scholar', name: 'Scholar Title', emoji: '🎓', cost: 80),
-    ShopItem(id: 'title_genius', name: 'Genius Title', emoji: '🧠', cost: 200),
-    ShopItem(id: 'theme_ocean', name: 'Ocean Theme Pack', emoji: '🌊', cost: 250),
-    ShopItem(id: 'streak_freeze', name: 'Streak Freeze', emoji: '🧊', cost: 50),
+    ShopItem(
+      id: 'frame_gold',
+      name: 'Gold Avatar Frame',
+      emoji: '🖼️',
+      cost: 100,
+      category: 'frame',
+      usefulness: 'Adds a gold ring around your avatar on your Profile once equipped.',
+    ),
+    ShopItem(
+      id: 'frame_fire',
+      name: 'Fire Avatar Frame',
+      emoji: '🔥',
+      cost: 150,
+      category: 'frame',
+      usefulness: 'Adds a fire-orange ring around your avatar on your Profile once equipped.',
+    ),
+    ShopItem(
+      id: 'title_scholar',
+      name: 'Scholar Title',
+      emoji: '🎓',
+      cost: 80,
+      category: 'title',
+      usefulness: 'Shows a "📖 Scholar" badge next to your name on your Profile once equipped.',
+    ),
+    ShopItem(
+      id: 'title_genius',
+      name: 'Genius Title',
+      emoji: '🧠',
+      cost: 200,
+      category: 'title',
+      usefulness: 'Shows a "🧠 Genius" badge next to your name on your Profile once equipped.',
+    ),
+    ShopItem(
+      id: 'theme_ocean',
+      name: 'Ocean Theme Pack',
+      emoji: '🌊',
+      cost: 250,
+      category: 'theme',
+      usefulness: 'Re-skins the whole app in ocean-blue colors once activated.',
+    ),
+    ShopItem(
+      id: 'streak_freeze',
+      name: 'Streak Freeze',
+      emoji: '🧊',
+      cost: 50,
+      category: 'consumable',
+      usefulness: 'Automatically protects your streak the next time you miss a day.',
+    ),
   ];
 
   String _todayKey() {
@@ -490,6 +545,10 @@ class CoinService extends ChangeNotifier {
           ..addAll(owned.where((id) => id != 'streak_freeze'));
         _streakFreezeCount = owned.where((id) => id == 'streak_freeze').length;
         _lastLoginBonusDate = row['last_login_bonus_date'] as String?;
+        _lastSpinDate = row['last_spin_date'] as String?;
+        _equippedFrameId = row['equipped_frame'] as String?;
+        _equippedTitleId = row['equipped_title'] as String?;
+        _oceanThemeActive = row['ocean_theme_active'] as bool? ?? false;
       } else {
         await _push();
       }
@@ -516,6 +575,17 @@ class CoinService extends ChangeNotifier {
     _pendingLoginBonusCoins = null;
   }
 
+  /// Whether the user still has their daily spin available. Persisted
+  /// server-side so reloading/restarting the app can't be used to spin
+  /// more than once per day.
+  bool get canSpinToday => _lastSpinDate != _todayKey();
+
+  void recordSpin() {
+    _lastSpinDate = _todayKey();
+    notifyListeners();
+    _push();
+  }
+
   List<String> _ownedItemsForStorage() => [
         ..._ownedItemIds,
         ...List.filled(_streakFreezeCount, 'streak_freeze'),
@@ -530,6 +600,10 @@ class CoinService extends ChangeNotifier {
         'coins': _coins,
         'owned_items': _ownedItemsForStorage(),
         'last_login_bonus_date': _lastLoginBonusDate,
+        'last_spin_date': _lastSpinDate,
+        'equipped_frame': _equippedFrameId,
+        'equipped_title': _equippedTitleId,
+        'ocean_theme_active': _oceanThemeActive,
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -567,16 +641,148 @@ class CoinService extends ChangeNotifier {
 
   bool owns(String id) => _ownedItemIds.contains(id);
 
+  /// Equips (or unequips, by passing null) an owned Avatar Frame. Only
+  /// one frame can be equipped at a time.
+  void equipFrame(String? id) {
+    if (id != null && !_ownedItemIds.contains(id)) return;
+    _equippedFrameId = id;
+    notifyListeners();
+    _push();
+  }
+
+  /// Equips (or unequips, by passing null) an owned Title. Only one
+  /// title can be equipped at a time.
+  void equipTitle(String? id) {
+    if (id != null && !_ownedItemIds.contains(id)) return;
+    _equippedTitleId = id;
+    notifyListeners();
+    _push();
+  }
+
+  /// Activates or deactivates the Ocean Theme pack, re-skinning the
+  /// whole app's color scheme. Only works if the pack is owned.
+  void setOceanThemeActive(bool active) {
+    if (active && !_ownedItemIds.contains('theme_ocean')) return;
+    _oceanThemeActive = active;
+    notifyListeners();
+    _push();
+  }
+
   /// Consumes one Streak Freeze to protect the current streak from
-  /// resetting after a missed day. Called from AppProvider when it
-  /// detects a gap — see the note in app_enhancements.dart. Returns
-  /// true if a freeze was available and consumed.
+  /// resetting after a missed day. Called from AppProvider's StreakService
+  /// when it detects a gap. Returns true if a freeze was available and
+  /// consumed.
   bool consumeStreakFreeze() {
     if (_streakFreezeCount <= 0) return false;
     _streakFreezeCount -= 1;
     notifyListeners();
     _push();
     return true;
+  }
+
+  static Color? frameColorFor(String? id) {
+    switch (id) {
+      case 'frame_gold':
+        return const Color(0xFFFFD700);
+      case 'frame_fire':
+        return Colors.deepOrange;
+      default:
+        return null;
+    }
+  }
+
+  static String? titleLabelFor(String? id) {
+    switch (id) {
+      case 'title_scholar':
+        return '📖 Scholar';
+      case 'title_genius':
+        return '🧠 Genius';
+      default:
+        return null;
+    }
+  }
+}
+
+/// Big, celebratory confirmation shown right after a successful purchase —
+/// replaces the old tiny SnackBar, which felt underwhelming for spending
+/// hard-earned coins.
+Future<void> showPurchaseCelebration(BuildContext context, ShopItem item) {
+  return showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => _PurchaseCelebrationDialog(item: item),
+  );
+}
+
+class _PurchaseCelebrationDialog extends StatefulWidget {
+  final ShopItem item;
+  const _PurchaseCelebrationDialog({required this.item});
+
+  @override
+  State<_PurchaseCelebrationDialog> createState() => _PurchaseCelebrationDialogState();
+}
+
+class _PurchaseCelebrationDialogState extends State<_PurchaseCelebrationDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _scale = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: ScaleTransition(
+        scale: _scale,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.item.emoji, style: const TextStyle(fontSize: 64)),
+              const SizedBox(height: 12),
+              const Text('Purchase Successful! 🎉',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text(widget.item.name,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(widget.item.usefulness,
+                    style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Awesome!'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -602,6 +808,76 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
         coinService.clearPendingLoginBonus();
       }
     });
+  }
+
+  Widget _buildActionButton(BuildContext context, CoinService coinService, ShopItem item) {
+    final owned = coinService.owns(item.id);
+
+    if (item.id == 'streak_freeze') {
+      return FilledButton(
+        onPressed: coinService.coins >= item.cost
+            ? () async {
+                final success = coinService.purchase(item);
+                if (success) await showPurchaseCelebration(context, item);
+              }
+            : null,
+        child: const Text('Buy'),
+      );
+    }
+
+    if (!owned) {
+      return FilledButton(
+        onPressed: coinService.coins >= item.cost
+            ? () async {
+                final success = coinService.purchase(item);
+                if (success) await showPurchaseCelebration(context, item);
+              }
+            : null,
+        child: const Text('Buy'),
+      );
+    }
+
+    switch (item.category) {
+      case 'frame':
+        final equipped = coinService.equippedFrameId == item.id;
+        return OutlinedButton(
+          onPressed: () => coinService.equipFrame(equipped ? null : item.id),
+          child: Text(equipped ? 'Unequip' : 'Equip'),
+        );
+      case 'title':
+        final equipped = coinService.equippedTitleId == item.id;
+        return OutlinedButton(
+          onPressed: () => coinService.equipTitle(equipped ? null : item.id),
+          child: Text(equipped ? 'Unequip' : 'Equip'),
+        );
+      case 'theme':
+        final active = coinService.oceanThemeActive;
+        return OutlinedButton(
+          onPressed: () => coinService.setOceanThemeActive(!active),
+          child: Text(active ? 'Deactivate' : 'Activate'),
+        );
+      default:
+        return const Icon(Icons.check_circle_rounded, color: Colors.green);
+    }
+  }
+
+  String _statusSubtitle(CoinService coinService, ShopItem item) {
+    if (item.id == 'streak_freeze') {
+      return '${coinService.streakFreezeCount} owned • ${item.cost} coins each';
+    }
+    if (!coinService.owns(item.id)) {
+      return '${item.cost} coins';
+    }
+    switch (item.category) {
+      case 'frame':
+        return coinService.equippedFrameId == item.id ? 'Owned • Equipped ✓' : 'Owned • Not equipped';
+      case 'title':
+        return coinService.equippedTitleId == item.id ? 'Owned • Equipped ✓' : 'Owned • Not equipped';
+      case 'theme':
+        return coinService.oceanThemeActive ? 'Owned • Active ✓' : 'Owned • Not active';
+      default:
+        return 'Owned';
+    }
   }
 
   @override
@@ -639,44 +915,30 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final item = CoinService.shopItems[index];
-          final isStreakFreeze = item.id == 'streak_freeze';
-          final owned = coinService.owns(item.id);
-
-          String subtitle;
-          if (isStreakFreeze) {
-            subtitle = '${coinService.streakFreezeCount} owned • ${item.cost} coins each — protects your streak on a missed day';
-          } else {
-            subtitle = owned ? 'Owned' : '${item.cost} coins';
-          }
-
-          Widget trailing;
-          if (!isStreakFreeze && owned) {
-            trailing = const Icon(Icons.check_circle_rounded, color: Colors.green);
-          } else {
-            trailing = FilledButton(
-              onPressed: coinService.coins >= item.cost
-                  ? () {
-                      final success = coinService.purchase(item);
-                      if (success) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('${item.name} purchased!')),
-                        );
-                      }
-                    }
-                  : null,
-              child: const Text('Buy'),
-            );
-          }
-
           return Material(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(16),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              leading: Text(item.emoji, style: const TextStyle(fontSize: 28)),
-              title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(subtitle),
-              trailing: trailing,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Text(item.emoji, style: const TextStyle(fontSize: 28)),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text(_statusSubtitle(coinService, item),
+                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionButton(context, coinService, item),
+                ],
+              ),
             ),
           );
         },
@@ -705,8 +967,6 @@ class SpinWheelScreen extends StatefulWidget {
 }
 
 class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProviderStateMixin {
-  static DateTime? _lastSpinDate;
-
   late final AnimationController _controller;
   bool _spinning = false;
   String? _result;
@@ -722,14 +982,6 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
     _WheelSegment('10 XP', Colors.teal, xp: 10),
   ];
 
-  bool get _alreadySpunToday {
-    if (_lastSpinDate == null) return false;
-    final now = DateTime.now();
-    return _lastSpinDate!.year == now.year &&
-        _lastSpinDate!.month == now.month &&
-        _lastSpinDate!.day == now.day;
-  }
-
   @override
   void initState() {
     super.initState();
@@ -743,7 +995,8 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
   }
 
   void _spin() {
-    if (_alreadySpunToday || _spinning) return;
+    final coinService = context.read<CoinService>();
+    if (!coinService.canSpinToday || _spinning) return;
     setState(() {
       _spinning = true;
       _result = null;
@@ -751,9 +1004,9 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
 
     final segment = _segments[Random().nextInt(_segments.length)];
     _controller.forward(from: 0).whenComplete(() {
-      _lastSpinDate = DateTime.now();
+      coinService.recordSpin();
       if (segment.coins != null) {
-        CoinService.instance.addCoins(segment.coins!);
+        coinService.addCoins(segment.coins!);
       }
       if (segment.xp != null) {
         context.read<AppProvider>().addXP(segment.xp!);
@@ -770,6 +1023,9 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final coinService = context.watch<CoinService>();
+    final alreadySpunToday = !coinService.canSpinToday;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Daily Spin')),
       body: Center(
@@ -804,8 +1060,8 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
                 width: double.infinity,
                 height: 52,
                 child: FilledButton(
-                  onPressed: (_alreadySpunToday || _spinning) ? null : _spin,
-                  child: Text(_alreadySpunToday
+                  onPressed: (alreadySpunToday || _spinning) ? null : _spin,
+                  child: Text(alreadySpunToday
                       ? 'Come back tomorrow'
                       : (_spinning ? 'Spinning...' : 'Spin Now')),
                 ),
