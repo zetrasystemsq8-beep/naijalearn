@@ -2890,3 +2890,120 @@ class _StatCard extends StatelessWidget {
     );
   }
 }
+/// =========================================================================
+/// REVIEW SCREEN
+/// =========================================================================
+
+class ReviewScreen extends StatelessWidget {
+  final List<Question> questions;
+  final List<int?> selectedAnswers;
+  const ReviewScreen({super.key, required this.questions, required this.selectedAnswers});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Review Answers')),
+      body: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: questions.length,
+        itemBuilder: (context, index) {
+          final question = questions[index];
+          final selected = selectedAnswers[index];
+          final isCorrect = selected == question.correctIndex;
+          final wasAnswered = selected != null;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: !wasAnswered ? scheme.outlineVariant : (isCorrect ? Colors.green : Colors.red), width: 1.4),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(10)),
+                      child: Text('Q${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.onPrimaryContainer)),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      !wasAnswered ? Icons.remove_circle_outline_rounded : (isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded),
+                      color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      !wasAnswered ? 'Skipped' : (isCorrect ? 'Correct' : 'Wrong'),
+                      style: TextStyle(fontWeight: FontWeight.w600, color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.star_border_rounded),
+                      tooltip: 'Bookmark for later',
+                      onPressed: () async {
+                        await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(question.questionText, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.4)),
+                const SizedBox(height: 10),
+                ...List.generate(question.options.length, (i) {
+                  final isCorrectOption = i == question.correctIndex;
+                  final isSelectedOption = i == selected;
+                  Color? bg;
+                  if (isCorrectOption) {
+                    bg = Colors.green.withOpacity(0.15);
+                  } else if (isSelectedOption && !isCorrectOption) {
+                    bg = Colors.red.withOpacity(0.15);
+                  }
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: isCorrectOption ? Colors.green : (isSelectedOption ? Colors.red : scheme.outlineVariant)),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(radius: 12, backgroundColor: scheme.surface, child: Text(String.fromCharCode(65 + i), style: const TextStyle(fontSize: 12))),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(question.options[i], style: const TextStyle(fontSize: 13.5))),
+                        if (isCorrectOption) const Icon(Icons.check_rounded, color: Colors.green, size: 18),
+                        if (isSelectedOption && !isCorrectOption) const Icon(Icons.close_rounded, color: Colors.red, size: 18),
+                      ],
+                    ),
+                  );
+                }),
+                if (question.explanation.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.4), borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.lightbulb_outline_rounded, size: 18, color: scheme.primary),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(question.explanation, style: const TextStyle(fontSize: 12.5, fontStyle: FontStyle.italic))),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
