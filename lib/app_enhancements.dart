@@ -30,6 +30,11 @@
 // user owns at least one Streak Freeze, one is consumed and the streak
 // is preserved instead of reset to zero — making the Coin Shop's Streak
 // Freeze item actually functional instead of a no-op purchase.
+//
+// EQUIPPED FRAME/TITLE: ProfileScreen now reads CoinService's equipped
+// frame and title (set from the Coin Shop) and renders them on the
+// avatar and name — so those purchases are visibly, permanently useful
+// rather than sitting unseen in an "owned items" list.
 
 import 'dart:convert';
 import 'dart:async';
@@ -1780,6 +1785,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final provider = Provider.of<AppProvider>(context);
     final stats = provider.stats;
     final scheme = Theme.of(context).colorScheme;
+    final coinService = context.watch<CoinService>();
+    final frameColor = CoinService.frameColorFor(coinService.equippedFrameId);
+    final titleLabel = CoinService.titleLabelFor(coinService.equippedTitleId);
 
     return Scaffold(
       appBar: AppBar(title: const Text('👤 Profile')),
@@ -1793,6 +1801,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(colors: [scheme.primary, scheme.primaryContainer]),
                 shape: BoxShape.circle,
+                border: frameColor != null ? Border.all(color: frameColor, width: 4) : null,
+                boxShadow: frameColor != null
+                    ? [BoxShadow(color: frameColor.withOpacity(0.5), blurRadius: 14, spreadRadius: 1)]
+                    : null,
               ),
               child: Center(
                 child: Text(provider.avatarEmoji, style: const TextStyle(fontSize: 40)),
@@ -1804,6 +1816,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Text(provider.userName,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           ),
+          if (titleLabel != null) ...[
+            const SizedBox(height: 6),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(titleLabel,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onPrimaryContainer)),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           Row(
             children: [
