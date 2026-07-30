@@ -13,7 +13,7 @@ import 'lessons_physics.dart';
 import 'lessons_government.dart';
 import 'lessons_literature.dart';
 import 'lessons_chemistry.dart';
-
+import 'lessons_math.dart';
 /// Represents one subject's textbook: its display info plus its list
 /// of lesson maps (each map has chapterTitle, body, etc.).
 class Textbook {
