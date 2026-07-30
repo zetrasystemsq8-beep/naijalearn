@@ -14,6 +14,7 @@ import 'lessons_government.dart';
 import 'lessons_literature.dart';
 import 'lessons_chemistry.dart';
 import 'lessons_math.dart';
+
 /// Represents one subject's textbook: its display info plus its list
 /// of lesson maps (each map has chapterTitle, body, etc.).
 class Textbook {
@@ -63,6 +64,18 @@ final List<Textbook> allTextbooks = [
     color: Colors.purple,
     lessons: literatureLessons,
   ),
+  Textbook(
+    subject: 'Chemistry',
+    icon: Icons.biotech_rounded,
+    color: Colors.teal,
+    lessons: chemistryLessons,
+  ),
+  Textbook(
+    subject: 'Mathematics',
+    icon: Icons.calculate_rounded,
+    color: Colors.orange,
+    lessons: mathLessons,
+  ),
 ];
 
 /// =========================================================================
@@ -93,7 +106,6 @@ class TextbookShelfScreen extends StatelessWidget {
             child: InkWell(
               borderRadius: BorderRadius.circular(20),
               onTap: () {
-                // Uses the LessonsScreen already defined in main.dart.
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => LessonsScreenLauncher(book: book),
@@ -114,17 +126,25 @@ class TextbookShelfScreen extends StatelessWidget {
                       child: Icon(book.icon, color: book.color, size: 26),
                     ),
                     const Spacer(),
-                    Text(book.subject,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(
+                      book.subject,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
                     const SizedBox(height: 4),
-                    Text('${book.lessons.length} chapters',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    Text(
+                      '${book.lessons.length} chapters',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
                   ],
                 ),
               ),
@@ -136,15 +156,19 @@ class TextbookShelfScreen extends StatelessWidget {
   }
 }
 
-/// Thin wrapper so this file doesn't need to redefine LessonsScreen —
-/// it just forwards to the one already in main.dart with the right data.
-/// (See wiring note below if you'd rather move LessonsScreen here instead.)
 class LessonsScreenLauncher extends StatelessWidget {
   final Textbook book;
-  const LessonsScreenLauncher({super.key, required this.book});
+
+  const LessonsScreenLauncher({
+    super.key,
+    required this.book,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return LessonsScreen(subject: book.subject, lessons: book.lessons);
+    return LessonsScreen(
+      subject: book.subject,
+      lessons: book.lessons,
+    );
   }
 }
