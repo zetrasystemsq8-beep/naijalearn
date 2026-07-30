@@ -1,3 +1,4 @@
+
 // lib/career_features.dart
 //
 // AI Study Coach, JAMB Score Predictor, Career Mode, Hall of Fame, Live
@@ -13,6 +14,22 @@
 // Score Predictor's "predicted marks" figures are explicitly heuristic
 // estimates from practice accuracy — not official JAMB scoring — and are
 // labelled as such in the UI.
+//
+// LIVE QUIZ BATTLES (rebuilt):
+// - Host can pick ONE or MULTIPLE subjects per battle.
+// - Host can choose to play "Now" or schedule a future time.
+// - Before the battle starts, both players see a Ready Check screen with
+//   the chosen subject(s). The joining player can tap "Ready" or raise a
+//   Request Edit (👏) asking the host to change the subjects. The host
+//   can then edit subjects, which resets both players back to not-ready.
+// - Once BOTH players are ready (and the scheduled time, if any, has been
+//   reached), the battle auto-starts with a RANDOMIZED countdown timer
+//   (different every battle — never a fixed duration).
+// - Neither player can manually submit early — they can only move between
+//   questions. When the timer hits zero, the battle auto-submits for
+//   both players simultaneously.
+// - Match history: last 5 results (W/L/T) are tracked per user and shown
+//   as a compact streak strip (e.g. "LLLWWL") wherever battles are shown.
 
 import 'dart:async';
 import 'dart:math';
@@ -506,34 +523,54 @@ class _HallOfFameScreenState extends State<HallOfFameScreen> {
 }
 
 /// =========================================================================
-/// 5. LIVE QUIZ BATTLES (real-time, via Supabase)
+/// 5. LIVE QUIZ BATTLES (real-time, via Supabase) — rebuilt
 /// =========================================================================
 
 class BattleInfo {
   final String id;
   final String code;
-  final String subject;
-  final int questionCount;
-  final String status;
+  final List<String> subjects;
+  final int perSubjectCount;
+  final String status; // waiting | active | finished
   final List<String> questionIds;
+  final int durationSeconds;
+  final DateTime? scheduledAt;
+  final bool hostReady;
+  final bool joinerReady;
+  final String? editRequestedBy;
+  final String createdBy;
 
   BattleInfo({
     required this.id,
     required this.code,
-    required this.subject,
-    required this.questionCount,
+    required this.subjects,
+    required this.perSubjectCount,
     required this.status,
     required this.questionIds,
+    required this.durationSeconds,
+    this.scheduledAt,
+    required this.hostReady,
+    required this.joinerReady,
+    this.editRequestedBy,
+    required this.createdBy,
   });
 
   factory BattleInfo.fromMap(Map<String, dynamic> m) => BattleInfo(
         id: m['id'] as String,
         code: m['code'] as String,
-        subject: m['subject'] as String,
-        questionCount: (m['question_count'] as num).toInt(),
+        subjects: List<String>.from((m['subjects'] as List<dynamic>?) ?? [m['subject']]),
+        perSubjectCount: (m['per_subject_count'] as num?)?.toInt() ?? (m['question_count'] as num?)?.toInt() ?? 10,
         status: m['status'] as String,
         questionIds: List<String>.from((m['question_ids'] as List<dynamic>?) ?? []),
+        durationSeconds: (m['duration_seconds'] as num?)?.toInt() ?? 240,
+        scheduledAt: m['scheduled_at'] != null ? DateTime.tryParse(m['scheduled_at'] as String) : null,
+        hostReady: m['host_ready'] as bool? ?? false,
+        joinerReady: m['joiner_ready'] as bool? ?? false,
+        editRequestedBy: m['edit_requested_by'] as String?,
+        createdBy: m['created_by'] as String? ?? '',
       );
+
+  String get subjectsLabel => subjects.join(' + ');
 }
 
 class BattleParticipant {
@@ -568,11 +605,18 @@ class BattleService {
   static final BattleService instance = BattleService._();
 
   SupabaseClient get _client => Supabase.instance.client;
+  final Random _rng = Random();
 
   String _generateCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final r = Random();
-    return List.generate(6, (_) => chars[r.nextInt(chars.length)]).join();
+    return List.generate(6, (_) => chars[_rng.nextInt(chars.length)]).join();
+  }
+
+  /// Duration is randomized every single battle — 3 to 8 minutes, in
+  /// 30-second increments — so no one can "learn" a fixed exam length.
+  int _randomDurationSeconds() {
+    final options = [180, 210, 240, 270, 300, 330, 360, 390, 420, 450, 480];
+    return options[_rng.nextInt(options.length)];
   }
 
   Future<String> _currentUsername(String userId) async {
@@ -584,24 +628,40 @@ class BattleService {
     }
   }
 
-  Future<BattleInfo> createBattle({required String subject, required int questionCount}) async {
+  List<String> _buildQuestionIds(List<String> subjects, int perSubjectCount) {
+    final ids = <String>[];
+    for (final subject in subjects) {
+      final pool = List<Question>.from(QuestionRepository.getForSubject(subject))..shuffle();
+      ids.addAll(pool.take(perSubjectCount).map((q) => q.id));
+    }
+    ids.shuffle();
+    return ids;
+  }
+
+  Future<BattleInfo> createBattle({
+    required List<String> subjects,
+    required int perSubjectCount,
+    DateTime? scheduledAt,
+  }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw StateError('Not signed in.');
+    if (subjects.isEmpty) throw StateError('Pick at least one subject.');
 
-    final pool = QuestionRepository.getForSubject(subject);
-    if (pool.length < questionCount) {
-      throw StateError('Not enough questions in $subject for a $questionCount-question battle.');
-    }
-    final shuffled = List<Question>.from(pool)..shuffle();
-    final ids = shuffled.take(questionCount).map((q) => q.id).toList();
+    final ids = _buildQuestionIds(subjects, perSubjectCount);
+    if (ids.isEmpty) throw StateError('Not enough questions available for that selection.');
+
     final code = _generateCode();
 
     final row = await _client.from('battles').insert({
       'code': code,
-      'subject': subject,
-      'question_count': questionCount,
+      'subjects': subjects,
+      'per_subject_count': perSubjectCount,
       'status': 'waiting',
       'question_ids': ids,
+      'duration_seconds': _randomDurationSeconds(),
+      'scheduled_at': scheduledAt?.toIso8601String(),
+      'host_ready': false,
+      'joiner_ready': false,
       'created_by': user.id,
     }).select().single();
 
@@ -634,6 +694,43 @@ class BattleService {
     }, onConflict: 'battle_id,user_id');
 
     return battle;
+  }
+
+  Future<void> setReady({required String battleId, required bool isHost, required bool ready}) async {
+    await _client.from('battles').update({
+      isHost ? 'host_ready' : 'joiner_ready': ready,
+    }).eq('id', battleId);
+  }
+
+  /// Joiner's "👏 Request Edit" — flags to the host that they'd like the
+  /// subject selection changed, and drops both ready flags so no one
+  /// accidentally starts mid-negotiation.
+  Future<void> requestEdit(String battleId) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    await _client.from('battles').update({
+      'edit_requested_by': user.id,
+      'host_ready': false,
+      'joiner_ready': false,
+    }).eq('id', battleId);
+  }
+
+  /// Host applies a new subject/question-count selection after an edit
+  /// request, clears the request flag, and resets readiness for both.
+  Future<void> updateSubjects({
+    required String battleId,
+    required List<String> subjects,
+    required int perSubjectCount,
+  }) async {
+    final ids = _buildQuestionIds(subjects, perSubjectCount);
+    await _client.from('battles').update({
+      'subjects': subjects,
+      'per_subject_count': perSubjectCount,
+      'question_ids': ids,
+      'edit_requested_by': null,
+      'host_ready': false,
+      'joiner_ready': false,
+    }).eq('id', battleId);
   }
 
   Future<void> startBattle(String battleId) async {
@@ -669,6 +766,39 @@ class BattleService {
         .eq('user_id', user.id);
   }
 
+  /// Records a W/L/T for the current user's last-5 match history strip.
+  Future<void> recordMatchResult(String result) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await _client.from('battle_history').insert({
+        'user_id': user.id,
+        'result': result, // 'W', 'L', or 'T'
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[BattleHistory] record failed: $e');
+    }
+  }
+
+  /// Returns the most recent results, most-recent-first, e.g. ['W','L','L','W','T'].
+  Future<List<String>> getRecentResults({int limit = 5}) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return [];
+    try {
+      final rows = await _client
+          .from('battle_history')
+          .select('result')
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (rows as List<dynamic>).map((r) => (r as Map<String, dynamic>)['result'] as String).toList();
+    } catch (e) {
+      debugPrint('[BattleHistory] load failed: $e');
+      return [];
+    }
+  }
+
   RealtimeChannel subscribeToParticipants(String battleId, void Function() onChange) {
     final channel = _client.channel('battle_participants_$battleId').onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -694,6 +824,44 @@ class BattleService {
   }
 }
 
+/// Compact "LLLWWL"-style streak strip, reusable anywhere.
+class MatchHistoryStrip extends StatelessWidget {
+  final List<String> results; // most-recent-first
+  const MatchHistoryStrip({super.key, required this.results});
+
+  Color _colorFor(String r) {
+    switch (r) {
+      case 'W':
+        return Colors.green;
+      case 'L':
+        return Colors.red;
+      default:
+        return Colors.amber;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (results.isEmpty) {
+      return Text('No battles played yet', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant));
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: results
+          .map((r) => Container(
+                width: 26,
+                height: 26,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(color: _colorFor(r), shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: Text(r, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+              ))
+          .toList(),
+    );
+  }
+}
+
 class BattleLobbyScreen extends StatefulWidget {
   const BattleLobbyScreen({super.key});
   @override
@@ -701,11 +869,48 @@ class BattleLobbyScreen extends StatefulWidget {
 }
 
 class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
-  String _subject = kSubjects.first.name;
-  int _count = 10;
+  final List<String> _subjects = [kSubjects.first.name];
+  int _perSubjectCount = 10;
+  bool _playNow = true;
+  DateTime? _scheduledAt;
   final _codeController = TextEditingController();
   bool _busy = false;
   String? _error;
+  late Future<List<String>> _historyFuture;
+
+  static const int _maxSubjects = 4;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = BattleService.instance.getRecentResults();
+  }
+
+  void _toggleSubject(String s) {
+    setState(() {
+      if (_subjects.contains(s)) {
+        if (_subjects.length > 1) _subjects.remove(s);
+      } else if (_subjects.length < _maxSubjects) {
+        _subjects.add(s);
+      }
+    });
+  }
+
+  Future<void> _pickScheduleTime() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+    if (time == null || !mounted) return;
+    setState(() {
+      _scheduledAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _playNow = false;
+    });
+  }
 
   Future<void> _create() async {
     setState(() {
@@ -713,9 +918,13 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
       _error = null;
     });
     try {
-      final battle = await BattleService.instance.createBattle(subject: _subject, questionCount: _count);
+      final battle = await BattleService.instance.createBattle(
+        subjects: _subjects,
+        perSubjectCount: _perSubjectCount,
+        scheduledAt: _playNow ? null : _scheduledAt,
+      );
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleRoomScreen(battleId: battle.id, isHost: true)));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleReadyScreen(battleId: battle.id, isHost: true)));
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -732,7 +941,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
     try {
       final battle = await BattleService.instance.joinBattle(_codeController.text);
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleRoomScreen(battleId: battle.id, isHost: false)));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleReadyScreen(battleId: battle.id, isHost: false)));
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -754,25 +963,85 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            child: Row(
+              children: [
+                const Icon(Icons.history_rounded),
+                const SizedBox(width: 10),
+                const Text('Last 5', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                FutureBuilder<List<String>>(
+                  future: _historyFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2));
+                    }
+                    return MatchHistoryStrip(results: snapshot.data ?? []);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
           Text('Create a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _subject,
-                  items: kSubjects.map((s) => DropdownMenuItem(value: s.name, child: Text(s.name))).toList(),
-                  onChanged: (v) => setState(() => _subject = v!),
-                  decoration: const InputDecoration(labelText: 'Subject'),
+                Text('Subjects (${_subjects.length}/$_maxSubjects) — pick one or more',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: kSubjects.map((s) {
+                    final isSelected = _subjects.contains(s.name);
+                    final disabled = !isSelected && _subjects.length >= _maxSubjects;
+                    return FilterChip(
+                      label: Text(s.name),
+                      selected: isSelected,
+                      onSelected: disabled ? null : (_) => _toggleSubject(s.name),
+                    );
+                  }).toList(),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 DropdownButtonFormField<int>(
-                  initialValue: _count,
-                  items: const [5, 10, 15, 20].map((c) => DropdownMenuItem(value: c, child: Text('$c questions'))).toList(),
-                  onChanged: (v) => setState(() => _count = v!),
-                  decoration: const InputDecoration(labelText: 'Question count'),
+                  initialValue: _perSubjectCount,
+                  items: const [5, 10, 15, 20].map((c) => DropdownMenuItem(value: c, child: Text('$c questions per subject'))).toList(),
+                  onChanged: (v) => setState(() => _perSubjectCount = v!),
+                  decoration: const InputDecoration(labelText: 'Questions per subject'),
+                ),
+                const SizedBox(height: 14),
+                Text('When do you want to compete?', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Play Now'),
+                        selected: _playNow,
+                        onSelected: (_) => setState(() {
+                          _playNow = true;
+                          _scheduledAt = null;
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: Text(_scheduledAt == null
+                            ? 'Schedule…'
+                            : '${_scheduledAt!.day}/${_scheduledAt!.month} ${_scheduledAt!.hour.toString().padLeft(2, '0')}:${_scheduledAt!.minute.toString().padLeft(2, '0')}'),
+                        selected: !_playNow,
+                        onSelected: (_) => _pickScheduleTime(),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -820,105 +1089,325 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
   }
 }
 
-class BattleRoomScreen extends StatefulWidget {
+/// Ready-check screen: shows subjects, lets both players mark Ready,
+/// lets the joiner request an edit (👏), lets the host edit subjects,
+/// and auto-transitions both players into the battle once ready +
+/// (if scheduled) the scheduled time has arrived.
+class BattleReadyScreen extends StatefulWidget {
   final String battleId;
   final bool isHost;
-  const BattleRoomScreen({super.key, required this.battleId, required this.isHost});
+  const BattleReadyScreen({super.key, required this.battleId, required this.isHost});
   @override
-  State<BattleRoomScreen> createState() => _BattleRoomScreenState();
+  State<BattleReadyScreen> createState() => _BattleReadyScreenState();
 }
 
-class _BattleRoomScreenState extends State<BattleRoomScreen> {
+class _BattleReadyScreenState extends State<BattleReadyScreen> {
+  BattleInfo? _battle;
   List<BattleParticipant> _participants = [];
   RealtimeChannel? _participantsChannel;
   RealtimeChannel? _battleChannel;
   bool _navigated = false;
+  Timer? _scheduleTicker;
 
   @override
   void initState() {
     super.initState();
-    _refresh();
-    _participantsChannel = BattleService.instance.subscribeToParticipants(widget.battleId, _refresh);
+    _refreshBattle();
+    _refreshParticipants();
+    _participantsChannel = BattleService.instance.subscribeToParticipants(widget.battleId, _refreshParticipants);
     _battleChannel = BattleService.instance.subscribeToBattle(widget.battleId, _onBattleChanged);
+    _scheduleTicker = Timer.periodic(const Duration(seconds: 5), (_) => _maybeAutoStart());
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refreshParticipants() async {
     final participants = await BattleService.instance.getParticipants(widget.battleId);
     if (!mounted) return;
     setState(() => _participants = participants);
   }
 
-  Future<void> _onBattleChanged() async {
+  Future<void> _refreshBattle() async {
     final battle = await BattleService.instance.getBattle(widget.battleId);
     if (!mounted || battle == null) return;
-    if (battle.status == 'active' && !_navigated) {
+    setState(() => _battle = battle);
+  }
+
+  Future<void> _onBattleChanged() async {
+    await _refreshBattle();
+    if (!mounted || _battle == null) return;
+    if (_battle!.status == 'active' && !_navigated) {
       _navigated = true;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => BattlePlayScreen(battleId: widget.battleId, questionIds: battle.questionIds, subject: battle.subject),
+        builder: (_) => BattlePlayScreen(
+          battleId: widget.battleId,
+          questionIds: _battle!.questionIds,
+          subjectsLabel: _battle!.subjectsLabel,
+          durationSeconds: _battle!.durationSeconds,
+        ),
       ));
+      return;
     }
+    _maybeAutoStart();
+  }
+
+  bool get _scheduleReached {
+    final scheduled = _battle?.scheduledAt;
+    if (scheduled == null) return true;
+    return DateTime.now().isAfter(scheduled);
+  }
+
+  Future<void> _maybeAutoStart() async {
+    final b = _battle;
+    if (b == null || !widget.isHost || _navigated) return;
+    if (b.hostReady && b.joinerReady && _scheduleReached && _participants.length >= 2) {
+      await BattleService.instance.startBattle(widget.battleId);
+    }
+  }
+
+  Future<void> _setReady(bool ready) async {
+    await BattleService.instance.setReady(battleId: widget.battleId, isHost: widget.isHost, ready: ready);
+    _maybeAutoStart();
+  }
+
+  Future<void> _requestEdit() async {
+    await BattleService.instance.requestEdit(widget.battleId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('👏 Edit request sent to the host')),
+    );
+  }
+
+  Future<void> _editSubjects() async {
+    final battle = _battle;
+    if (battle == null) return;
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _SubjectEditSheet(initialSubjects: battle.subjects, initialCount: battle.perSubjectCount),
+    );
+    if (result == null) return;
+    await BattleService.instance.updateSubjects(
+      battleId: widget.battleId,
+      subjects: List<String>.from(result['subjects'] as List),
+      perSubjectCount: result['count'] as int,
+    );
   }
 
   @override
   void dispose() {
     _participantsChannel?.unsubscribe();
     _battleChannel?.unsubscribe();
+    _scheduleTicker?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final battle = _battle;
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final myReady = widget.isHost ? (battle?.hostReady ?? false) : (battle?.joinerReady ?? false);
+    final opponentReady = widget.isHost ? (battle?.joinerReady ?? false) : (battle?.hostReady ?? false);
+    final editRequested = battle?.editRequestedBy != null && battle!.editRequestedBy != me;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Battle Room')),
-      body: FutureBuilder<BattleInfo?>(
-        future: BattleService.instance.getBattle(widget.battleId),
-        builder: (context, snapshot) {
-          final code = snapshot.data?.code;
-          return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (code != null)
+      appBar: AppBar(title: const Text('Ready Check')),
+      body: battle == null
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(18)),
                     child: Column(children: [
                       const Text('Share this code', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 6),
-                      Text(code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6)),
+                      Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6)),
                     ]),
                   ),
-                const SizedBox(height: 20),
-                Text('Players (${_participants.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                ..._participants.map((p) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.menu_book_rounded, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(battle.subjectsLabel, style: const TextStyle(fontWeight: FontWeight.bold))),
+                          Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                        ]),
+                        if (battle.scheduledAt != null) ...[
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            const Icon(Icons.schedule_rounded, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              _scheduleReached
+                                  ? 'Scheduled time reached'
+                                  : 'Starts at ${battle.scheduledAt!.hour.toString().padLeft(2, '0')}:${battle.scheduledAt!.minute.toString().padLeft(2, '0')} on ${battle.scheduledAt!.day}/${battle.scheduledAt!.month}',
+                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                            ),
+                          ]),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (editRequested && widget.isHost) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(16)),
                       child: Row(children: [
-                        Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 20)),
+                        const Text('👏', style: TextStyle(fontSize: 20)),
                         const SizedBox(width: 10),
-                        Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        const Expanded(child: Text('Your opponent asked to change the subjects.')),
+                        TextButton(onPressed: _editSubjects, child: const Text('Edit')),
                       ]),
-                    )),
-                const Spacer(),
-                if (widget.isHost)
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Text('Players (${_participants.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  ..._participants.map((p) => Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                        child: Row(children: [
+                          Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 20)),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600))),
+                        ]),
+                      )),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: (opponentReady ? Colors.green : Colors.orange).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(children: [
+                            Icon(opponentReady ? Icons.check_circle_rounded : Icons.hourglass_bottom_rounded,
+                                color: opponentReady ? Colors.green : Colors.orange),
+                            const SizedBox(height: 4),
+                            Text(opponentReady ? 'Opponent Ready' : 'Waiting on opponent', style: const TextStyle(fontSize: 11)),
+                          ]),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (!widget.isHost)
+                    SizedBox(
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        onPressed: myReady ? null : _requestEdit,
+                        icon: const Text('👏'),
+                        label: const Text('Request Subject Change'),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
                   SizedBox(
                     height: 52,
                     child: FilledButton.icon(
-                      onPressed: _participants.length >= 2 ? () => BattleService.instance.startBattle(widget.battleId) : null,
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text(_participants.length >= 2 ? 'Start Battle' : 'Waiting for opponent…'),
+                      onPressed: _participants.length >= 2 ? () => _setReady(!myReady) : null,
+                      icon: Icon(myReady ? Icons.close_rounded : Icons.check_circle_outline_rounded),
+                      label: Text(
+                        _participants.length < 2
+                            ? 'Waiting for opponent…'
+                            : (myReady ? 'Not Ready' : 'I\'m Ready'),
+                      ),
                     ),
-                  )
-                else
-                  const Text('Waiting for host to start…', textAlign: TextAlign.center),
-              ],
+                  ),
+                  if (!_scheduleReached) ...[
+                    const SizedBox(height: 8),
+                    Text('Battle will auto-start once the scheduled time arrives.',
+                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+                  ],
+                ],
+              ),
             ),
-          );
-        },
+    );
+  }
+}
+
+class _SubjectEditSheet extends StatefulWidget {
+  final List<String> initialSubjects;
+  final int initialCount;
+  const _SubjectEditSheet({required this.initialSubjects, required this.initialCount});
+
+  @override
+  State<_SubjectEditSheet> createState() => _SubjectEditSheetState();
+}
+
+class _SubjectEditSheetState extends State<_SubjectEditSheet> {
+  late List<String> _subjects;
+  late int _count;
+  static const int _maxSubjects = 4;
+
+  @override
+  void initState() {
+    super.initState();
+    _subjects = List<String>.from(widget.initialSubjects);
+    _count = widget.initialCount;
+  }
+
+  void _toggle(String s) {
+    setState(() {
+      if (_subjects.contains(s)) {
+        if (_subjects.length > 1) _subjects.remove(s);
+      } else if (_subjects.length < _maxSubjects) {
+        _subjects.add(s);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Edit Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: kSubjects.map((s) {
+              final isSelected = _subjects.contains(s.name);
+              final disabled = !isSelected && _subjects.length >= _maxSubjects;
+              return FilterChip(
+                label: Text(s.name),
+                selected: isSelected,
+                onSelected: disabled ? null : (_) => _toggle(s.name),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<int>(
+            initialValue: _count,
+            items: const [5, 10, 15, 20].map((c) => DropdownMenuItem(value: c, child: Text('$c questions per subject'))).toList(),
+            onChanged: (v) => setState(() => _count = v!),
+            decoration: const InputDecoration(labelText: 'Questions per subject'),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              onPressed: () => Navigator.pop(context, {'subjects': _subjects, 'count': _count}),
+              child: const Text('Save Changes'),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -927,27 +1416,55 @@ class _BattleRoomScreenState extends State<BattleRoomScreen> {
 class BattlePlayScreen extends StatefulWidget {
   final String battleId;
   final List<String> questionIds;
-  final String subject;
-  const BattlePlayScreen({super.key, required this.battleId, required this.questionIds, required this.subject});
+  final String subjectsLabel;
+  final int durationSeconds;
+  const BattlePlayScreen({
+    super.key,
+    required this.battleId,
+    required this.questionIds,
+    required this.subjectsLabel,
+    required this.durationSeconds,
+  });
   @override
   State<BattlePlayScreen> createState() => _BattlePlayScreenState();
 }
 
 class _BattlePlayScreenState extends State<BattlePlayScreen> {
   late List<Question> _questions;
+  late List<int?> _selectedAnswers;
   int _index = 0;
-  int _score = 0;
-  int? _selected;
   List<BattleParticipant> _participants = [];
   RealtimeChannel? _channel;
+  Timer? _timer;
+  late int _remainingSeconds;
+  bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
     final all = {for (final q in QuestionRepository.getAll()) q.id: q};
     _questions = widget.questionIds.map((id) => all[id]).whereType<Question>().toList();
+    _selectedAnswers = List<int?>.filled(_questions.length, null);
+    _remainingSeconds = widget.durationSeconds;
     _channel = BattleService.instance.subscribeToParticipants(widget.battleId, _refreshOpponents);
     _refreshOpponents();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_remainingSeconds <= 1) {
+        timer.cancel();
+        setState(() => _remainingSeconds = 0);
+        _autoSubmit();
+      } else {
+        setState(() => _remainingSeconds--);
+      }
+    });
   }
 
   Future<void> _refreshOpponents() async {
@@ -956,59 +1473,70 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     setState(() => _participants = p);
   }
 
-  void _selectOption(int i) => setState(() => _selected = i);
+  void _selectOption(int i) => setState(() => _selectedAnswers[_index] = i);
 
-  Future<void> _next() async {
-    if (_selected == null) return;
-    final q = _questions[_index];
-    if (_selected == q.correctIndex) _score++;
-    final isLast = _index == _questions.length - 1;
+  void _goTo(int index) {
+    if (index < 0 || index >= _questions.length) return;
+    setState(() => _index = index);
+  }
+
+  /// Neither player can trigger this manually — it only fires when the
+  /// shared countdown reaches zero, so both submit at the same instant.
+  Future<void> _autoSubmit() async {
+    if (_submitting) return;
+    _submitting = true;
+
+    int score = 0;
+    for (int i = 0; i < _questions.length; i++) {
+      if (_selectedAnswers[i] != null && _selectedAnswers[i] == _questions[i].correctIndex) score++;
+    }
 
     await BattleService.instance.updateProgress(
       battleId: widget.battleId,
-      score: _score,
-      currentQuestion: _index + 1,
-      finished: isLast,
+      score: score,
+      currentQuestion: _questions.length,
+      finished: true,
     );
 
-    if (isLast) {
-      final provider = context.read<AppProvider>();
-      await Future.delayed(const Duration(seconds: 2)); // give the opponent a moment to also finish
-      final finalParticipants = await BattleService.instance.getParticipants(widget.battleId);
-      final me = Supabase.instance.client.auth.currentUser?.id;
-      final myEntry = finalParticipants.firstWhere(
-        (p) => p.userId == me,
-        orElse: () => BattleParticipant(userId: '', username: '', score: _score, currentQuestion: _questions.length, finished: true),
-      );
-      final opponents = finalParticipants.where((p) => p.userId != me).toList();
-      final opponentScore = opponents.isNotEmpty ? opponents.first.score : 0;
-      final won = myEntry.score > opponentScore;
-      final tied = myEntry.score == opponentScore;
+    final provider = context.read<AppProvider>();
+    await Future.delayed(const Duration(seconds: 2)); // give the opponent a moment to also finish
+    final finalParticipants = await BattleService.instance.getParticipants(widget.battleId);
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final myEntry = finalParticipants.firstWhere(
+      (p) => p.userId == me,
+      orElse: () => BattleParticipant(userId: '', username: '', score: score, currentQuestion: _questions.length, finished: true),
+    );
+    final opponents = finalParticipants.where((p) => p.userId != me).toList();
+    final opponentScore = opponents.isNotEmpty ? opponents.first.score : 0;
+    final won = myEntry.score > opponentScore;
+    final tied = myEntry.score == opponentScore;
 
-      await provider.recordBattleResult(won: won && !tied);
-      await provider.addXP(won && !tied ? 50 : (tied ? 25 : 10));
+    await provider.recordBattleResult(won: won && !tied);
+    await provider.addXP(won && !tied ? 50 : (tied ? 25 : 10));
+    await BattleService.instance.recordMatchResult(won && !tied ? 'W' : (tied ? 'T' : 'L'));
 
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => BattleResultScreen(
-          myScore: myEntry.score,
-          opponentScore: opponentScore,
-          opponentName: opponents.isNotEmpty ? opponents.first.username : 'Opponent',
-          total: _questions.length,
-        ),
-      ));
-    } else {
-      setState(() {
-        _index++;
-        _selected = null;
-      });
-    }
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+      builder: (_) => BattleResultScreen(
+        myScore: myEntry.score,
+        opponentScore: opponentScore,
+        opponentName: opponents.isNotEmpty ? opponents.first.username : 'Opponent',
+        total: _questions.length,
+      ),
+    ));
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _channel?.unsubscribe();
     super.dispose();
+  }
+
+  String get _formattedTime {
+    final m = (_remainingSeconds ~/ 60).toString().padLeft(2, '0');
+    final s = (_remainingSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
   @override
@@ -1021,11 +1549,32 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     final opponents = _participants.where((p) => p.userId != me).toList();
     final opponentProgress = opponents.isNotEmpty ? opponents.first.currentQuestion / _questions.length : 0.0;
     final q = _questions[_index];
+    final answeredCount = _selectedAnswers.where((a) => a != null).length;
+    final isLowTime = _remainingSeconds <= 30;
 
     return PopScope(
       canPop: false,
       child: Scaffold(
-        appBar: AppBar(title: Text('⚔️ Battle — ${widget.subject}'), automaticallyImplyLeading: false),
+        appBar: AppBar(
+          title: Text('⚔️ ${widget.subjectsLabel}'),
+          automaticallyImplyLeading: false,
+          actions: [
+            Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isLowTime ? scheme.errorContainer : scheme.primaryContainer,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(children: [
+                Icon(Icons.timer_rounded, size: 18, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer),
+                const SizedBox(width: 6),
+                Text(_formattedTime,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer)),
+              ]),
+            ),
+          ],
+        ),
         body: Column(
           children: [
             Padding(
@@ -1033,13 +1582,16 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
               child: Column(
                 children: [
                   Row(children: [
-                    Expanded(child: Text('You: Q${_index + 1}/${_questions.length}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                    Expanded(child: Text('You: $answeredCount/${_questions.length} answered', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
                     if (opponents.isNotEmpty)
                       Text('${opponents.first.username}: Q${opponents.first.currentQuestion}/${_questions.length}',
                           style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
                   ]),
                   const SizedBox(height: 6),
-                  ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: _index / _questions.length, minHeight: 6, backgroundColor: scheme.surfaceContainerHighest)),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(value: answeredCount / _questions.length, minHeight: 6, backgroundColor: scheme.surfaceContainerHighest),
+                  ),
                   const SizedBox(height: 4),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
@@ -1048,8 +1600,19 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
                 ],
               ),
             ),
+            Container(
+              margin: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+              child: const Text(
+                'Answers lock in automatically when the timer hits 0 — no early submit.',
+                style: TextStyle(fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ),
             Expanded(
               child: SingleChildScrollView(
+                key: ValueKey(_index),
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1058,11 +1621,11 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
-                      child: Text(q.questionText, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                      child: Text('Q${_index + 1}. ${q.questionText}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(height: 18),
                     ...List.generate(q.options.length, (i) {
-                      final isSelected = _selected == i;
+                      final isSelected = _selectedAnswers[_index] == i;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Material(
@@ -1091,11 +1654,25 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
             SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: FilledButton(onPressed: _selected == null ? null : _next, child: Text(_index == _questions.length - 1 ? 'Finish' : 'Next')),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
+                        icon: const Icon(Icons.chevron_left_rounded),
+                        label: const Text('Previous'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _index < _questions.length - 1 ? () => _goTo(_index + 1) : null,
+                        icon: const Icon(Icons.chevron_right_rounded),
+                        label: const Text('Next'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1145,6 +1722,18 @@ class BattleResultScreen extends StatelessWidget {
               const Text('+25 XP', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))
             else
               const Text('+10 XP for showing up', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            FutureBuilder<List<String>>(
+              future: BattleService.instance.getRecentResults(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox.shrink();
+                return Column(children: [
+                  Text('Your Last 5', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  MatchHistoryStrip(results: snapshot.data!),
+                ]);
+              },
+            ),
             const SizedBox(height: 32),
             SizedBox(width: double.infinity, height: 52, child: FilledButton(onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst), child: const Text('Back to Home'))),
           ],
@@ -1452,8 +2041,20 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
 /// 8. SHAREABLE REPORT CARD
 /// =========================================================================
 
-class ReportCardScreen extends StatelessWidget {
+class ReportCardScreen extends StatefulWidget {
   const ReportCardScreen({super.key});
+  @override
+  State<ReportCardScreen> createState() => _ReportCardScreenState();
+}
+
+class _ReportCardScreenState extends State<ReportCardScreen> {
+  late Future<List<String>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = BattleService.instance.getRecentResults();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1494,11 +2095,37 @@ Practice. Prepare. Pass. — NaijaLearn
           children: [
             Expanded(
               child: SingleChildScrollView(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
-                  child: Text(text, style: const TextStyle(height: 1.6, fontSize: 14)),
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
+                      child: Text(text, style: const TextStyle(height: 1.6, fontSize: 14)),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('⚔️ Battle Record (Last 5)', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 10),
+                          FutureBuilder<List<String>>(
+                            future: _historyFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                return const SizedBox(height: 26, child: CircularProgressIndicator(strokeWidth: 2));
+                              }
+                              return MatchHistoryStrip(results: snapshot.data ?? []);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
