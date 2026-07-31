@@ -409,10 +409,10 @@ class _LoginScreenState extends State<LoginScreen> {
       // never straight into HomeScreen. Password alone is never enough.
       await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
-        (route) => false,
-      );
+     Navigator.of(context).pushAndRemoveUntil(
+  MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+  (route) => false,
+);
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
