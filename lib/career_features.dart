@@ -1,35 +1,25 @@
-
 // lib/career_features.dart
 //
 // AI Study Coach, JAMB Score Predictor, Career Mode, Hall of Fame, Live
 // Quiz Battles, Mistakes Vault, Bookmarks, Report Card, Streak Saver
 // banner, and the exam Pace Meter.
 //
-// Weak-topic detection is SUBJECT-level, not sub-topic-level — the
-// question data has no topic tags (see certification.dart's own comment
-// on this), so "focus on Quadratic Equations" style output would be
-// fabricated. This coach instead says "focus on Mathematics" honestly,
-// based on real accuracy numbers.
-//
-// Score Predictor's "predicted marks" figures are explicitly heuristic
-// estimates from practice accuracy — not official JAMB scoring — and are
-// labelled as such in the UI.
-//
-// LIVE QUIZ BATTLES (rebuilt):
-// - Host can pick ONE or MULTIPLE subjects per battle.
-// - Host can choose to play "Now" or schedule a future time.
-// - Before the battle starts, both players see a Ready Check screen with
-//   the chosen subject(s). The joining player can tap "Ready" or raise a
-//   Request Edit (👏) asking the host to change the subjects. The host
-//   can then edit subjects, which resets both players back to not-ready.
-// - Once BOTH players are ready (and the scheduled time, if any, has been
-//   reached), the battle auto-starts with a RANDOMIZED countdown timer
-//   (different every battle — never a fixed duration).
-// - Neither player can manually submit early — they can only move between
-//   questions. When the timer hits zero, the battle auto-submits for
-//   both players simultaneously.
-// - Match history: last 5 results (W/L/T) are tracked per user and shown
-//   as a compact streak strip (e.g. "LLLWWL") wherever battles are shown.
+// LIVE QUIZ BATTLES (multiplayer + connecting overlay):
+// - Battles now support 2–6 players (host picks max players).
+// - Every participant has their own "ready" state (not just host/joiner).
+// - Any non-host player can raise a 👏 Request Edit; host can then adjust
+//   subjects, which resets everyone's ready state.
+// - Host can either wait for auto-start (all joined + all ready +
+//   scheduled time reached) or manually "Start Now" once >=2 are ready.
+// - The moment a start is triggered (locally predicted or confirmed via
+//   realtime), a full-screen "connecting" overlay appears with a spinner
+//   and rotating status messages ("Creating battle server...", "Ensuring
+//   service space...", etc.) for a minimum of ~2.2s so it never feels
+//   like a dead tap — then both players drop into the battle together.
+// - Randomized countdown timer per battle; no manual submit — the timer
+//   auto-submits for everyone when it hits zero.
+// - Results now show a full ranked leaderboard (not just 1v1), and the
+//   last-5 match history strip (e.g. "LLLWWL") is tracked per user.
 
 import 'dart:async';
 import 'dart:math';
@@ -201,7 +191,7 @@ class _ScorePredictorScreenState extends State<ScorePredictorScreen> {
   void _toggle(String s) {
     setState(() {
       if (_selected.contains(s)) {
-        if (s != 'English') _selected.remove(s); // English is compulsory in real UTME
+        if (s != 'English') _selected.remove(s);
       } else if (_selected.length < maxSubjects) {
         _selected.add(s);
       }
@@ -209,9 +199,7 @@ class _ScorePredictorScreenState extends State<ScorePredictorScreen> {
   }
 
   double _predictedFor(AppProvider provider, String subject) {
-    final accuracy = provider.getSubjectScore(subject); // 0-100
-    // Heuristic: guessing on 4-option MCQs nets ~25% by chance, so floor
-    // there; scale remaining accuracy up toward 100. ESTIMATE ONLY.
+    final accuracy = provider.getSubjectScore(subject);
     final predicted = 25 + (accuracy * 0.75);
     return predicted.clamp(0, 100);
   }
@@ -313,9 +301,6 @@ class CareerTier {
   const CareerTier(this.title, this.minLevel, this.color, this.icon, this.avatars);
 }
 
-// Thresholds intentionally match rankTitleForLevel/rankColor in
-// app_enhancements.dart so "Rank" on Home/Profile and "Career Mode" never
-// disagree with each other.
 const List<CareerTier> kCareerTiers = [
   CareerTier('Rookie', 1, Colors.grey, Icons.backpack_rounded, ['🙂', '📘']),
   CareerTier('Scholar', 5, Color(0xFF4CAF50), Icons.menu_book_rounded, ['🎓', '📗']),
@@ -523,7 +508,7 @@ class _HallOfFameScreenState extends State<HallOfFameScreen> {
 }
 
 /// =========================================================================
-/// 5. LIVE QUIZ BATTLES (real-time, via Supabase) — rebuilt
+/// 5. LIVE QUIZ BATTLES — multiplayer + connecting overlay
 /// =========================================================================
 
 class BattleInfo {
@@ -531,12 +516,11 @@ class BattleInfo {
   final String code;
   final List<String> subjects;
   final int perSubjectCount;
-  final String status; // waiting | active | finished
+  final String status;
   final List<String> questionIds;
   final int durationSeconds;
   final DateTime? scheduledAt;
-  final bool hostReady;
-  final bool joinerReady;
+  final int maxPlayers;
   final String? editRequestedBy;
   final String createdBy;
 
@@ -549,8 +533,7 @@ class BattleInfo {
     required this.questionIds,
     required this.durationSeconds,
     this.scheduledAt,
-    required this.hostReady,
-    required this.joinerReady,
+    required this.maxPlayers,
     this.editRequestedBy,
     required this.createdBy,
   });
@@ -564,8 +547,7 @@ class BattleInfo {
         questionIds: List<String>.from((m['question_ids'] as List<dynamic>?) ?? []),
         durationSeconds: (m['duration_seconds'] as num?)?.toInt() ?? 240,
         scheduledAt: m['scheduled_at'] != null ? DateTime.tryParse(m['scheduled_at'] as String) : null,
-        hostReady: m['host_ready'] as bool? ?? false,
-        joinerReady: m['joiner_ready'] as bool? ?? false,
+        maxPlayers: (m['max_players'] as num?)?.toInt() ?? 2,
         editRequestedBy: m['edit_requested_by'] as String?,
         createdBy: m['created_by'] as String? ?? '',
       );
@@ -580,6 +562,7 @@ class BattleParticipant {
   final int score;
   final int currentQuestion;
   final bool finished;
+  final bool ready;
 
   BattleParticipant({
     required this.userId,
@@ -588,6 +571,7 @@ class BattleParticipant {
     required this.score,
     required this.currentQuestion,
     required this.finished,
+    required this.ready,
   });
 
   factory BattleParticipant.fromMap(Map<String, dynamic> m) => BattleParticipant(
@@ -597,6 +581,7 @@ class BattleParticipant {
         score: (m['score'] as num?)?.toInt() ?? 0,
         currentQuestion: (m['current_question'] as num?)?.toInt() ?? 0,
         finished: m['finished'] as bool? ?? false,
+        ready: m['ready'] as bool? ?? false,
       );
 }
 
@@ -612,8 +597,8 @@ class BattleService {
     return List.generate(6, (_) => chars[_rng.nextInt(chars.length)]).join();
   }
 
-  /// Duration is randomized every single battle — 3 to 8 minutes, in
-  /// 30-second increments — so no one can "learn" a fixed exam length.
+  /// Randomized every battle — 3 to 8 minutes, 30-second increments — so
+  /// the duration can never be memorized or gamed.
   int _randomDurationSeconds() {
     final options = [180, 210, 240, 270, 300, 330, 360, 390, 420, 450, 480];
     return options[_rng.nextInt(options.length)];
@@ -641,6 +626,7 @@ class BattleService {
   Future<BattleInfo> createBattle({
     required List<String> subjects,
     required int perSubjectCount,
+    required int maxPlayers,
     DateTime? scheduledAt,
   }) async {
     final user = _client.auth.currentUser;
@@ -660,8 +646,7 @@ class BattleService {
       'question_ids': ids,
       'duration_seconds': _randomDurationSeconds(),
       'scheduled_at': scheduledAt?.toIso8601String(),
-      'host_ready': false,
-      'joiner_ready': false,
+      'max_players': maxPlayers,
       'created_by': user.id,
     }).select().single();
 
@@ -672,6 +657,7 @@ class BattleService {
       'battle_id': battle.id,
       'user_id': user.id,
       'username': username,
+      'ready': false,
     });
 
     return battle;
@@ -685,38 +671,43 @@ class BattleService {
     final row = await _client.from('battles').select().eq('code', normalized).eq('status', 'waiting').maybeSingle();
     if (row == null) throw StateError('No open battle found with that code.');
     final battle = BattleInfo.fromMap(row);
-    final username = await _currentUsername(user.id);
 
+    final existing = await getParticipants(battle.id);
+    final alreadyIn = existing.any((p) => p.userId == user.id);
+    if (!alreadyIn && existing.length >= battle.maxPlayers) {
+      throw StateError('This battle room is full (${battle.maxPlayers} players).');
+    }
+
+    final username = await _currentUsername(user.id);
     await _client.from('battle_participants').upsert({
       'battle_id': battle.id,
       'user_id': user.id,
       'username': username,
+      'ready': false,
     }, onConflict: 'battle_id,user_id');
 
     return battle;
   }
 
-  Future<void> setReady({required String battleId, required bool isHost, required bool ready}) async {
-    await _client.from('battles').update({
-      isHost ? 'host_ready' : 'joiner_ready': ready,
-    }).eq('id', battleId);
+  Future<void> setReady({required String battleId, required bool ready}) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    await _client.from('battle_participants').update({'ready': ready}).eq('battle_id', battleId).eq('user_id', user.id);
   }
 
-  /// Joiner's "👏 Request Edit" — flags to the host that they'd like the
-  /// subject selection changed, and drops both ready flags so no one
-  /// accidentally starts mid-negotiation.
+  Future<void> resetAllReady(String battleId) async {
+    await _client.from('battle_participants').update({'ready': false}).eq('battle_id', battleId);
+  }
+
+  /// Any non-host player's 👏 — flags the host, and drops everyone's ready
+  /// state so no one accidentally starts mid-negotiation.
   Future<void> requestEdit(String battleId) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
-    await _client.from('battles').update({
-      'edit_requested_by': user.id,
-      'host_ready': false,
-      'joiner_ready': false,
-    }).eq('id', battleId);
+    await _client.from('battles').update({'edit_requested_by': user.id}).eq('id', battleId);
+    await resetAllReady(battleId);
   }
 
-  /// Host applies a new subject/question-count selection after an edit
-  /// request, clears the request flag, and resets readiness for both.
   Future<void> updateSubjects({
     required String battleId,
     required List<String> subjects,
@@ -728,9 +719,8 @@ class BattleService {
       'per_subject_count': perSubjectCount,
       'question_ids': ids,
       'edit_requested_by': null,
-      'host_ready': false,
-      'joiner_ready': false,
     }).eq('id', battleId);
+    await resetAllReady(battleId);
   }
 
   Future<void> startBattle(String battleId) async {
@@ -766,14 +756,13 @@ class BattleService {
         .eq('user_id', user.id);
   }
 
-  /// Records a W/L/T for the current user's last-5 match history strip.
   Future<void> recordMatchResult(String result) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
     try {
       await _client.from('battle_history').insert({
         'user_id': user.id,
-        'result': result, // 'W', 'L', or 'T'
+        'result': result,
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -781,7 +770,6 @@ class BattleService {
     }
   }
 
-  /// Returns the most recent results, most-recent-first, e.g. ['W','L','L','W','T'].
   Future<List<String>> getRecentResults({int limit = 5}) async {
     final user = _client.auth.currentUser;
     if (user == null) return [];
@@ -826,7 +814,7 @@ class BattleService {
 
 /// Compact "LLLWWL"-style streak strip, reusable anywhere.
 class MatchHistoryStrip extends StatelessWidget {
-  final List<String> results; // most-recent-first
+  final List<String> results;
   const MatchHistoryStrip({super.key, required this.results});
 
   Color _colorFor(String r) {
@@ -862,6 +850,76 @@ class MatchHistoryStrip extends StatelessWidget {
   }
 }
 
+/// Full-screen "connecting" overlay with rotating status messages — shown
+/// from the moment a start is predicted/confirmed until the player lands
+/// inside the battle, so the transition never feels like a dead tap.
+class _BattleConnectingOverlay extends StatefulWidget {
+  const _BattleConnectingOverlay();
+  @override
+  State<_BattleConnectingOverlay> createState() => _BattleConnectingOverlayState();
+}
+
+class _BattleConnectingOverlayState extends State<_BattleConnectingOverlay> {
+  static const List<String> _messages = [
+    'Creating battle server...',
+    'Ensuring service space...',
+    'Syncing all players...',
+    'Loading question bank...',
+    'Shuffling questions fairly...',
+    'Locking in the timer...',
+    'Warming up the arena...',
+    'Almost ready...',
+  ];
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 850), (_) {
+      if (!mounted) return;
+      setState(() => _index = (_index + 1) % _messages.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withOpacity(0.78),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 56,
+              height: 56,
+              child: CircularProgressIndicator(strokeWidth: 4, color: Colors.white),
+            ),
+            const SizedBox(height: 22),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Text(
+                _messages[_index],
+                key: ValueKey(_index),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text('⚔️ Entering the battle arena', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class BattleLobbyScreen extends StatefulWidget {
   const BattleLobbyScreen({super.key});
   @override
@@ -871,6 +929,7 @@ class BattleLobbyScreen extends StatefulWidget {
 class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
   final List<String> _subjects = [kSubjects.first.name];
   int _perSubjectCount = 10;
+  int _maxPlayers = 2;
   bool _playNow = true;
   DateTime? _scheduledAt;
   final _codeController = TextEditingController();
@@ -921,6 +980,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
       final battle = await BattleService.instance.createBattle(
         subjects: _subjects,
         perSubjectCount: _perSubjectCount,
+        maxPlayers: _maxPlayers,
         scheduledAt: _playNow ? null : _scheduledAt,
       );
       if (!mounted) return;
@@ -1017,7 +1077,14 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                   decoration: const InputDecoration(labelText: 'Questions per subject'),
                 ),
                 const SizedBox(height: 14),
-                Text('When do you want to compete?', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                DropdownButtonFormField<int>(
+                  initialValue: _maxPlayers,
+                  items: const [2, 3, 4, 5, 6].map((c) => DropdownMenuItem(value: c, child: Text('$c players'))).toList(),
+                  onChanged: (v) => setState(() => _maxPlayers = v!),
+                  decoration: const InputDecoration(labelText: 'Number of players'),
+                ),
+                const SizedBox(height: 14),
+                const Text('When do you want to compete?', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -1089,10 +1156,6 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
   }
 }
 
-/// Ready-check screen: shows subjects, lets both players mark Ready,
-/// lets the joiner request an edit (👏), lets the host edit subjects,
-/// and auto-transitions both players into the battle once ready +
-/// (if scheduled) the scheduled time has arrived.
 class BattleReadyScreen extends StatefulWidget {
   final String battleId;
   final bool isHost;
@@ -1109,14 +1172,23 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
   bool _navigated = false;
   Timer? _scheduleTicker;
 
+  bool _connecting = false;
+  DateTime? _connectingSince;
+
   @override
   void initState() {
     super.initState();
     _refreshBattle();
     _refreshParticipants();
-    _participantsChannel = BattleService.instance.subscribeToParticipants(widget.battleId, _refreshParticipants);
+    _participantsChannel = BattleService.instance.subscribeToParticipants(widget.battleId, _onParticipantsChanged);
     _battleChannel = BattleService.instance.subscribeToBattle(widget.battleId, _onBattleChanged);
     _scheduleTicker = Timer.periodic(const Duration(seconds: 5), (_) => _maybeAutoStart());
+  }
+
+  Future<void> _onParticipantsChanged() async {
+    await _refreshParticipants();
+    _syncConnectingState();
+    _maybeAutoStart();
   }
 
   Future<void> _refreshParticipants() async {
@@ -1134,16 +1206,25 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
   Future<void> _onBattleChanged() async {
     await _refreshBattle();
     if (!mounted || _battle == null) return;
+    _syncConnectingState();
     if (_battle!.status == 'active' && !_navigated) {
       _navigated = true;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => BattlePlayScreen(
-          battleId: widget.battleId,
-          questionIds: _battle!.questionIds,
-          subjectsLabel: _battle!.subjectsLabel,
-          durationSeconds: _battle!.durationSeconds,
-        ),
-      ));
+      final since = _connectingSince ?? DateTime.now();
+      final elapsed = DateTime.now().difference(since);
+      const minDuration = Duration(milliseconds: 2200);
+      final wait = elapsed >= minDuration ? Duration.zero : minDuration - elapsed;
+      final battleSnapshot = _battle!;
+      Timer(wait, () {
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => BattlePlayScreen(
+            battleId: widget.battleId,
+            questionIds: battleSnapshot.questionIds,
+            subjectsLabel: battleSnapshot.subjectsLabel,
+            durationSeconds: battleSnapshot.durationSeconds,
+          ),
+        ));
+      });
       return;
     }
     _maybeAutoStart();
@@ -1155,22 +1236,54 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
     return DateTime.now().isAfter(scheduled);
   }
 
+  bool get _allReady => _participants.isNotEmpty && _participants.every((p) => p.ready);
+
+  void _syncConnectingState() {
+    final b = _battle;
+    if (b == null) return;
+    final aboutToStart = b.status == 'waiting' && _participants.length >= 2 && _allReady && _scheduleReached;
+    final starting = b.status == 'active';
+    final shouldShow = aboutToStart || starting;
+    if (shouldShow && !_connecting) {
+      setState(() {
+        _connecting = true;
+        _connectingSince = DateTime.now();
+      });
+    } else if (!shouldShow && _connecting && b.status != 'active') {
+      setState(() => _connecting = false);
+    }
+  }
+
   Future<void> _maybeAutoStart() async {
     final b = _battle;
     if (b == null || !widget.isHost || _navigated) return;
-    if (b.hostReady && b.joinerReady && _scheduleReached && _participants.length >= 2) {
+    if (_participants.length == b.maxPlayers && _allReady && _scheduleReached) {
       await BattleService.instance.startBattle(widget.battleId);
     }
   }
 
-  Future<void> _setReady(bool ready) async {
-    await BattleService.instance.setReady(battleId: widget.battleId, isHost: widget.isHost, ready: ready);
+  Future<void> _hostStartNow() async {
+    setState(() {
+      _connecting = true;
+      _connectingSince = DateTime.now();
+    });
+    await BattleService.instance.startBattle(widget.battleId);
+  }
+
+  Future<void> _toggleReady() async {
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final myEntry = _participants.where((p) => p.userId == me).toList();
+    final currentlyReady = myEntry.isNotEmpty && myEntry.first.ready;
+    await BattleService.instance.setReady(battleId: widget.battleId, ready: !currentlyReady);
+    await _refreshParticipants();
+    _syncConnectingState();
     _maybeAutoStart();
   }
 
   Future<void> _requestEdit() async {
     await BattleService.instance.requestEdit(widget.battleId);
     if (!mounted) return;
+    setState(() => _connecting = false);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('👏 Edit request sent to the host')),
     );
@@ -1190,6 +1303,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
       subjects: List<String>.from(result['subjects'] as List),
       perSubjectCount: result['count'] as int,
     );
+    _refreshBattle();
   }
 
   @override
@@ -1205,133 +1319,168 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
     final scheme = Theme.of(context).colorScheme;
     final battle = _battle;
     final me = Supabase.instance.client.auth.currentUser?.id;
-    final myReady = widget.isHost ? (battle?.hostReady ?? false) : (battle?.joinerReady ?? false);
-    final opponentReady = widget.isHost ? (battle?.joinerReady ?? false) : (battle?.hostReady ?? false);
+    final myEntryList = _participants.where((p) => p.userId == me).toList();
+    final myReady = myEntryList.isNotEmpty && myEntryList.first.ready;
     final editRequested = battle?.editRequestedBy != null && battle!.editRequestedBy != me;
+    final notReadyNames = _participants.where((p) => !p.ready).map((p) => p.userId == me ? 'You' : p.username).toList();
+    final canManualStart = battle != null &&
+        widget.isHost &&
+        _participants.length >= 2 &&
+        _allReady &&
+        _scheduleReached &&
+        battle.status == 'waiting';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Ready Check')),
       body: battle == null
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(18)),
-                    child: Column(children: [
-                      const Text('Share this code', style: TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 6),
-                      Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6)),
-                    ]),
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          const Icon(Icons.menu_book_rounded, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(battle.subjectsLabel, style: const TextStyle(fontWeight: FontWeight.bold))),
-                          Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-                        ]),
-                        if (battle.scheduledAt != null) ...[
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            const Icon(Icons.schedule_rounded, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              _scheduleReached
-                                  ? 'Scheduled time reached'
-                                  : 'Starts at ${battle.scheduledAt!.hour.toString().padLeft(2, '0')}:${battle.scheduledAt!.minute.toString().padLeft(2, '0')} on ${battle.scheduledAt!.day}/${battle.scheduledAt!.month}',
-                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                            ),
-                          ]),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (editRequested && widget.isHost) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(16)),
-                      child: Row(children: [
-                        const Text('👏', style: TextStyle(fontSize: 20)),
-                        const SizedBox(width: 10),
-                        const Expanded(child: Text('Your opponent asked to change the subjects.')),
-                        TextButton(onPressed: _editSubjects, child: const Text('Edit')),
-                      ]),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Text('Players (${_participants.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  ..._participants.map((p) => Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
-                        child: Row(children: [
-                          Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 20)),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600))),
-                        ]),
-                      )),
-                  const Spacer(),
-                  Row(
+          : Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: (opponentReady ? Colors.green : Colors.orange).withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Column(children: [
-                            Icon(opponentReady ? Icons.check_circle_rounded : Icons.hourglass_bottom_rounded,
-                                color: opponentReady ? Colors.green : Colors.orange),
-                            const SizedBox(height: 4),
-                            Text(opponentReady ? 'Opponent Ready' : 'Waiting on opponent', style: const TextStyle(fontSize: 11)),
-                          ]),
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(18)),
+                        child: Column(children: [
+                          const Text('Share this code', style: TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 6),
+                          Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6)),
+                          const SizedBox(height: 4),
+                          Text('Up to ${battle.maxPlayers} players', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                        ]),
+                      ),
+                      const SizedBox(height: 20),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.menu_book_rounded, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(battle.subjectsLabel, style: const TextStyle(fontWeight: FontWeight.bold))),
+                              Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                            ]),
+                            if (battle.scheduledAt != null) ...[
+                              const SizedBox(height: 8),
+                              Row(children: [
+                                const Icon(Icons.schedule_rounded, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _scheduleReached
+                                      ? 'Scheduled time reached'
+                                      : 'Starts at ${battle.scheduledAt!.hour.toString().padLeft(2, '0')}:${battle.scheduledAt!.minute.toString().padLeft(2, '0')} on ${battle.scheduledAt!.day}/${battle.scheduledAt!.month}',
+                                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                                ),
+                              ]),
+                            ],
+                          ],
                         ),
                       ),
+                      if (editRequested && widget.isHost) ...[
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(16)),
+                          child: Row(children: [
+                            const Text('👏', style: TextStyle(fontSize: 20)),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text('A player asked to change the subjects.')),
+                            TextButton(onPressed: _editSubjects, child: const Text('Edit')),
+                          ]),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Text('Players (${_participants.length}/${battle.maxPlayers})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView(
+                          children: _participants.map((p) {
+                            final isMe = p.userId == me;
+                            final isHostPlayer = p.userId == battle.createdBy;
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                              child: Row(children: [
+                                Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 20)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Row(children: [
+                                    Flexible(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                                    if (isMe) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                        decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+                                        child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
+                                      ),
+                                    ],
+                                    if (isHostPlayer) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                        decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(8)),
+                                        child: const Text('Host', style: TextStyle(fontSize: 10, color: Colors.white)),
+                                      ),
+                                    ],
+                                  ]),
+                                ),
+                                Icon(p.ready ? Icons.check_circle_rounded : Icons.hourglass_bottom_rounded,
+                                    color: p.ready ? Colors.green : Colors.orange, size: 20),
+                              ]),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      if (notReadyNames.isNotEmpty && _participants.length >= 2) ...[
+                        Text('Waiting on: ${notReadyNames.join(', ')}',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                        const SizedBox(height: 8),
+                      ],
+                      if (!widget.isHost)
+                        SizedBox(
+                          height: 44,
+                          child: OutlinedButton.icon(
+                            onPressed: myReady ? null : _requestEdit,
+                            icon: const Text('👏'),
+                            label: const Text('Request Subject Change'),
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 52,
+                        child: FilledButton.icon(
+                          onPressed: battle.status == 'waiting' ? _toggleReady : null,
+                          icon: Icon(myReady ? Icons.close_rounded : Icons.check_circle_outline_rounded),
+                          label: Text(myReady ? 'Not Ready' : 'I\'m Ready'),
+                        ),
+                      ),
+                      if (canManualStart) ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            onPressed: _hostStartNow,
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: Text('Start Now (${_participants.length}/${battle.maxPlayers} joined)'),
+                          ),
+                        ),
+                      ],
+                      if (!_scheduleReached) ...[
+                        const SizedBox(height: 8),
+                        Text('Battle will auto-start once the scheduled time arrives.',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  if (!widget.isHost)
-                    SizedBox(
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        onPressed: myReady ? null : _requestEdit,
-                        icon: const Text('👏'),
-                        label: const Text('Request Subject Change'),
-                      ),
-                    ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 52,
-                    child: FilledButton.icon(
-                      onPressed: _participants.length >= 2 ? () => _setReady(!myReady) : null,
-                      icon: Icon(myReady ? Icons.close_rounded : Icons.check_circle_outline_rounded),
-                      label: Text(
-                        _participants.length < 2
-                            ? 'Waiting for opponent…'
-                            : (myReady ? 'Not Ready' : 'I\'m Ready'),
-                      ),
-                    ),
-                  ),
-                  if (!_scheduleReached) ...[
-                    const SizedBox(height: 8),
-                    Text('Battle will auto-start once the scheduled time arrives.',
-                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
-                  ],
-                ],
-              ),
+                ),
+                if (_connecting) const Positioned.fill(child: _BattleConnectingOverlay()),
+              ],
             ),
     );
   }
@@ -1370,7 +1519,6 @@ class _SubjectEditSheetState extends State<_SubjectEditSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(
@@ -1480,8 +1628,8 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     setState(() => _index = index);
   }
 
-  /// Neither player can trigger this manually — it only fires when the
-  /// shared countdown reaches zero, so both submit at the same instant.
+  /// Fires only when the shared countdown hits zero — no manual submit
+  /// button exists, so both/all players lock in at the same instant.
   Future<void> _autoSubmit() async {
     if (_submitting) return;
     _submitting = true;
@@ -1499,30 +1647,24 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     );
 
     final provider = context.read<AppProvider>();
-    await Future.delayed(const Duration(seconds: 2)); // give the opponent a moment to also finish
+    await Future.delayed(const Duration(seconds: 2));
     final finalParticipants = await BattleService.instance.getParticipants(widget.battleId);
     final me = Supabase.instance.client.auth.currentUser?.id;
-    final myEntry = finalParticipants.firstWhere(
-      (p) => p.userId == me,
-      orElse: () => BattleParticipant(userId: '', username: '', score: score, currentQuestion: _questions.length, finished: true),
-    );
-    final opponents = finalParticipants.where((p) => p.userId != me).toList();
-    final opponentScore = opponents.isNotEmpty ? opponents.first.score : 0;
-    final won = myEntry.score > opponentScore;
-    final tied = myEntry.score == opponentScore;
 
-    await provider.recordBattleResult(won: won && !tied);
-    await provider.addXP(won && !tied ? 50 : (tied ? 25 : 10));
-    await BattleService.instance.recordMatchResult(won && !tied ? 'W' : (tied ? 'T' : 'L'));
+    final ranked = List<BattleParticipant>.from(finalParticipants)..sort((a, b) => b.score.compareTo(a.score));
+    final topScore = ranked.isNotEmpty ? ranked.first.score : score;
+    final topScorers = ranked.where((p) => p.score == topScore).toList();
+    final iAmTop = topScorers.any((p) => p.userId == me);
+    final tied = iAmTop && topScorers.length > 1;
+    final won = iAmTop && !tied;
+
+    await provider.recordBattleResult(won: won);
+    await provider.addXP(won ? 50 : (tied ? 25 : 10));
+    await BattleService.instance.recordMatchResult(won ? 'W' : (tied ? 'T' : 'L'));
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => BattleResultScreen(
-        myScore: myEntry.score,
-        opponentScore: opponentScore,
-        opponentName: opponents.isNotEmpty ? opponents.first.username : 'Opponent',
-        total: _questions.length,
-      ),
+      builder: (_) => BattleResultScreen(participants: finalParticipants, total: _questions.length),
     ));
   }
 
@@ -1547,7 +1689,6 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     }
     final me = Supabase.instance.client.auth.currentUser?.id;
     final opponents = _participants.where((p) => p.userId != me).toList();
-    final opponentProgress = opponents.isNotEmpty ? opponents.first.currentQuestion / _questions.length : 0.0;
     final q = _questions[_index];
     final answeredCount = _selectedAnswers.where((a) => a != null).length;
     final isLowTime = _remainingSeconds <= 30;
@@ -1583,20 +1724,32 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
                 children: [
                   Row(children: [
                     Expanded(child: Text('You: $answeredCount/${_questions.length} answered', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-                    if (opponents.isNotEmpty)
-                      Text('${opponents.first.username}: Q${opponents.first.currentQuestion}/${_questions.length}',
-                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
                   ]),
                   const SizedBox(height: 6),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: LinearProgressIndicator(value: answeredCount / _questions.length, minHeight: 6, backgroundColor: scheme.surfaceContainerHighest),
                   ),
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(value: opponentProgress, minHeight: 4, backgroundColor: scheme.surfaceContainerHighest, valueColor: AlwaysStoppedAnimation(scheme.secondary)),
-                  ),
+                  if (opponents.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    ...opponents.map((o) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(children: [
+                            SizedBox(width: 90, child: Text(o.username, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant), overflow: TextOverflow.ellipsis)),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: LinearProgressIndicator(
+                                  value: o.currentQuestion / _questions.length,
+                                  minHeight: 4,
+                                  backgroundColor: scheme.surfaceContainerHighest,
+                                  valueColor: AlwaysStoppedAnimation(scheme.secondary),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        )),
+                  ],
                 ],
               ),
             ),
@@ -1684,17 +1837,21 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
 }
 
 class BattleResultScreen extends StatelessWidget {
-  final int myScore;
-  final int opponentScore;
-  final String opponentName;
+  final List<BattleParticipant> participants;
   final int total;
-  const BattleResultScreen({super.key, required this.myScore, required this.opponentScore, required this.opponentName, required this.total});
+  const BattleResultScreen({super.key, required this.participants, required this.total});
 
   @override
   Widget build(BuildContext context) {
-    final won = myScore > opponentScore;
-    final tied = myScore == opponentScore;
     final scheme = Theme.of(context).colorScheme;
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    final ranked = List<BattleParticipant>.from(participants)..sort((a, b) => b.score.compareTo(a.score));
+    final topScore = ranked.isNotEmpty ? ranked.first.score : 0;
+    final topScorers = ranked.where((p) => p.score == topScore).toList();
+    final myEntry = ranked.where((p) => p.userId == me).toList();
+    final iAmTop = myEntry.isNotEmpty && topScorers.any((p) => p.userId == me);
+    final tied = iAmTop && topScorers.length > 1;
+    final won = iAmTop && !tied;
     final color = tied ? Colors.amber : (won ? Colors.green : scheme.error);
 
     return Scaffold(
@@ -1702,27 +1859,62 @@ class BattleResultScreen extends StatelessWidget {
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(tied ? Icons.handshake_rounded : (won ? Icons.emoji_events_rounded : Icons.sentiment_dissatisfied_rounded), size: 72, color: color),
-            const SizedBox(height: 16),
-            Text(tied ? "It's a Tie!" : (won ? 'You Won! 🏆' : 'You Lost'), style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: color)),
+            Icon(tied ? Icons.handshake_rounded : (won ? Icons.emoji_events_rounded : Icons.sentiment_dissatisfied_rounded), size: 64, color: color),
+            const SizedBox(height: 12),
+            Text(tied ? "It's a Tie!" : (won ? 'You Won! 🏆' : 'Battle Over'), style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
             const SizedBox(height: 20),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _ScoreChip(label: 'You', score: myScore, total: total, color: scheme.primary),
-              const SizedBox(width: 16),
-              const Text('vs', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(width: 16),
-              _ScoreChip(label: opponentName, score: opponentScore, total: total, color: scheme.secondary),
-            ]),
-            const SizedBox(height: 24),
-            if (won && !tied)
+            Expanded(
+              child: ListView.separated(
+                itemCount: ranked.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, i) {
+                  final p = ranked[i];
+                  final isMe = p.userId == me;
+                  final isTop = p.score == topScore;
+                  final medalColors = [Colors.amber, Colors.grey, Colors.brown];
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(16),
+                      border: isTop ? Border.all(color: Colors.amber, width: 1.6) : null,
+                    ),
+                    child: Row(children: [
+                      CircleAvatar(
+                        backgroundColor: i < 3 ? medalColors[i] : scheme.primaryContainer,
+                        child: Text('${i + 1}', style: TextStyle(color: i < 3 ? Colors.white : scheme.onPrimaryContainer, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 18)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Row(children: [
+                          Flexible(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                          if (isMe) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+                              child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
+                            ),
+                          ],
+                        ]),
+                      ),
+                      Text('${p.score}/$total', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
+                    ]),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (won)
               const Text('+50 XP • Ranking increased', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
             else if (tied)
               const Text('+25 XP', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))
             else
               const Text('+10 XP for showing up', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             FutureBuilder<List<String>>(
               future: BattleService.instance.getRecentResults(),
               builder: (context, snapshot) {
@@ -1734,29 +1926,13 @@ class BattleResultScreen extends StatelessWidget {
                 ]);
               },
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
             SizedBox(width: double.infinity, height: 52, child: FilledButton(onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst), child: const Text('Back to Home'))),
           ],
         ),
       ),
     );
   }
-}
-
-class _ScoreChip extends StatelessWidget {
-  final String label;
-  final int score;
-  final int total;
-  final Color color;
-  const _ScoreChip({required this.label, required this.score, required this.total, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Column(children: [
-        CircleAvatar(radius: 28, backgroundColor: color.withOpacity(0.15), child: Text('$score', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 18))),
-        const SizedBox(height: 6),
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-        Text('/ $total', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-      ]);
 }
 
 /// =========================================================================
