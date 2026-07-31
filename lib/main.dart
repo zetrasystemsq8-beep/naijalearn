@@ -410,7 +410,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+        MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
         (route) => false,
       );
     } on ZetraAuthException catch (e) {
