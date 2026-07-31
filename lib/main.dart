@@ -63,7 +63,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'notification_service.dart';
 import 'app_enhancements.dart';
 import 'certification.dart';
 import 'career_features.dart';
