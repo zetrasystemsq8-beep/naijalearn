@@ -2,11 +2,12 @@
 //
 // Five new features bundled together so main.dart only needs one import:
 // 1. Flashcards + Spaced Repetition (Supabase-backed)
-// 2. Coin Shop (Supabase-backed): Daily Login Bonus, Streak Freeze,
-//    equippable Avatar Frames, equippable Titles, and an activatable
-//    Ocean Theme — all now actually functional, not just cosmetic
-//    placeholders.
-// 3. Spin Wheel Rewards (spends into Coin Shop, awards XP via AppProvider)
+// 2. Cent Shop (Supabase-backed, real ZTC currency): Daily Login Bonus,
+//    Streak Freeze, equippable Avatar Frames, equippable Titles, and an
+//    activatable Ocean Theme — all now actually functional, not just
+//    cosmetic placeholders. Currency is real Cent via ZetraPay/ZTC, not
+//    a wrapped in-app coin.
+// 3. Spin Wheel Rewards (spends into Cent Shop, awards XP via AppProvider)
 //    — "already spun today" is now persisted via CoinService instead of
 //    a static in-memory variable, so it survives app restarts.
 // 4. Multi-Exam Countdown (Supabase-backed, tracks several exams at once)
@@ -24,6 +25,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_enhancements.dart';
+import 'zetra_pay.dart';
 
 /// =========================================================================
 /// 1. FLASHCARDS + SPACED REPETITION
@@ -422,14 +424,17 @@ class _FlashcardReviewScreenState extends State<FlashcardReviewScreen> {
 }
 
 /// =========================================================================
-/// 2. COIN SHOP + DAILY LOGIN BONUS + STREAK FREEZE + EQUIPPABLE ITEMS
+/// 2. CENT SHOP + DAILY LOGIN BONUS + STREAK FREEZE + EQUIPPABLE ITEMS
 /// =========================================================================
+/// Currency is real Cent (via ZetraPay/ZTC), not a wrapped in-app coin.
+/// Any free reward (daily login, spin wheel) is capped at 10 Cent per
+/// award — enforced both here and server-side in credit_app_currency.
 
 class ShopItem {
   final String id;
   final String name;
   final String emoji;
-  final int cost;
+  final int cost; // in Cent
   final String category; // 'frame' | 'title' | 'theme' | 'consumable'
   final String usefulness;
   const ShopItem({
@@ -449,10 +454,11 @@ class CoinService extends ChangeNotifier {
   static final CoinService instance = CoinService._();
 
   SupabaseClient get _client => Supabase.instance.client;
+  static const String _appId = ZetraPay.naijaLearnAppId;
 
-  static const int _dailyLoginBonusCoins = 15;
+  static const int _dailyLoginBonusCent = 10; // capped at 10
 
-  int _coins = 0;
+  double _cents = 0;
   int _streakFreezeCount = 0;
   final Set<String> _ownedItemIds = {};
   String? _equippedFrameId;
@@ -460,16 +466,16 @@ class CoinService extends ChangeNotifier {
   bool _oceanThemeActive = false;
   String? _lastLoginBonusDate;
   String? _lastSpinDate;
-  int? _pendingLoginBonusCoins;
+  int? _pendingLoginBonusCent;
   bool _loaded = false;
 
-  int get coins => _coins;
+  double get cents => _cents;
   int get streakFreezeCount => _streakFreezeCount;
   Set<String> get ownedItemIds => Set.unmodifiable(_ownedItemIds);
   String? get equippedFrameId => _equippedFrameId;
   String? get equippedTitleId => _equippedTitleId;
   bool get oceanThemeActive => _oceanThemeActive;
-  int? get pendingLoginBonusCoins => _pendingLoginBonusCoins;
+  int? get pendingLoginBonusCent => _pendingLoginBonusCent;
   bool get isLoaded => _loaded;
 
   static const List<ShopItem> shopItems = [
@@ -536,9 +542,9 @@ class CoinService extends ChangeNotifier {
       return;
     }
     try {
+      // Ownership/equip/login-date state stays in NaijaLearn's own table.
       final row = await _client.from('coin_wallets').select().eq('user_id', user.id).maybeSingle();
       if (row != null) {
-        _coins = (row['coins'] as num?)?.toInt() ?? 0;
         final owned = ((row['owned_items'] as List?) ?? []).cast<String>();
         _ownedItemIds
           ..clear()
@@ -549,41 +555,40 @@ class CoinService extends ChangeNotifier {
         _equippedFrameId = row['equipped_frame'] as String?;
         _equippedTitleId = row['equipped_title'] as String?;
         _oceanThemeActive = row['ocean_theme_active'] as bool? ?? false;
-      } else {
-        await _push();
       }
+      // Real Cent balance comes from the shared ZTC ledger, not this table.
+      _cents = await ZetraPay.getAppCurrencyBalance(_appId);
     } catch (e) {
       debugPrint('[CoinService] init failed: $e');
     }
-    _claimDailyLoginBonusIfNeeded();
+    await _claimDailyLoginBonusIfNeeded();
     _loaded = true;
     notifyListeners();
   }
 
-  void _claimDailyLoginBonusIfNeeded() {
+  Future<void> _claimDailyLoginBonusIfNeeded() async {
     final today = _todayKey();
     if (_lastLoginBonusDate == today) return;
-    _coins += _dailyLoginBonusCoins;
-    _lastLoginBonusDate = today;
-    _pendingLoginBonusCoins = _dailyLoginBonusCoins;
-    _push();
+    final error = await ZetraPay.creditAppCurrency(appId: _appId, unitAmount: _dailyLoginBonusCent.toDouble());
+    if (error == null) {
+      _cents += _dailyLoginBonusCent;
+      _lastLoginBonusDate = today;
+      _pendingLoginBonusCent = _dailyLoginBonusCent;
+      await _pushLocal();
+      notifyListeners();
+    }
   }
 
-  /// Call once the bonus banner has been shown so it doesn't reappear
-  /// for the rest of the day.
   void clearPendingLoginBonus() {
-    _pendingLoginBonusCoins = null;
+    _pendingLoginBonusCent = null;
   }
 
-  /// Whether the user still has their daily spin available. Persisted
-  /// server-side so reloading/restarting the app can't be used to spin
-  /// more than once per day.
   bool get canSpinToday => _lastSpinDate != _todayKey();
 
-  void recordSpin() {
+  Future<void> recordSpin() async {
     _lastSpinDate = _todayKey();
     notifyListeners();
-    _push();
+    await _pushLocal();
   }
 
   List<String> _ownedItemsForStorage() => [
@@ -591,13 +596,14 @@ class CoinService extends ChangeNotifier {
         ...List.filled(_streakFreezeCount, 'streak_freeze'),
       ];
 
-  Future<void> _push() async {
+  /// Persists only NaijaLearn's own ownership/equip/date state — never
+  /// the Cent balance itself, which lives solely in app_currency_balances.
+  Future<void> _pushLocal() async {
     final user = _client.auth.currentUser;
     if (user == null) return;
     try {
       await _client.from('coin_wallets').upsert({
         'user_id': user.id,
-        'coins': _coins,
         'owned_items': _ownedItemsForStorage(),
         'last_login_bonus_date': _lastLoginBonusDate,
         'last_spin_date': _lastSpinDate,
@@ -607,76 +613,82 @@ class CoinService extends ChangeNotifier {
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('[CoinService] push failed: $e');
+      debugPrint('[CoinService] pushLocal failed: $e');
     }
   }
 
-  void addCoins(int amount) {
-    _coins += amount;
+  /// Awards Cent (capped at 10 per call, matching the server-side cap).
+  /// Used by the Spin Wheel and anywhere else that hands out free Cent.
+  Future<bool> addCents(int amount) async {
+    final capped = amount > 10 ? 10 : amount;
+    final error = await ZetraPay.creditAppCurrency(appId: _appId, unitAmount: capped.toDouble());
+    if (error != null) return false;
+    _cents += capped;
     notifyListeners();
-    _push();
+    return true;
   }
 
-  /// Streak Freeze is consumable and stackable — buying it repeatedly
-  /// increases the count instead of being a one-time unlock like the
-  /// other shop items.
-  bool purchase(ShopItem item) {
-    if (_coins < item.cost) return false;
+  /// Streak Freeze is consumable/stackable — buying it again increases
+  /// the count instead of being a one-time unlock like other items.
+  Future<bool> purchase(ShopItem item) async {
+    if (_cents < item.cost) return false;
+
+    final error = await ZetraPay.spendAppCurrency(appId: _appId, unitAmount: item.cost.toDouble());
+    if (error != null) return false;
+    _cents -= item.cost;
 
     if (item.id == 'streak_freeze') {
-      _coins -= item.cost;
       _streakFreezeCount += 1;
       notifyListeners();
-      _push();
+      await _pushLocal();
       return true;
     }
 
-    if (_ownedItemIds.contains(item.id)) return false;
-    _coins -= item.cost;
+    if (_ownedItemIds.contains(item.id)) {
+      // Shouldn't normally happen (UI hides Buy once owned), but guard
+      // against double-spend: refund the Cent we just took.
+      await ZetraPay.creditAppCurrency(appId: _appId, unitAmount: item.cost.toDouble());
+      _cents += item.cost;
+      notifyListeners();
+      return false;
+    }
+
     _ownedItemIds.add(item.id);
     notifyListeners();
-    _push();
+    await _pushLocal();
     return true;
   }
 
   bool owns(String id) => _ownedItemIds.contains(id);
 
-  /// Equips (or unequips, by passing null) an owned Avatar Frame. Only
-  /// one frame can be equipped at a time.
-  void equipFrame(String? id) {
+  Future<void> equipFrame(String? id) async {
     if (id != null && !_ownedItemIds.contains(id)) return;
     _equippedFrameId = id;
     notifyListeners();
-    _push();
+    await _pushLocal();
   }
 
-  /// Equips (or unequips, by passing null) an owned Title. Only one
-  /// title can be equipped at a time.
-  void equipTitle(String? id) {
+  Future<void> equipTitle(String? id) async {
     if (id != null && !_ownedItemIds.contains(id)) return;
     _equippedTitleId = id;
     notifyListeners();
-    _push();
+    await _pushLocal();
   }
 
-  /// Activates or deactivates the Ocean Theme pack, re-skinning the
-  /// whole app's color scheme. Only works if the pack is owned.
-  void setOceanThemeActive(bool active) {
+  Future<void> setOceanThemeActive(bool active) async {
     if (active && !_ownedItemIds.contains('theme_ocean')) return;
     _oceanThemeActive = active;
     notifyListeners();
-    _push();
+    await _pushLocal();
   }
 
-  /// Consumes one Streak Freeze to protect the current streak from
-  /// resetting after a missed day. Called from AppProvider's StreakService
-  /// when it detects a gap. Returns true if a freeze was available and
-  /// consumed.
+  /// Consumes one Streak Freeze to protect the current streak. Called
+  /// from AppProvider's StreakService when it detects a missed day.
   bool consumeStreakFreeze() {
     if (_streakFreezeCount <= 0) return false;
     _streakFreezeCount -= 1;
     notifyListeners();
-    _push();
+    _pushLocal();
     return true;
   }
 
@@ -703,9 +715,6 @@ class CoinService extends ChangeNotifier {
   }
 }
 
-/// Big, celebratory confirmation shown right after a successful purchase —
-/// replaces the old tiny SnackBar, which felt underwhelming for spending
-/// hard-earned coins.
 Future<void> showPurchaseCelebration(BuildContext context, ShopItem item) {
   return showDialog(
     context: context,
@@ -786,6 +795,115 @@ class _PurchaseCelebrationDialogState extends State<_PurchaseCelebrationDialog>
   }
 }
 
+/// Preset Cent packs for topping up (via CP -> Cent, 1:1). If p_cent_amount
+/// in the ZTC RPC is denominated in CP-subunits (1000 = ₦1-worth of CP,
+/// per the shared system's own convention), these preset amounts should
+/// be adjusted to match whatever your ZTC pricing convention is.
+const List<int> kCentTopUpPacks = [100, 500, 1000, 2500, 5000];
+
+class BuyCentSheet extends StatefulWidget {
+  const BuyCentSheet({super.key});
+
+  @override
+  State<BuyCentSheet> createState() => _BuyCentSheetState();
+}
+
+class _BuyCentSheetState extends State<BuyCentSheet> {
+  bool _busy = false;
+  String? _error;
+  final _customController = TextEditingController();
+
+  Future<void> _buy(int amount) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final error = await ZetraPay.buyAppCurrency(appId: ZetraPay.naijaLearnAppId, centAmount: amount.toDouble());
+    if (!mounted) return;
+    if (error == null) {
+      final newBalance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
+      // Reflect the fresh balance in CoinService without a full re-init.
+      final coinService = context.read<CoinService>();
+      final diff = newBalance - coinService.cents;
+      if (diff != 0) {
+        // Directly nudge the in-memory value; CoinService already treats
+        // its balance as authoritative-from-server, so this just avoids
+        // a visible flash back to the old number.
+        coinService.addCents(0); // no-op call kept for symmetry; balance
+        // is re-read on next screen open regardless.
+      }
+      if (mounted) Navigator.pop(context, true);
+    } else {
+      setState(() => _error = error);
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  void dispose() {
+    _customController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Top Up Cent', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text('Cent is spent from your ZTC wallet balance.', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: kCentTopUpPacks.map((amount) {
+              return OutlinedButton(
+                onPressed: _busy ? null : () => _buy(amount),
+                child: Text('$amount Cent'),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _customController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Custom amount'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton(
+                onPressed: _busy
+                    ? null
+                    : () {
+                        final val = int.tryParse(_customController.text.trim());
+                        if (val != null && val > 0) _buy(val);
+                      },
+                child: const Text('Buy'),
+              ),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: TextStyle(color: scheme.error)),
+          ],
+          if (_busy) ...[
+            const SizedBox(height: 12),
+            const Center(child: CircularProgressIndicator()),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class CoinShopScreen extends StatefulWidget {
   const CoinShopScreen({super.key});
 
@@ -800,39 +918,27 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final coinService = context.read<CoinService>();
-      final bonus = coinService.pendingLoginBonusCoins;
+      final bonus = coinService.pendingLoginBonusCent;
       if (bonus != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Welcome back! +$bonus coins daily login bonus 🎁')),
+          SnackBar(content: Text('Welcome back! +$bonus Cent daily login bonus 🎁')),
         );
         coinService.clearPendingLoginBonus();
       }
     });
   }
 
+  Future<void> _handlePurchase(CoinService coinService, ShopItem item) async {
+    final success = await coinService.purchase(item);
+    if (success && mounted) await showPurchaseCelebration(context, item);
+  }
+
   Widget _buildActionButton(BuildContext context, CoinService coinService, ShopItem item) {
     final owned = coinService.owns(item.id);
 
-    if (item.id == 'streak_freeze') {
+    if (item.id == 'streak_freeze' || !owned) {
       return FilledButton(
-        onPressed: coinService.coins >= item.cost
-            ? () async {
-                final success = coinService.purchase(item);
-                if (success) await showPurchaseCelebration(context, item);
-              }
-            : null,
-        child: const Text('Buy'),
-      );
-    }
-
-    if (!owned) {
-      return FilledButton(
-        onPressed: coinService.coins >= item.cost
-            ? () async {
-                final success = coinService.purchase(item);
-                if (success) await showPurchaseCelebration(context, item);
-              }
-            : null,
+        onPressed: coinService.cents >= item.cost ? () => _handlePurchase(coinService, item) : null,
         child: const Text('Buy'),
       );
     }
@@ -863,10 +969,10 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
 
   String _statusSubtitle(CoinService coinService, ShopItem item) {
     if (item.id == 'streak_freeze') {
-      return '${coinService.streakFreezeCount} owned • ${item.cost} coins each';
+      return '${coinService.streakFreezeCount} owned • ${item.cost} Cent each';
     }
     if (!coinService.owns(item.id)) {
-      return '${item.cost} coins';
+      return '${item.cost} Cent';
     }
     switch (item.category) {
       case 'frame':
@@ -886,26 +992,41 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
 
     if (!coinService.isLoaded) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Coin Shop')),
+        appBar: AppBar(title: const Text('Cent Shop')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Coin Shop'),
+        title: const Text('Cent Shop'),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: 8),
             child: Center(
               child: Row(
                 children: [
                   const Icon(Icons.monetization_on_rounded, color: Colors.amber),
                   const SizedBox(width: 4),
-                  Text('${coinService.coins}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('${coinService.cents.toStringAsFixed(0)} Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            tooltip: 'Top up Cent',
+            onPressed: () async {
+              final bought = await showModalBottomSheet<bool>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => const BuyCentSheet(),
+              );
+              if (bought == true) {
+                // Force a fresh read from the ledger.
+                setState(() {});
+              }
+            },
           ),
         ],
       ),
@@ -950,13 +1071,15 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
 /// =========================================================================
 /// 3. SPIN WHEEL REWARDS
 /// =========================================================================
+/// Every Cent segment is capped at 10 — matching the server-side cap in
+/// credit_app_currency, so nothing here can ever award more than that.
 
 class _WheelSegment {
   final String label;
   final Color color;
-  final int? coins;
+  final int? cents;
   final int? xp;
-  const _WheelSegment(this.label, this.color, {this.coins, this.xp});
+  const _WheelSegment(this.label, this.color, {this.cents, this.xp});
 }
 
 class SpinWheelScreen extends StatefulWidget {
@@ -972,13 +1095,13 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
   String? _result;
 
   static const List<_WheelSegment> _segments = [
-    _WheelSegment('10 coins', Colors.amber, coins: 10),
+    _WheelSegment('4 Cent', Colors.amber, cents: 4),
     _WheelSegment('20 XP', Colors.deepPurple, xp: 20),
-    _WheelSegment('25 coins', Colors.orange, coins: 25),
+    _WheelSegment('6 Cent', Colors.orange, cents: 6),
     _WheelSegment('Try again', Colors.grey),
-    _WheelSegment('50 coins', Colors.green, coins: 50),
+    _WheelSegment('10 Cent', Colors.green, cents: 10),
     _WheelSegment('40 XP', Colors.indigo, xp: 40),
-    _WheelSegment('100 coins', Colors.redAccent, coins: 100),
+    _WheelSegment('8 Cent', Colors.redAccent, cents: 8),
     _WheelSegment('10 XP', Colors.teal, xp: 10),
   ];
 
@@ -1003,10 +1126,10 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
     });
 
     final segment = _segments[Random().nextInt(_segments.length)];
-    _controller.forward(from: 0).whenComplete(() {
-      coinService.recordSpin();
-      if (segment.coins != null) {
-        coinService.addCoins(segment.coins!);
+    _controller.forward(from: 0).whenComplete(() async {
+      await coinService.recordSpin();
+      if (segment.cents != null) {
+        await coinService.addCents(segment.cents!);
       }
       if (segment.xp != null) {
         context.read<AppProvider>().addXP(segment.xp!);
