@@ -70,6 +70,7 @@ import 'career_features.dart';
 import 'textbooks.dart';
 import 'features5.dart';
 import 'zetra_pay.dart';
+import 'guest_mode.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -502,18 +503,32 @@ class _LoginScreenState extends State<LoginScreen> {
               // Primary action pinned to the bottom of the screen.
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                child: SizedBox(
-                  height: 52,
-                  child: FilledButton(
-                    onPressed: _loading ? null : _continue,
-                    child: _loading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                          )
-                        : const Text('Log In', style: TextStyle(fontSize: 16)),
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: _loading ? null : _continue,
+                        child: _loading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                              )
+                            : const Text('Log In', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const GuestHomeScreen()),
+                              ),
+                      child: const Text('Continue as Guest'),
+                    ),
+                  ],
                 ),
               ),
             ],
