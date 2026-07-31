@@ -70,6 +70,7 @@ import 'career_features.dart';
 import 'textbooks.dart';
 import 'features5.dart';
 import 'zetra_pay.dart';
+import 'nai_mentor.dart';
 import 'guest_mode.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
@@ -408,8 +409,9 @@ class _LoginScreenState extends State<LoginScreen> {
       // never straight into HomeScreen. Password alone is never enough.
       await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+        (route) => false,
       );
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
