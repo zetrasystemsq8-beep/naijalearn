@@ -617,6 +617,11 @@ class AppProvider extends ChangeNotifier {
     _darkMode = _storage.loadDarkMode();
     _avatarEmoji = _storage.loadAvatarEmoji();
     _stats = await _streak.checkStreak(_stats);
+
+    if (_stats.streak > 0 && _stats.questionsToday == 0 && DateTime.now().hour >= 17) {
+      NotificationService.instance.showStreakAtRisk(_stats.streak);
+    }
+    
     _stats = _rolloverDailyIfNeeded(_stats);
     await _storage.saveUserStats(_stats);
 
