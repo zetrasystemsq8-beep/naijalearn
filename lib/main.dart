@@ -613,7 +613,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
+        MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
         (route) => false,
       );
     } on ZetraAuthException catch (e) {
