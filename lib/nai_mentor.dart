@@ -4,16 +4,26 @@
 // Talks to the 'nai-interview' Supabase Edge Function. Only reachable by
 // signed-in Zetra users (guests never see this entry point).
 //
+// Pricing (paid in NaijaLearn's app currency — Cent, via ZetraPay):
+//   - 1 message  = 1 Cent
+//   - 15 messages = 10 Cent
+//   - Unlimited for 24 hours = 1000 Cent (= 1 CP)
+// Credits/day-pass are tracked server-side in nai_message_wallet via
+// security-definer RPCs, so the client can never grant itself free
+// messages — only nai_grant_message_credits/nai_grant_day_pass can add
+// them, and those only run after a real ZetraPay.spendAppCurrency call.
+//
 // NaiOnboardingGate is a one-time interstitial shown right after a NEW
 // account verifies (accounts created after _naiRolloutCutoff only —
-// existing users are never shown this). It checks for an existing
-// Academic Blueprint first, and marks itself "seen" via Supabase Auth
-// user metadata so it never reappears once dismissed.
+// existing users are never shown this). The first onboarding interview
+// is free — it does NOT consume a credit — since it happens before the
+// user has had any chance to buy any.
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart' show ZetraProfile, HomeScreen;
+import 'zetra_pay.dart';
 
 class NaiBlueprintService {
   NaiBlueprintService._();
@@ -53,6 +63,57 @@ class NaiBlueprintService {
   }
 }
 
+/// Handles the paid side: consuming a credit before each message, and
+/// purchasing more (single message / 15-pack / day pass).
+class NaiWallet {
+  NaiWallet._();
+  static SupabaseClient get _client => Supabase.instance.client;
+
+  static const int singleMessagePriceCent = 1;
+  static const int packOf15PriceCent = 10;
+  static const int packOf15Credits = 15;
+  static const int dayPassPriceCent = 1000; // = 1 CP
+
+  /// Tries to consume one message credit (or use an active day pass).
+  /// Returns true if the message may proceed.
+  static Future<bool> tryConsumeCredit() async {
+    final result = await _client.rpc('nai_consume_message_credit');
+    return result == true;
+  }
+
+  /// Buys a single message: spends Cent, then grants exactly 1 credit.
+  /// Returns null on success, or an error message.
+  static Future<String?> buySingleMessage() async {
+    final err = await ZetraPay.spendAppCurrency(
+      appId: ZetraPay.naijaLearnAppId,
+      unitAmount: singleMessagePriceCent.toDouble(),
+    );
+    if (err != null) return err;
+    await _client.rpc('nai_grant_message_credits', params: {'p_credits': 1});
+    return null;
+  }
+
+  static Future<String?> buyFifteenPack() async {
+    final err = await ZetraPay.spendAppCurrency(
+      appId: ZetraPay.naijaLearnAppId,
+      unitAmount: packOf15PriceCent.toDouble(),
+    );
+    if (err != null) return err;
+    await _client.rpc('nai_grant_message_credits', params: {'p_credits': packOf15Credits});
+    return null;
+  }
+
+  static Future<String?> buyDayPass() async {
+    final err = await ZetraPay.spendAppCurrency(
+      appId: ZetraPay.naijaLearnAppId,
+      unitAmount: dayPassPriceCent.toDouble(),
+    );
+    if (err != null) return err;
+    await _client.rpc('nai_grant_day_pass');
+    return null;
+  }
+}
+
 class ChatMessage {
   final String role; // 'user' or 'assistant'
   final String content;
@@ -62,7 +123,13 @@ class ChatMessage {
 class NaiMentorScreen extends StatefulWidget {
   final String blueprintType; // 'academic', 'career', etc.
   final VoidCallback? onDone; // if set, shows a "Continue" button (onboarding mode)
-  const NaiMentorScreen({super.key, this.blueprintType = 'academic', this.onDone});
+  final bool freeMode; // true during the one-time onboarding interview — no charge
+  const NaiMentorScreen({
+    super.key,
+    this.blueprintType = 'academic',
+    this.onDone,
+    this.freeMode = false,
+  });
 
   @override
   State<NaiMentorScreen> createState() => _NaiMentorScreenState();
@@ -78,7 +145,9 @@ class _NaiMentorScreenState extends State<NaiMentorScreen> {
   @override
   void initState() {
     super.initState();
-    _send(null);
+    // The opening message never costs a credit — only messages the user
+    // actually types and sends do.
+    _send(null, chargeable: false);
   }
 
   @override
@@ -88,8 +157,88 @@ class _NaiMentorScreenState extends State<NaiMentorScreen> {
     super.dispose();
   }
 
-  Future<void> _send(String? userText) async {
+  Future<void> _showPaywall() async {
+    final scheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          decoration: BoxDecoration(
+            color: Theme.of(sheetContext).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Keep chatting with NAI',
+                style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "You're out of messages. Top up to continue.",
+                style: Theme.of(sheetContext).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+              _PaywallOption(
+                title: '1 Message',
+                price: '1¢',
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final err = await NaiWallet.buySingleMessage();
+                  if (err != null && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              _PaywallOption(
+                title: '15 Messages',
+                price: '10¢',
+                subtitle: 'Best value',
+                highlight: true,
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final err = await NaiWallet.buyFifteenPack();
+                  if (err != null && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              _PaywallOption(
+                title: 'Unlimited Today',
+                price: '1 CP',
+                subtitle: '24 hours, no limits',
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final err = await NaiWallet.buyDayPass();
+                  if (err != null && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _send(String? userText, {bool chargeable = true}) async {
     if (userText != null && userText.trim().isEmpty) return;
+
+    if (chargeable && !widget.freeMode) {
+      final allowed = await NaiWallet.tryConsumeCredit();
+      if (!allowed) {
+        await _showPaywall();
+        return;
+      }
+    }
 
     setState(() {
       _sending = true;
@@ -186,6 +335,17 @@ class _NaiMentorScreenState extends State<NaiMentorScreen> {
               },
             ),
           ),
+          if (!widget.freeMode)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '1¢ per message · 15 for 10¢ · 1 CP for unlimited today',
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                ),
+              ),
+            ),
           SafeArea(
             top: false,
             child: Padding(
@@ -220,11 +380,58 @@ class _NaiMentorScreenState extends State<NaiMentorScreen> {
   }
 }
 
+class _PaywallOption extends StatelessWidget {
+  final String title;
+  final String price;
+  final String? subtitle;
+  final bool highlight;
+  final VoidCallback onTap;
+  const _PaywallOption({
+    required this.title,
+    required this.price,
+    this.subtitle,
+    this.highlight = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: highlight ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                    if (subtitle != null)
+                      Text(subtitle!, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              Text(price, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One-time onboarding gate shown right after signup verification.
 /// Only shown to accounts created AFTER _naiRolloutCutoff — existing
 /// users never see this, per product decision. Also skipped if the
 /// user already has an Academic Blueprint, or already dismissed this
-/// once before (tracked via Supabase Auth user metadata).
+/// once before (tracked via Supabase Auth user metadata). The interview
+/// here runs in freeMode — it never charges Cent.
 class NaiOnboardingGate extends StatefulWidget {
   final ZetraProfile profile;
   const NaiOnboardingGate({super.key, required this.profile});
@@ -287,6 +494,6 @@ class _NaiOnboardingGateState extends State<NaiOnboardingGate> {
     if (_checking) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return NaiMentorScreen(blueprintType: 'academic', onDone: _markSeenAndContinue);
+    return NaiMentorScreen(blueprintType: 'academic', onDone: _markSeenAndContinue, freeMode: true);
   }
 }
