@@ -20,6 +20,13 @@
 //   auto-submits for everyone when it hits zero.
 // - Results now show a full ranked leaderboard (not just 1v1), and the
 //   last-5 match history strip (e.g. "LLLWWL") is tracked per user.
+//
+// SECURITY UPDATE: question bank + correct answers now live in Postgres
+// (`questions` table), never in the client binary. BattlePlayScreen fetches
+// questions via the get_battle_questions RPC (answer key withheld) and
+// submits raw answer choices via submit_battle_answers, which recomputes
+// the score server-side against the real answer key. battle_participants'
+// score/finished columns can no longer be set directly by any client.
 
 import 'dart:async';
 import 'dart:math';
@@ -741,19 +748,55 @@ class BattleService {
     return BattleInfo.fromMap(row);
   }
 
+  /// Live progress ping (which question a player is currently on) —
+  /// current_question is still directly client-writable. Score and
+  /// "finished" are no longer settable this way; see submitAnswers below.
   Future<void> updateProgress({
     required String battleId,
-    required int score,
     required int currentQuestion,
-    bool finished = false,
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
     await _client
         .from('battle_participants')
-        .update({'score': score, 'current_question': currentQuestion, 'finished': finished})
+        .update({'current_question': currentQuestion})
         .eq('battle_id', battleId)
         .eq('user_id', user.id);
+  }
+
+  /// Fetches the real question bank from Postgres for this battle — the
+  /// correct answer is deliberately never included in the response.
+  Future<List<Question>> getBattleQuestions(List<String> questionIds) async {
+    final rows = await _client.rpc('get_battle_questions', params: {
+      'p_question_ids': questionIds,
+    });
+    return (rows as List).map((r) {
+      final row = r as Map<String, dynamic>;
+      return Question(
+        id: row['id'] as String,
+        subject: row['subject'] as String,
+        questionText: row['question_text'] as String,
+        options: List<String>.from(row['options'] as List),
+        // The server never sends this anymore — scoring is verified
+        // server-side in submitAnswers, so this value is unused here.
+        correctIndex: -1,
+      );
+    }).toList();
+  }
+
+  /// The ONLY way a battle result becomes final. Sends the player's raw
+  /// answer choices; the server recomputes the score against the real
+  /// answer key and writes score/finished itself. Returns the verified
+  /// score and total question count.
+  Future<Map<String, dynamic>> submitAnswers({
+    required String battleId,
+    required Map<String, int> answers,
+  }) async {
+    final result = await _client.rpc('submit_battle_answers', params: {
+      'p_battle_id': battleId,
+      'p_answers': answers,
+    });
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> recordMatchResult(String result) async {
@@ -1578,25 +1621,48 @@ class BattlePlayScreen extends StatefulWidget {
 }
 
 class _BattlePlayScreenState extends State<BattlePlayScreen> {
-  late List<Question> _questions;
-  late List<int?> _selectedAnswers;
+  List<Question> _questions = [];
+  List<int?> _selectedAnswers = [];
   int _index = 0;
   List<BattleParticipant> _participants = [];
   RealtimeChannel? _channel;
   Timer? _timer;
   late int _remainingSeconds;
   bool _submitting = false;
+  bool _loadingQuestions = true;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    final all = {for (final q in QuestionRepository.getAll()) q.id: q};
-    _questions = widget.questionIds.map((id) => all[id]).whereType<Question>().toList();
-    _selectedAnswers = List<int?>.filled(_questions.length, null);
     _remainingSeconds = widget.durationSeconds;
     _channel = BattleService.instance.subscribeToParticipants(widget.battleId, _refreshOpponents);
     _refreshOpponents();
-    _startTimer();
+    _loadQuestions();
+  }
+
+  /// Fetches the real question bank from Postgres (answer key withheld).
+  /// The countdown timer only starts once questions have actually loaded,
+  /// so a slow connection never eats into a player's answering time.
+  Future<void> _loadQuestions() async {
+    try {
+      final questions = await BattleService.instance.getBattleQuestions(widget.questionIds);
+      if (!mounted) return;
+      setState(() {
+        _questions = questions;
+        _selectedAnswers = List<int?>.filled(_questions.length, null);
+        _loadingQuestions = false;
+      });
+      if (_questions.isNotEmpty) {
+        _startTimer();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.toString();
+        _loadingQuestions = false;
+      });
+    }
   }
 
   void _startTimer() {
@@ -1630,21 +1696,22 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
 
   /// Fires only when the shared countdown hits zero — no manual submit
   /// button exists, so both/all players lock in at the same instant.
+  /// Sends raw answer choices to the server; the server recomputes the
+  /// real score against the answer key. The client never claims a score.
   Future<void> _autoSubmit() async {
     if (_submitting) return;
     _submitting = true;
 
-    int score = 0;
-    for (int i = 0; i < _questions.length; i++) {
-      if (_selectedAnswers[i] != null && _selectedAnswers[i] == _questions[i].correctIndex) score++;
-    }
+    final answersMap = <String, int>{
+      for (var i = 0; i < _questions.length; i++)
+        if (_selectedAnswers[i] != null) _questions[i].id: _selectedAnswers[i]!,
+    };
 
-    await BattleService.instance.updateProgress(
-      battleId: widget.battleId,
-      score: score,
-      currentQuestion: _questions.length,
-      finished: true,
-    );
+    try {
+      await BattleService.instance.submitAnswers(battleId: widget.battleId, answers: answersMap);
+    } catch (e) {
+      debugPrint('[Battle] submitAnswers failed: $e');
+    }
 
     final provider = context.read<AppProvider>();
     await Future.delayed(const Duration(seconds: 2));
@@ -1652,7 +1719,7 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     final me = Supabase.instance.client.auth.currentUser?.id;
 
     final ranked = List<BattleParticipant>.from(finalParticipants)..sort((a, b) => b.score.compareTo(a.score));
-    final topScore = ranked.isNotEmpty ? ranked.first.score : score;
+    final topScore = ranked.isNotEmpty ? ranked.first.score : 0;
     final topScorers = ranked.where((p) => p.score == topScore).toList();
     final iAmTop = topScorers.any((p) => p.userId == me);
     final tied = iAmTop && topScorers.length > 1;
@@ -1684,9 +1751,29 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (_questions.isEmpty) {
-      return Scaffold(appBar: AppBar(title: const Text('Battle')), body: const Center(child: Text('Could not load battle questions.')));
+
+    if (_loadingQuestions) {
+      return Scaffold(
+        appBar: AppBar(title: Text('⚔️ ${widget.subjectsLabel}')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
+
+    if (_loadError != null || _questions.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Battle')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              _loadError != null ? 'Could not load battle questions: $_loadError' : 'Could not load battle questions.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
     final me = Supabase.instance.client.auth.currentUser?.id;
     final opponents = _participants.where((p) => p.userId != me).toList();
     final q = _questions[_index];
@@ -2347,53 +2434,4 @@ class StreakSaverBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.red.withOpacity(0.4)),
       ),
-      child: Row(children: [
-        const Icon(Icons.local_fire_department_rounded, color: Colors.red),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            'Your ${stats.streak}-day streak is at risk! Answer a few questions today to keep it alive.',
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-          ),
-        ),
-      ]),
-    );
-  }
-}
-
-/// =========================================================================
-/// 10. LIVE PACE METER
-/// =========================================================================
-
-class PaceMeter extends StatelessWidget {
-  final int answeredCount;
-  final int totalQuestions;
-  final int remainingSeconds;
-  final int totalSeconds;
-  const PaceMeter({
-    super.key,
-    required this.answeredCount,
-    required this.totalQuestions,
-    required this.remainingSeconds,
-    required this.totalSeconds,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (totalQuestions == 0 || totalSeconds == 0) return const SizedBox.shrink();
-    final timeUsedFraction = 1 - (remainingSeconds / totalSeconds);
-    final answeredFraction = answeredCount / totalQuestions;
-    final diff = answeredFraction - timeUsedFraction;
-    final isAhead = diff >= -0.05;
-
-    return Container(
-      margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: (isAhead ? Colors.green : Colors.orange).withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
-      child: Text(
-        isAhead ? '⏱️ On pace' : '⏱️ Behind pace — pick it up',
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isAhead ? Colors.green : Colors.orange),
-      ),
-    );
-  }
-}
+      chil
