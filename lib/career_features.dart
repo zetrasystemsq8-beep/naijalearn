@@ -767,22 +767,23 @@ class BattleService {
   /// Fetches the real question bank from Postgres for this battle — the
   /// correct answer is deliberately never included in the response.
   Future<List<Question>> getBattleQuestions(List<String> questionIds) async {
-    final rows = await _client.rpc('get_battle_questions', params: {
-      'p_question_ids': questionIds,
-    });
-    return (rows as List).map((r) {
-      final row = r as Map<String, dynamic>;
-      return Question(
-        id: row['id'] as String,
-        subject: row['subject'] as String,
-        questionText: row['question_text'] as String,
-        options: List<String>.from(row['options'] as List),
-        // The server never sends this anymore — scoring is verified
-        // server-side in submitAnswers, so this value is unused here.
-        correctIndex: -1,
-      );
-    }).toList();
-  }
+  final rows = await _client.rpc('get_battle_questions', params: {
+    'p_question_ids': questionIds,
+  });
+  return (rows as List).map((r) {
+    final row = r as Map<String, dynamic>;
+    return Question(
+      id: row['id'] as String,
+      subject: row['subject'] as String,
+      // Battle questions don't carry a meaningful exam year — this field
+      // isn't shown or used anywhere in the battle UI.
+      year: 0,
+      questionText: row['question_text'] as String,
+      options: List<String>.from(row['options'] as List),
+      correctIndex: -1,
+    );
+  }).toList();
+}
 
   /// The ONLY way a battle result becomes final. Sends the player's raw
   /// answer choices; the server recomputes the score against the real
