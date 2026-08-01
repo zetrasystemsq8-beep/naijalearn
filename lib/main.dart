@@ -1572,6 +1572,7 @@ class _CommunityTab extends StatelessWidget {
         children: [
           _MenuTile(icon: Icons.leaderboard_rounded, label: 'Leaderboard', subtitle: 'See how you rank', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
           _MenuTile(icon: Icons.bolt_rounded, label: 'Quiz Battle', subtitle: 'Live head-to-head challenge', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
+          _MenuTile(icon: Icons.emoji_events_rounded, label: 'World Challenge', subtitle: 'Weekly competition, 500 Cent entry', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen()))),
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
         ],
       ),
