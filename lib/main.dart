@@ -70,6 +70,7 @@ import 'career_features.dart';
 import 'textbooks.dart';
 import 'features5.dart';
 import 'zetra_pay.dart';
+import 'wallet_display.dart';
 import 'academic_arena.dart';
 import 'world_challenge.dart';
 import 'study_squads.dart';
@@ -1680,6 +1681,14 @@ class _ProfileTab extends StatelessWidget {
           const SizedBox(height: 20),
           _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
           _MenuTile(icon: Icons.sticky_note_2_rounded, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
+          _MenuTile(
+  icon: Icons.account_balance_wallet_rounded,
+  label: 'My Wallet',
+  subtitle: 'View your NaijaLearn balance',
+  onTap: () => Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const WalletDisplayScreen()),
+  ),
+),
           _MenuTile(
   icon: Icons.cloud_upload_rounded,
   label: 'Migrate Questions (run once)',
