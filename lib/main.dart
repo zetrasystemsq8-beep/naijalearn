@@ -70,6 +70,7 @@ import 'career_features.dart';
 import 'textbooks.dart';
 import 'features5.dart';
 import 'zetra_pay.dart';
+import 'academic_arena.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
 import 'questions_english.dart';
@@ -2414,6 +2415,7 @@ class _ExamScreenState extends State<ExamScreen> {
       correct: correct,
       total: widget.questions.length,
     );
+    ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
