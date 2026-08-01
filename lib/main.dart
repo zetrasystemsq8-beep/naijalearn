@@ -2421,6 +2421,7 @@ class _ExamScreenState extends State<ExamScreen> {
       total: widget.questions.length,
     );
     ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
+    SquadService.instance.recordActivity(activityType: 'question', amount: correct, subject: widget.subject.name);
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
