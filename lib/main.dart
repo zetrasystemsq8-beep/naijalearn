@@ -71,6 +71,7 @@ import 'textbooks.dart';
 import 'features5.dart';
 import 'zetra_pay.dart';
 import 'academic_arena.dart';
+import 'world_challenge.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
 import 'questions_english.dart';
