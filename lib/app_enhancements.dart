@@ -1470,7 +1470,22 @@ class _MockExamScreenState extends State<MockExamScreen> {
             ),
     );
   }
-
+Widget _buildExam(BuildContext context, AppProvider provider) {
+  final questions = provider.generateMockExamMulti(selectedSubjects, perSubjectCount);
+  final subjectsLabel = selectedSubjects.join(' + ');
+  return QuizScreen(
+    questions: questions,
+    title: 'Mock Exam — $subjectsLabel',
+    showCalculator: true,
+    showNavigator: true,
+    onComplete: (score) {
+      Navigator.pop(context);
+    },
+    onCompleteDetailed: (gradedQuestions) {
+      // unchanged — same body as before
+    },
+  );
+}
   Widget _buildExam(BuildContext context, AppProvider provider) {
     final questions = provider.generateMockExamMulti(selectedSubjects, perSubjectCount);
     final subjectsLabel = selectedSubjects.join(' + ');
