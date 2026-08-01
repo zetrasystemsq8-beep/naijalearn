@@ -1672,6 +1672,33 @@ class _ProfileTab extends StatelessWidget {
           const SizedBox(height: 20),
           _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
           _MenuTile(icon: Icons.sticky_note_2_rounded, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
+          _MenuTile(
+  icon: Icons.cloud_upload_rounded,
+  label: 'Migrate Questions (run once)',
+  subtitle: 'Debug: pushes all questions to Supabase',
+  onTap: () async {
+    final client = Supabase.instance.client;
+    final all = QuestionRepository.getAll();
+    const batchSize = 200;
+
+    for (var i = 0; i < all.length; i += batchSize) {
+      final batch = all.skip(i).take(batchSize).map((q) => {
+        'id': q.id,
+        'subject': q.subject,
+        'question_text': q.questionText,
+        'options': q.options,
+        'correct_index': q.correctIndex,
+      }).toList();
+      await client.from('questions').upsert(batch);
+    }
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Migration complete!')),
+      );
+    }
+  },
+),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
