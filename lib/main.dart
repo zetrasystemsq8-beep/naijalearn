@@ -1685,6 +1685,7 @@ class _ProfileTab extends StatelessWidget {
   label: 'Migrate Questions (run once)',
   subtitle: 'Debug: pushes all questions to Supabase',
   onTap: () async {
+  try {
     final client = Supabase.instance.client;
     final all = QuestionRepository.getAll();
     const batchSize = 200;
@@ -1697,7 +1698,7 @@ class _ProfileTab extends StatelessWidget {
         'options': q.options,
         'correct_index': q.correctIndex,
       }).toList();
-      await client.from('questions').upsert(batch);
+      await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
     }
 
     if (context.mounted) {
@@ -1705,8 +1706,14 @@ class _ProfileTab extends StatelessWidget {
         const SnackBar(content: Text('Migration complete!')),
       );
     }
-  },
-),
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Migration failed: $e')),
+      );
+    }
+  }
+},
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
