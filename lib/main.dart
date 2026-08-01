@@ -72,6 +72,7 @@ import 'features5.dart';
 import 'zetra_pay.dart';
 import 'academic_arena.dart';
 import 'world_challenge.dart';
+import 'study_squads.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
 import 'questions_english.dart';
@@ -1578,7 +1579,7 @@ class _CommunityTab extends StatelessWidget {
           _MenuTile(icon: Icons.leaderboard_rounded, label: 'Leaderboard', subtitle: 'See how you rank', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
           _MenuTile(icon: Icons.bolt_rounded, label: 'Quiz Battle', subtitle: 'Live head-to-head challenge', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'World Challenge', subtitle: 'Weekly competition, 500 Cent entry', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen()))),
-          
+          _MenuTile(icon: Icons.groups_2_rounded, label: 'Study Squads', subtitle: 'Study together, chat, battle other squads', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen()))),
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
         ],
       ),
