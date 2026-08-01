@@ -2434,4 +2434,53 @@ class StreakSaverBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.red.withOpacity(0.4)),
       ),
-      chil
+      child: Row(children: [
+        const Icon(Icons.local_fire_department_rounded, color: Colors.red),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Your ${stats.streak}-day streak is at risk! Answer a few questions today to keep it alive.',
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// =========================================================================
+/// 10. LIVE PACE METER
+/// =========================================================================
+
+class PaceMeter extends StatelessWidget {
+  final int answeredCount;
+  final int totalQuestions;
+  final int remainingSeconds;
+  final int totalSeconds;
+  const PaceMeter({
+    super.key,
+    required this.answeredCount,
+    required this.totalQuestions,
+    required this.remainingSeconds,
+    required this.totalSeconds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (totalQuestions == 0 || totalSeconds == 0) return const SizedBox.shrink();
+    final timeUsedFraction = 1 - (remainingSeconds / totalSeconds);
+    final answeredFraction = answeredCount / totalQuestions;
+    final diff = answeredFraction - timeUsedFraction;
+    final isAhead = diff >= -0.05;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: (isAhead ? Colors.green : Colors.orange).withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+      child: Text(
+        isAhead ? '⏱️ On pace' : '⏱️ Behind pace — pick it up',
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isAhead ? Colors.green : Colors.orange),
+      ),
+    );
+  }
+}
