@@ -1483,7 +1483,30 @@ Widget _buildExam(BuildContext context, AppProvider provider) {
       Navigator.pop(context);
     },
     onCompleteDetailed: (gradedQuestions) {
-      // unchanged — same body as before
+      final Map<String, int> correctBySubject = {};
+      final Map<String, int> totalBySubject = {};
+      int overallScore = 0;
+
+      for (final gq in gradedQuestions) {
+        final subject = gq['subject'] as String? ?? 'Unknown';
+        final wasCorrect = gq['__correct'] as bool? ?? false;
+        totalBySubject[subject] = (totalBySubject[subject] ?? 0) + 1;
+        if (wasCorrect) {
+          correctBySubject[subject] = (correctBySubject[subject] ?? 0) + 1;
+          overallScore++;
+        }
+      }
+
+      for (final subject in selectedSubjects) {
+        provider.recordAnswer(subject, correctBySubject[subject] ?? 0, totalBySubject[subject] ?? 0);
+      }
+      provider.addXP(overallScore * 2);
+
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('You scored $overallScore out of ${gradedQuestions.length}'),
+        backgroundColor: overallScore >= (gradedQuestions.length * 0.6) ? Colors.green : Colors.red,
+      ));
     },
   );
 }
