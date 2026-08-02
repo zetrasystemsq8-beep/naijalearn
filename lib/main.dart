@@ -1689,11 +1689,7 @@ class _ProfileTab extends StatelessWidget {
     MaterialPageRoute(builder: (_) => const WalletDisplayScreen()),
   ),
 ),
-          _MenuTile(
-  icon: Icons.cloud_upload_rounded,
-  label: 'Migrate Questions (run once)',
-  subtitle: 'Debug: pushes all questions to Supabase',
-  onTap: () async {
+          onTap: () async {
   try {
     final client = Supabase.instance.client;
     final all = QuestionRepository.getAll();
