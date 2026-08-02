@@ -1682,43 +1682,48 @@ class _ProfileTab extends StatelessWidget {
           _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
           _MenuTile(icon: Icons.sticky_note_2_rounded, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
           _MenuTile(
-  icon: Icons.account_balance_wallet_rounded,
-  label: 'My Wallet',
-  subtitle: 'View your NaijaLearn balance',
-  onTap: () => Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const WalletDisplayScreen()),
-  ),
-),
-          onTap: () async {
-  try {
-    final client = Supabase.instance.client;
-    final all = QuestionRepository.getAll();
-    const batchSize = 200;
+            icon: Icons.account_balance_wallet_rounded,
+            label: 'My Wallet',
+            subtitle: 'View your NaijaLearn balance',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const WalletDisplayScreen()),
+            ),
+          ),
+          _MenuTile(
+            icon: Icons.cloud_upload_rounded,
+            label: 'Migrate Questions (run once)',
+            subtitle: 'Debug: pushes all questions to Supabase',
+            onTap: () async {
+              try {
+                final client = Supabase.instance.client;
+                final all = QuestionRepository.getAll();
+                const batchSize = 200;
 
-    for (var i = 0; i < all.length; i += batchSize) {
-      final batch = all.skip(i).take(batchSize).map((q) => {
-        'id': q.id,
-        'subject': q.subject,
-        'question_text': q.questionText,
-        'options': q.options,
-        'correct_index': q.correctIndex,
-      }).toList();
-      await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
-    }
+                for (var i = 0; i < all.length; i += batchSize) {
+                  final batch = all.skip(i).take(batchSize).map((q) => {
+                    'id': q.id,
+                    'subject': q.subject,
+                    'question_text': q.questionText,
+                    'options': q.options,
+                    'correct_index': q.correctIndex,
+                  }).toList();
+                  await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
+                }
 
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Migration complete!')),
-      );
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Migration failed: $e')),
-      );
-    }
-  }
-},
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Migration complete!')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Migration failed: $e')),
+                  );
+                }
+              }
+            },
+          ),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1777,6 +1782,7 @@ class _ProfileTab extends StatelessWidget {
     );
   }
 }
+
 
 /// =========================================================================
 /// REVISION NOTES (self-contained — replacement for the removed
