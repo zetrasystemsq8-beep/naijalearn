@@ -58,12 +58,32 @@ class WorldChallengeService {
     }).toList();
   }
 
-  Future<int> submitAnswers(String challengeId, Map<String, int> answers) async {
-    final result = await _client.rpc('submit_world_challenge_answers', params: {
+  /// Submits the user's answers. Deliberately returns nothing — the
+  /// server withholds the score entirely until the challenge concludes,
+  /// so there is no way for the client to know the result early.
+  Future<void> submitAnswers(String challengeId, Map<String, int> answers) async {
+    await _client.rpc('submit_world_challenge_answers', params: {
       'p_challenge_id': challengeId,
       'p_answers': answers,
     });
-    return (result as Map)['score'] as int;
+  }
+
+  /// The most recent challenge this user has joined — works even after
+  /// the week has rolled over, so results stay reachable afterward.
+  Future<String?> getMyLastChallengeId() async {
+    final result = await _client.rpc('get_my_last_world_challenge');
+    return result as String?;
+  }
+
+  /// Returns one of:
+  ///   { concluded: false }
+  ///   { concluded: true, joined: false }
+  ///   { concluded: true, joined: true, won: true, rank, percentage, prize_cent }
+  ///   { concluded: true, joined: true, won: false, percentage }
+  /// Percentage only — raw score is never sent to the client.
+  Future<Map<String, dynamic>> getResult(String challengeId) async {
+    final result = await _client.rpc('get_world_challenge_result', params: {'p_challenge_id': challengeId});
+    return Map<String, dynamic>.from(result as Map);
   }
 }
 
@@ -116,7 +136,7 @@ class _WorldChallengeScreenState extends State<WorldChallengeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.emoji_events_rounded, size: 64, color: Colors.amber),
+            const Icon(Icons.emoji_events_rounded, size: 64, color: Colors.amber),
             const SizedBox(height: 16),
             Text('Weekly World Challenge', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -135,6 +155,11 @@ class _WorldChallengeScreenState extends State<WorldChallengeScreen> {
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('Join This Week\'s Challenge'),
               ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeResultScreen())),
+              child: const Text('View My Last Result'),
             ),
           ],
         ),
@@ -170,27 +195,30 @@ class _WorldChallengeQuizScreenState extends State<_WorldChallengeQuizScreen> {
         if (_answers[i] != null) widget.questions[i].id: _answers[i]!,
     };
 
-    final score = await WorldChallengeService.instance.submitAnswers(widget.challengeId, answersMap);
+    await WorldChallengeService.instance.submitAnswers(widget.challengeId, answersMap);
     if (!mounted) return;
 
     Navigator.of(context).pushReplacement(MaterialPageRoute(
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Submitted'), automaticallyImplyLeading: false),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.green, size: 64),
-              const SizedBox(height: 16),
-              Text('You scored $score/${widget.questions.length}'),
-              const SizedBox(height: 8),
-              const Text('Winners are announced at the end of the week.'),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-                child: const Text('Back to Home'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.hourglass_top_rounded, color: Colors.amber, size: 64),
+                const SizedBox(height: 16),
+                const Text('Your answers are locked in.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18), textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                const Text('Winners are announced at the end of the week. Check back then to see how you did.', textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+                  child: const Text('Back to Home'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -260,6 +288,158 @@ class _WorldChallengeQuizScreenState extends State<_WorldChallengeQuizScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// =========================================================================
+/// RESULTS SCREEN
+/// =========================================================================
+///
+/// Winners (top 3): shown their position AND their score, as a percentage.
+/// Everyone else: shown ONLY their score, as a percentage — no rank, no
+/// hint of how close they came. The server itself withholds rank/prize
+/// data from non-winners, so this isn't just a UI choice to hide it —
+/// the app genuinely never receives it for a loss.
+
+class WorldChallengeResultScreen extends StatefulWidget {
+  const WorldChallengeResultScreen({super.key});
+
+  @override
+  State<WorldChallengeResultScreen> createState() => _WorldChallengeResultScreenState();
+}
+
+class _WorldChallengeResultScreenState extends State<WorldChallengeResultScreen> {
+  bool _loading = true;
+  Map<String, dynamic>? _result;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final challengeId = await WorldChallengeService.instance.getMyLastChallengeId();
+      if (challengeId == null) {
+        setState(() {
+          _loading = false;
+          _result = {'concluded': true, 'joined': false};
+        });
+        return;
+      }
+      final result = await WorldChallengeService.instance.getResult(challengeId);
+      if (!mounted) return;
+      setState(() {
+        _result = result;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load your result. Please try again.';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('My Result')),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 40),
+            if (_loading)
+              const Center(child: CircularProgressIndicator())
+            else if (_error != null)
+              Center(child: Text(_error!, style: TextStyle(color: scheme.error)))
+            else
+              _buildResultContent(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultContent(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final result = _result!;
+
+    if (result['joined'] == false) {
+      return Column(
+        children: [
+          const Text('🌍', style: TextStyle(fontSize: 64)),
+          const SizedBox(height: 16),
+          const Text("You haven't joined a World Challenge yet.", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      );
+    }
+
+    if (result['concluded'] == false) {
+      return Column(
+        children: [
+          const Icon(Icons.hourglass_top_rounded, size: 64, color: Colors.amber),
+          const SizedBox(height: 16),
+          const Text('Not decided yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          const SizedBox(height: 8),
+          const Text('Winners are announced once the week ends. Check back then.', textAlign: TextAlign.center),
+        ],
+      );
+    }
+
+    final percentage = (result['percentage'] as num?)?.toDouble() ?? 0;
+    final won = result['won'] == true;
+
+    if (won) {
+      final rank = (result['rank'] as num).toInt();
+      final prize = (result['prize_cent'] as num?)?.toDouble() ?? 0;
+      final rankLabel = rank == 1 ? '🥇 1st Place' : rank == 2 ? '🥈 2nd Place' : '🥉 3rd Place';
+
+      return Column(
+        children: [
+          const Text('🏆', style: TextStyle(fontSize: 72)),
+          const SizedBox(height: 16),
+          Text(rankLabel, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(20)),
+            child: Text('${percentage.toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+          ),
+          if (prize > 0) ...[
+            const SizedBox(height: 16),
+            Text('+${prize.toStringAsFixed(0)} Cent prize', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold)),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        const Icon(Icons.check_circle_outline_rounded, size: 64),
+        const SizedBox(height: 16),
+        const Text('Challenge Complete', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
+          child: Text('${percentage.toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+        ),
+        const SizedBox(height: 12),
+        Text('You didn\'t place in the top 3 this week — try again next week!', textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
+      ],
     );
   }
 }
