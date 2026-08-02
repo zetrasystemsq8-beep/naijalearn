@@ -45,6 +45,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'notification_service.dart';
 import 'questions_english.dart';
+import 'main.dart' show QuestionNavigatorSheet, QuestionStatus;
 import 'questions_mathematics.dart';
 import 'questions_physics.dart';
 import 'questions_biology.dart';
