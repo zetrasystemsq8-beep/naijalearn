@@ -17,6 +17,11 @@
 // shared and reactive across screens. Register CoinService, FlashcardService,
 // MasteryService, and ExamCountdownService as providers in main() alongside
 // AppProvider.
+//
+// NOTE: In-app Cent top-up has been removed. Users fund their NaijaLearn
+// balance exclusively via ZTC (Send to Apps > NaijaLearn). CoinService
+// still only reads the real balance from the shared ZTC ledger — it
+// never lets the user buy Cent from inside this app.
 
 import 'dart:async';
 import 'dart:math';
@@ -429,6 +434,10 @@ class _FlashcardReviewScreenState extends State<FlashcardReviewScreen> {
 /// Currency is real Cent (via ZetraPay/ZTC), not a wrapped in-app coin.
 /// Any free reward (daily login, spin wheel) is capped at 10 Cent per
 /// award — enforced both here and server-side in credit_app_currency.
+///
+/// Funding is ZTC-only: there is no in-app "buy Cent" flow. Users open
+/// ZTC, tap Send to Apps > NaijaLearn, and this screen's balance updates
+/// automatically off the shared ledger.
 
 class ShopItem {
   final String id;
@@ -457,6 +466,7 @@ class CoinService extends ChangeNotifier {
   static const String _appId = ZetraPay.naijaLearnAppId;
 
   static const int _dailyLoginBonusCent = 10; // capped at 10
+  static const int _centsPerCp = 1000;
 
   double _cents = 0;
   int _streakFreezeCount = 0;
@@ -470,6 +480,15 @@ class CoinService extends ChangeNotifier {
   bool _loaded = false;
 
   double get cents => _cents;
+
+  /// CP and leftover-Cent split of the raw balance, for display
+  /// wherever both units should be shown side by side (e.g. the Cent
+  /// Shop header). The underlying balance itself rolls 1000 Cent -> 1 CP
+  /// server-side via auto_convert_overflow, so this split should rarely
+  /// show more than a few hundred Cent in practice.
+  int get cp => (_cents.round()) ~/ _centsPerCp;
+  int get leftoverCent => (_cents.round()) % _centsPerCp;
+
   int get streakFreezeCount => _streakFreezeCount;
   Set<String> get ownedItemIds => Set.unmodifiable(_ownedItemIds);
   String? get equippedFrameId => _equippedFrameId;
@@ -626,6 +645,18 @@ class CoinService extends ChangeNotifier {
     _cents += capped;
     notifyListeners();
     return true;
+  }
+
+  /// Re-reads the authoritative balance from the shared ZTC ledger.
+  /// Call this after returning from ZTC (or on pull-to-refresh) so a
+  /// funding transfer done there shows up here without a full re-init.
+  Future<void> refreshBalance() async {
+    try {
+      _cents = await ZetraPay.getAppCurrencyBalance(_appId);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[CoinService] refreshBalance failed: $e');
+    }
   }
 
   /// Streak Freeze is consumable/stackable — buying it again increases
@@ -795,115 +826,6 @@ class _PurchaseCelebrationDialogState extends State<_PurchaseCelebrationDialog>
   }
 }
 
-/// Preset Cent packs for topping up (via CP -> Cent, 1:1). If p_cent_amount
-/// in the ZTC RPC is denominated in CP-subunits (1000 = ₦1-worth of CP,
-/// per the shared system's own convention), these preset amounts should
-/// be adjusted to match whatever your ZTC pricing convention is.
-const List<int> kCentTopUpPacks = [100, 500, 1000, 2500, 5000];
-
-class BuyCentSheet extends StatefulWidget {
-  const BuyCentSheet({super.key});
-
-  @override
-  State<BuyCentSheet> createState() => _BuyCentSheetState();
-}
-
-class _BuyCentSheetState extends State<BuyCentSheet> {
-  bool _busy = false;
-  String? _error;
-  final _customController = TextEditingController();
-
-  Future<void> _buy(int amount) async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final error = await ZetraPay.buyAppCurrency(appId: ZetraPay.naijaLearnAppId, centAmount: amount.toDouble());
-    if (!mounted) return;
-    if (error == null) {
-      final newBalance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
-      // Reflect the fresh balance in CoinService without a full re-init.
-      final coinService = context.read<CoinService>();
-      final diff = newBalance - coinService.cents;
-      if (diff != 0) {
-        // Directly nudge the in-memory value; CoinService already treats
-        // its balance as authoritative-from-server, so this just avoids
-        // a visible flash back to the old number.
-        coinService.addCents(0); // no-op call kept for symmetry; balance
-        // is re-read on next screen open regardless.
-      }
-      if (mounted) Navigator.pop(context, true);
-    } else {
-      setState(() => _error = error);
-    }
-    if (mounted) setState(() => _busy = false);
-  }
-
-  @override
-  void dispose() {
-    _customController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Top Up Cent', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('Cent is spent from your ZTC wallet balance.', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: kCentTopUpPacks.map((amount) {
-              return OutlinedButton(
-                onPressed: _busy ? null : () => _buy(amount),
-                child: Text('$amount Cent'),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _customController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Custom amount'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: _busy
-                    ? null
-                    : () {
-                        final val = int.tryParse(_customController.text.trim());
-                        if (val != null && val > 0) _buy(val);
-                      },
-                child: const Text('Buy'),
-              ),
-            ],
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: scheme.error)),
-          ],
-          if (_busy) ...[
-            const SizedBox(height: 12),
-            const Center(child: CircularProgressIndicator()),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class CoinShopScreen extends StatefulWidget {
   const CoinShopScreen({super.key});
 
@@ -1002,67 +924,79 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
         title: const Text('Cent Shop'),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 12),
             child: Center(
-              child: Row(
-                children: [
-                  const Icon(Icons.monetization_on_rounded, color: Colors.amber),
-                  const SizedBox(width: 4),
-                  Text('${coinService.cents.toStringAsFixed(0)} Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
+              child: RefreshIndicator(
+                onRefresh: coinService.refreshBalance,
+                child: GestureDetector(
+                  onTap: coinService.refreshBalance,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.monetization_on_rounded, color: Colors.amber, size: 18),
+                      const SizedBox(width: 4),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${coinService.cp} CP',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          if (coinService.leftoverCent > 0)
+                            Text(
+                              '+${coinService.leftoverCent} Cent',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded),
-            tooltip: 'Top up Cent',
-            onPressed: () async {
-              final bought = await showModalBottomSheet<bool>(
-                context: context,
-                isScrollControlled: true,
-                builder: (_) => const BuyCentSheet(),
-              );
-              if (bought == true) {
-                // Force a fresh read from the ledger.
-                setState(() {});
-              }
-            },
           ),
         ],
       ),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: CoinService.shopItems.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          final item = CoinService.shopItems[index];
-          return Material(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: [
-                  Text(item.emoji, style: const TextStyle(fontSize: 28)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 2),
-                        Text(_statusSubtitle(coinService, item),
-                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                      ],
+      body: RefreshIndicator(
+        onRefresh: coinService.refreshBalance,
+        child: ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: CoinService.shopItems.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final item = CoinService.shopItems[index];
+            return Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Text(item.emoji, style: const TextStyle(fontSize: 28)),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 2),
+                          Text(_statusSubtitle(coinService, item),
+                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildActionButton(context, coinService, item),
-                ],
+                    const SizedBox(width: 8),
+                    _buildActionButton(context, coinService, item),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
