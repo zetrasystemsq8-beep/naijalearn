@@ -17,7 +17,7 @@ class WalletDisplayScreen extends StatefulWidget {
 }
 
 class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
-  double? _balance;
+  int? _rawBalance; // raw Cent, source of truth
   bool _loading = true;
   String? _error;
 
@@ -34,7 +34,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
     });
     try {
       final balance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
-      setState(() => _balance = balance);
+      setState(() => _rawBalance = balance.round());
     } catch (e) {
       setState(() => _error = 'Could not load your wallet. Please try again.');
     } finally {
@@ -42,9 +42,15 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
     }
   }
 
-  String _formatBalance(double balance) {
-    if (balance == balance.roundToDouble()) return balance.toStringAsFixed(0);
-    return balance.toStringAsFixed(2);
+  int get _cp => (_rawBalance ?? 0) ~/ 1000;
+  int get _cent => (_rawBalance ?? 0) % 1000;
+
+  String _formatCp(int cp) {
+    return cp.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},');
+  }
+
+  String _formatCent(int cent) {
+    return cent.toString().padLeft(3, '0');
   }
 
   @override
@@ -80,10 +86,21 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                                 style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13)),
                             const SizedBox(height: 8),
                             Text(
-                              _balance != null ? _formatBalance(_balance!) : '—',
+                              _rawBalance != null ? '${_formatCp(_cp)} CP' : '—',
                               style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white),
                             ),
-                            const SizedBox(height: 4),
+                            if (_rawBalance != null && _cent > 0) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '+ ${_formatCent(_cent)} Cent',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withOpacity(0.85),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
                             Row(
                               children: [
                                 const Icon(Icons.verified_rounded, size: 14, color: Colors.white70),
