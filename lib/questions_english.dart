@@ -235,7 +235,7 @@ final List<Map<String, dynamic>> englishQuestions = [
 // 70 questions (Word Formation, Punctuation, Sentence Completion,
 // Vocabulary-in-Context, Idioms, and Synonyms/Antonyms).
 
-final List<Map<String, dynamic>> englishQuestions = [
+
   // ---- Synonyms ----
   {"subject": "English", "year": 2000, "question": "Choose the word nearest in meaning to 'Diligent'.", "options": ["Lazy", "Hardworking", "Careless", "Slow"], "correctIndex": 1, "explanation": "Diligent means hardworking and careful."},
   {"subject": "English", "year": 2001, "question": "Choose the word nearest in meaning to 'Candid'.", "options": ["Frank", "Shy", "Rude", "Quiet"], "correctIndex": 0, "explanation": "Candid means frank or honest."},
@@ -553,7 +553,7 @@ final List<Map<String, dynamic>> englishQuestions = [
   {"subject": "English", "year": 2244, "question": "Choose the word most opposite in meaning to 'Pernicious'.", "options": ["Harmful", "Beneficial", "Damaging", "Destructive"], "correctIndex": 1, "explanation": "Beneficial is the opposite of pernicious (harmful)."},
 ];
 
-10
+questions_english.dart
 
 
   // ---- Comprehension-style Vocabulary in Context ----
