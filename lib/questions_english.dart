@@ -15,7 +15,6 @@ final List<Map<String, dynamic>> englishQuestions = [
 // 70 questions (Word Formation, Punctuation, Sentence Completion,
 // Vocabulary-in-Context, Idioms, and Synonyms/Antonyms).
 
-final List<Map<String, dynamic>> englishQuestions = [
   // ---- Synonyms ----
   // lib/questions_english_batch2.dart
 //
@@ -26,7 +25,7 @@ final List<Map<String, dynamic>> englishQuestions = [
 // IMPORTANT: copy this from the downloaded file, not from the chat window,
 // to avoid paste/formatting corruption of braces.
 
-final List<Map<String, dynamic>> englishQuestionsBatch2 = [
+
   {"subject": "English", "year": 2245, "question": "Choose the word nearest in meaning to 'Adroit'.", "options": ["Weak", "Skillful", "Awkward", "Careless"], "correctIndex": 1, "explanation": "'Adroit' means skillful."},
   {"subject": "English", "year": 2246, "question": "Choose the word nearest in meaning to 'Benign'.", "options": ["Kind", "Dishonest", "Weak", "Rude"], "correctIndex": 0, "explanation": "'Benign' means kind."},
   {"subject": "English", "year": 2247, "question": "Choose the word nearest in meaning to 'Copious'.", "options": ["Abundant", "Ordinary", "Foolish", "Careless"], "correctIndex": 0, "explanation": "'Copious' means abundant."},
