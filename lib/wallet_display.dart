@@ -6,6 +6,7 @@
 // the balance updates server-side. This screen just shows the result.
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'zetra_pay.dart';
 
@@ -18,6 +19,7 @@ class WalletDisplayScreen extends StatefulWidget {
 
 class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
   int? _rawBalance; // raw Cent, source of truth
+  String? _zetraId;
   bool _loading = true;
   String? _error;
 
@@ -34,7 +36,22 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
     });
     try {
       final balance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
-      setState(() => _rawBalance = balance.round());
+
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      String? zetraId;
+      if (userId != null) {
+        final row = await Supabase.instance.client
+            .from('profiles')
+            .select('zetra_id')
+            .eq('id', userId)
+            .maybeSingle();
+        zetraId = row?['zetra_id'] as String?;
+      }
+
+      setState(() {
+        _rawBalance = balance.round();
+        _zetraId = zetraId;
+      });
     } catch (e) {
       setState(() => _error = 'Could not load your wallet. Please try again.');
     } finally {
@@ -49,8 +66,12 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
     return cp.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},');
   }
 
-  String _formatCent(int cent) {
-    return cent.toString().padLeft(3, '0');
+  void _copyZetraId() {
+    if (_zetraId == null) return;
+    Clipboard.setData(ClipboardData(text: _zetraId!));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Zetra ID copied'), duration: Duration(seconds: 2)),
+    );
   }
 
   @override
@@ -92,7 +113,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                             if (_rawBalance != null && _cent > 0) ...[
                               const SizedBox(height: 2),
                               Text(
-                                '+ ${_formatCent(_cent)} Cent',
+                                '+ $_cent Cent',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
@@ -100,6 +121,35 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                                 ),
                               ),
                             ],
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.14),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.badge_outlined, size: 16, color: Colors.white70),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _zetraId ?? 'Loading...',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_zetraId != null)
+                                    GestureDetector(
+                                      onTap: _copyZetraId,
+                                      child: const Icon(Icons.copy_rounded, size: 16, color: Colors.white70),
+                                    ),
+                                ],
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             Row(
                               children: [
@@ -135,7 +185,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                                 children: [
                                   const Text('Fund this wallet', style: TextStyle(fontWeight: FontWeight.w600)),
                                   Text(
-                                    'Open ZTC → Send to Apps → NaijaLearn',
+                                    'Open ZTC → Send to Apps → NaijaLearn, using the Zetra ID above',
                                     style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
