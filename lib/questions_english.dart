@@ -235,7 +235,7 @@ final List<Map<String, dynamic>> englishQuestions = [
 // Display the passage once, then let the learner answer each blank
 // question in order — see the note at the end of this message.
 
-final List<Map<String, dynamic>> englishClozePassages = [
+
   {"passageId": "CZ1", "title": "A Morning Routine", "passage": "Every morning, Chidi wakes up (1) six o'clock to prepare for school. He (2) his bed before brushing his teeth and getting dressed. His mother always (3) breakfast ready by seven, and the family eats together. Afterwards, Chidi (4) his school bag and walks to the bus stop with his younger sister. They try never to (5) late for the school bus."},
   {"passageId": "CZ2", "title": "A Visit to the Market", "passage": "Last Saturday, Ngozi decided to (1) to the market to buy foodstuff for the week. She (2) a long list before leaving home so that she would not forget anything. At the market, she (3) with several traders to get fair prices. By the time she was done, her basket was (4) with vegetables, rice, and fresh fish. She returned home feeling (5) that she had completed her shopping successfully."},
   {"passageId": "CZ3", "title": "The New Student", "passage": "When Tunde joined the new school, he felt rather (1) because he did not know anyone. His classmates, however, were friendly and made an (2) to include him in their activities. Within a few weeks, he had (3) several close friends and no longer felt like a stranger. His teacher noticed how quickly he had (4) to his new environment and praised him for his positive attitude. Tunde was grateful for the (5) he received from everyone."},
