@@ -1187,6 +1187,7 @@ class _HomeTab extends StatelessWidget {
             const SliverToBoxAdapter(child: StreakSaverBanner()),
             const SliverToBoxAdapter(child: SeasonPassBanner()),
             const SliverToBoxAdapter(child: ArenaDashboardCard()),
+            const SliverToBoxAdapter(child: NaiDashboardCard()),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
