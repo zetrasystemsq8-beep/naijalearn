@@ -15,6 +15,7 @@
 // Textbooks (multi-subject lesson shelf) live in textbooks.dart.
 // Flashcards, Coin Shop, Spin Wheel, Multi-Exam Countdown, Topic
 // Mastery, and Focus Mode live in features5.dart.
+// Force-update / version gate lives in app_update.dart.
 //
 // THEME: the app's seed color is Nigerian green by default, but switches
 // to an ocean-blue seed whenever CoinService.oceanThemeActive is true —
@@ -55,6 +56,13 @@
 // rejects the .internal auth email domain with "Email address is
 // invalid") — it uses the backend's own request_otp/verify_otp RPCs,
 // the same ones NAI uses.
+//
+// FORCE UPDATE: before deciding where to route (Login vs Home vs
+// VerifyOtp), SplashScreen asks AppUpdateService whether this build is
+// too old to keep running. If so, it's replaced entirely by
+// ForceUpdateScreen — a non-dismissible wall — instead of continuing on
+// to auth/session routing. See app_update.dart for the Supabase-backed
+// version check itself.
 
 import 'dart:async';
 import 'dart:convert';
@@ -76,6 +84,7 @@ import 'world_challenge.dart';
 import 'study_squads.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
+import 'app_update.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -943,6 +952,24 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _controller.forward();
     Timer(_splashDuration, () async {
       if (!mounted) return;
+
+      // FORCE UPDATE CHECK — runs before any session/auth routing. If this
+      // build is older than the Supabase-configured minimum, the user is
+      // shown a non-dismissible update wall and nothing else executes.
+      // Fails open (see AppUpdateService) so a network hiccup never locks
+      // everyone out.
+      final updateResult = await AppUpdateService.instance.checkForUpdate();
+      if (!mounted) return;
+      if (updateResult.mustUpdate) {
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 500),
+            pageBuilder: (_, animation, __) =>
+                FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult)),
+          ),
+        );
+        return;
+      }
 
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       Widget destination;
