@@ -68,6 +68,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1764,6 +1765,17 @@ class _ProfileTab extends StatelessWidget {
               onChanged: (_) => provider.toggleDarkMode(),
             ),
           ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('Support', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          _MenuTile(
+            icon: Icons.support_agent_rounded,
+            label: 'Contact Support',
+            subtitle: 'Reach the team — WhatsApp, phone, or email',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen())),
+          ),
           const SizedBox(height: 10),
           Material(
             color: scheme.errorContainer.withOpacity(0.5),
@@ -1964,6 +1976,169 @@ class _NotesScreenState extends State<NotesScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: () => _addOrEditNote(),
         child: const Icon(Icons.add_rounded),
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// CONTACT SUPPORT
+/// =========================================================================
+/// Signed-in-only (reached from the Profile tab) — deliberately not
+/// offered from GuestHomeScreen, since guest sessions are anonymous and
+/// support requests need an account for the team to act on.
+
+class _SupportContact {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final String value;
+  final String subtitle;
+  final Uri uri;
+  const _SupportContact({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+    required this.uri,
+  });
+}
+
+class ContactSupportScreen extends StatelessWidget {
+  const ContactSupportScreen({super.key});
+
+  static final List<_SupportContact> _general = [
+    _SupportContact(
+      icon: Icons.chat_rounded,
+      color: const Color(0xFF25D366),
+      label: 'WhatsApp (Private Line)',
+      value: '+234 805 660 4409',
+      subtitle: 'Fastest way to reach the team directly',
+      uri: Uri.parse('https://wa.me/2348056604409'),
+    ),
+    _SupportContact(
+      icon: Icons.phone_rounded,
+      color: Colors.blue,
+      label: 'Official Support Line',
+      value: '0806 542 5732',
+      subtitle: 'Call for general enquiries',
+      uri: Uri.parse('tel:08065425732'),
+    ),
+    _SupportContact(
+      icon: Icons.email_rounded,
+      color: Colors.orange,
+      label: 'App Support Email',
+      value: 'naijalearn01@gmail.com',
+      subtitle: 'Bugs, account issues, feedback',
+      uri: Uri.parse('mailto:naijalearn01@gmail.com?subject=NaijaLearn%20Support'),
+    ),
+  ];
+
+  static final List<_SupportContact> _company = [
+    _SupportContact(
+      icon: Icons.business_rounded,
+      color: Colors.indigo,
+      label: 'Zetra Company Email',
+      value: 'zetraworld0@gmail.com',
+      subtitle: 'General company enquiries',
+      uri: Uri.parse('mailto:zetraworld0@gmail.com?subject=NaijaLearn%20Enquiry'),
+    ),
+    _SupportContact(
+      icon: Icons.person_rounded,
+      color: Colors.deepPurple,
+      label: 'Founder / CEO',
+      value: 'coderinnovator@gmail.com',
+      subtitle: 'Direct line to the founder',
+      uri: Uri.parse('mailto:coderinnovator@gmail.com?subject=NaijaLearn%20-%20Message%20for%20the%20CEO'),
+    ),
+  ];
+
+  Future<void> _open(BuildContext context, Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open that automatically. Please reach out manually.')),
+      );
+    }
+  }
+
+  Widget _sectionLabel(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+      child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _contactTile(BuildContext context, _SupportContact c) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => _open(context, c.uri),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: c.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
+                  child: Icon(c.icon, color: c.color),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      const SizedBox(height: 2),
+                      Text(c.value, style: TextStyle(fontSize: 13, color: scheme.primary, fontWeight: FontWeight.w600)),
+                      Text(c.subtitle, style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Contact Support')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.4), borderRadius: BorderRadius.circular(18)),
+            child: Row(
+              children: [
+                Icon(Icons.support_agent_rounded, color: scheme.primary, size: 28),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Having a problem or challenge with the app? Reach out through any of the channels below — we read everything.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _sectionLabel(context, 'Talk to the Team'),
+          ..._general.map((c) => _contactTile(context, c)),
+          _sectionLabel(context, 'Company & Leadership'),
+          ..._company.map((c) => _contactTile(context, c)),
+        ],
       ),
     );
   }
