@@ -57,6 +57,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart' show Question, QuestionRepository, SubjectInfo, kSubjects, ExamInstructionsScreen;
 import 'app_enhancements.dart' show AppProvider, rankTitleForLevel, QuizScreen;
+import 'connect_baba.dart' show ConnectBabaLobbyScreen;
 
 /// =========================================================================
 /// SHARED HELPER — daily goal status text (fixes the "40 / 10" bug)
@@ -1131,6 +1132,34 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
               FilledButton.tonal(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BotBattleSetupScreen())),
                 child: const Text('Practice'),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFF7B2FF7), Color(0xFF2D1B4E)]),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(children: [
+              const Text('🧟', style: TextStyle(fontSize: 26)),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Connect Baba', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                    Text('Team up with a friend — 2 players, 1 shared boss HP bar.',
+                        style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF2D1B4E)),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectBabaLobbyScreen())),
+                child: const Text('Play'),
               ),
             ]),
           ),
