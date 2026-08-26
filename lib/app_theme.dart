@@ -123,13 +123,26 @@ class AppTheme {
   static ThemeData _build(Color seedColor, Brightness brightness) {
     final isDark = brightness == Brightness.dark;
 
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: brightness,
-    );
+    final baseColorScheme = ColorScheme.fromSeed(
+  seedColor: seedColor,
+  brightness: brightness,
+);
 
-    final backgroundColor = isDark ? const Color(0xFF0B0F0E) : const Color(0xFFF7F9F8);
+// ColorScheme.fromSeed's default dark surfaces are too close together —
+// that's what flattens every card into the same gray block. Manually
+// step the surface ladder so cards visibly lift off the background.
+final colorScheme = isDark
+    ? baseColorScheme.copyWith(
+        surface: const Color(0xFF0B0F0E),
+        surfaceContainerLowest: const Color(0xFF080B0A),
+        surfaceContainerLow: const Color(0xFF141A18),
+        surfaceContainer: const Color(0xFF1C2422),
+        surfaceContainerHigh: const Color(0xFF26302D),
+        surfaceContainerHighest: const Color(0xFF313D3A),
+      )
+    : baseColorScheme;
 
+final backgroundColor = isDark ? const Color(0xFF0B0F0E) : const Color(0xFFF7F9F8);
     final textTheme = _textTheme(isDark);
 
     return ThemeData(
