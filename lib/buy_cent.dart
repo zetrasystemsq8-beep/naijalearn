@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Same admin WhatsApp line used in ContactSupportScreen (main.dart).
 const String _adminWhatsAppNumber = '2348056604409';
@@ -47,10 +48,50 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
   static const int _nairaPerCent = 1;
   static const int _centPerCp = 1000;
 
+  // Local-storage keys used to survive the app being backgrounded/killed
+  // while the user switches to their banking app to make the transfer.
+  static const String _kRefKey = 'nl_buycent_ref';
+  static const String _kAmountKey = 'nl_buycent_amount_text';
+  static const String _kIsCentKey = 'nl_buycent_is_cent';
+
+  bool _resumedPayment = false;
+
   @override
   void initState() {
     super.initState();
     _loadPaymentSettings();
+    _restorePendingPaymentIfAny();
+  }
+
+  Future<void> _restorePendingPaymentIfAny() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ref = prefs.getString(_kRefKey);
+    final amountText = prefs.getString(_kAmountKey);
+    final isCent = prefs.getBool(_kIsCentKey);
+
+    if (ref != null && amountText != null && isCent != null && mounted) {
+      setState(() {
+        _currentReference = ref;
+        _amountController.text = amountText;
+        _isCent = isCent;
+        _resumedPayment = true;
+      });
+    }
+  }
+
+  Future<void> _savePendingPaymentLocally() async {
+    if (_currentReference == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kRefKey, _currentReference!);
+    await prefs.setString(_kAmountKey, _amountController.text);
+    await prefs.setBool(_kIsCentKey, _isCent);
+  }
+
+  Future<void> _clearPendingPaymentLocally() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kRefKey);
+    await prefs.remove(_kAmountKey);
+    await prefs.remove(_kIsCentKey);
   }
 
   @override
@@ -103,8 +144,10 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
     setState(() {
       _currentReference = _generateReference();
       _paymentConfirmed = false;
+      _resumedPayment = false;
       _error = null;
     });
+    _savePendingPaymentLocally();
   }
 
   Future<void> _confirmPayment() async {
@@ -127,11 +170,13 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
       });
 
       if (result is Map && result['success'] == true) {
+        await _clearPendingPaymentLocally();
         if (mounted) {
           setState(() {
             _paymentConfirmed = true;
             _currentReference = null;
             _amountController.clear();
+            _resumedPayment = false;
             _error = null;
           });
 
@@ -374,6 +419,29 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
               else ...[
                 if (_error != null) ...[
                   _ErrorBox(message: _error!),
+                  const SizedBox(height: 16),
+                ],
+
+                if (_resumedPayment) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.restore_rounded, size: 16, color: Colors.blue.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Picked up where you left off — this reference is still valid.',
+                            style: TextStyle(color: Colors.blue.shade800, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 16),
                 ],
 
@@ -654,11 +722,15 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                   child: FilledButton.tonal(
                     onPressed: _loading
                         ? null
-                        : () => setState(() {
+                        : () {
+                            _clearPendingPaymentLocally();
+                            setState(() {
                               _currentReference = null;
                               _amountController.clear();
+                              _resumedPayment = false;
                               _error = null;
-                            }),
+                            });
+                          },
                     child: const Text('Back', style: TextStyle(fontSize: 16)),
                   ),
                 ),
