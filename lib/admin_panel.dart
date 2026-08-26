@@ -53,12 +53,36 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     }
   }
 
+  Future<String?> _promptForAdminPassword() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Admin Password'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          decoration: const InputDecoration(hintText: 'Enter admin password'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Unlock')),
+        ],
+      ),
+    );
+    return result;
+  }
+
   Future<void> _approveRequest(String requestId, int centAmount) async {
+    final adminPassword = await _promptForAdminPassword();
+    if (adminPassword == null || adminPassword.isEmpty) return;
+
     setState(() => _actionInProgress[requestId] = true);
 
     try {
       final result = await _client.rpc('admin_approve_cent_purchase', params: {
         'request_id': requestId,
+        'p_admin_password': adminPassword,
       });
 
       if (result is Map && result['success'] == true) {
@@ -82,6 +106,15 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           );
         }
       }
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.message ?? e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -100,12 +133,16 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     final reason = await _showRejectDialog();
     if (reason == null) return;
 
+    final adminPassword = await _promptForAdminPassword();
+    if (adminPassword == null || adminPassword.isEmpty) return;
+
     setState(() => _actionInProgress[requestId] = true);
 
     try {
       final result = await _client.rpc('admin_reject_cent_purchase', params: {
         'request_id': requestId,
         'rejection_reason': reason,
+        'p_admin_password': adminPassword,
       });
 
       if (result is Map && result['success'] == true) {
@@ -128,6 +165,15 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             ),
           );
         }
+      }
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.message ?? e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
