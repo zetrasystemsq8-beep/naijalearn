@@ -20,9 +20,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   List<Map<String, dynamic>> _pendingRequests = [];
   bool _loading = true;
   String? _error;
-  bool _processingId = false;
 
-  Map<String, bool> _actionInProgress = {};
+  Map<int, bool> _actionInProgress = {};
 
   @override
   void initState() {
@@ -73,7 +72,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     return result;
   }
 
-  Future<void> _approveRequest(String requestId, int centAmount) async {
+  Future<void> _approveRequest(int requestId, int centAmount) async {
     final adminPassword = await _promptForAdminPassword();
     if (adminPassword == null || adminPassword.isEmpty) return;
 
@@ -110,7 +109,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.message ?? e.toString()}'),
+            content: Text('Error: ${e.message}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -129,7 +128,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     }
   }
 
-  Future<void> _rejectRequest(String requestId) async {
+  Future<void> _rejectRequest(int requestId) async {
     final reason = await _showRejectDialog();
     if (reason == null) return;
 
@@ -170,7 +169,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.message ?? e.toString()}'),
+            content: Text('Error: ${e.message}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -224,10 +223,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     } catch (e) {
       return dateStr;
     }
-  }
-
-  String _formatNaira(num amount) {
-    return '₦${amount.toStringAsFixed(2).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+\.)'), (m) => '${m[1]},')}';
   }
 
   @override
@@ -291,10 +286,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                         itemCount: _pendingRequests.length,
                         itemBuilder: (context, index) {
                           final req = _pendingRequests[index];
-                          final requestId = req['id'] as String;
-                          final username = req['username'] as String? ?? 'Unknown';
+                          final requestId = req['id'] as int;
+                          final reference = req['reference'] as String? ?? '';
                           final centAmount = req['cent_amount'] as int? ?? 0;
-                          final totalNaira = req['total_naira'] as num? ?? 0;
                           final requestedAt = req['requested_at'] as String? ?? '';
                           final isProcessing = _actionInProgress[requestId] ?? false;
 
@@ -310,31 +304,19 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Header: Username & Amount
+                                  // Header: Reference & Amount
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              username,
-                                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              _formatNaira(totalNaira),
-                                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                                color: scheme.primary,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
+                                        child: Text(
+                                          reference,
+                                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            fontFamily: 'monospace',
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                       Container(
@@ -372,7 +354,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                                             const SizedBox(width: 6),
                                             Expanded(
                                               child: Text(
-                                                requestId,
+                                                'Request #$requestId',
                                                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                                   color: scheme.onSurfaceVariant,
                                                   fontFamily: 'monospace',
