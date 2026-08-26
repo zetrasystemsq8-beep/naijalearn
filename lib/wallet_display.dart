@@ -2,13 +2,13 @@
 //
 // NaijaLearn's wallet screen. Read-only display of the app-specific
 // balance (backed by app_currency_balances via ZetraPay). Funding is
-// NOT done here — users open ZTC, tap "Send to Apps" > NaijaLearn, and
-// the balance updates server-side. This screen just shows the result.
+// done via the BuyCentScreen or ZTC.
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/services.dart';
 import 'zetra_pay.dart';
+import 'buy_cent.dart';
 
 class WalletDisplayScreen extends StatefulWidget {
   const WalletDisplayScreen({super.key});
@@ -89,6 +89,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(20),
                     children: [
+                      // Balance Card
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(24),
@@ -161,12 +162,94 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                           ],
                         ),
                       ),
+
                       const SizedBox(height: 20),
+
+                      // Buy Cent/CP Button (PRIMARY)
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: scheme.primary.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          borderRadius: BorderRadius.circular(18),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const BuyCentScreen()),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(18),
+                            child: Container(
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: scheme.primary,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: Icon(
+                                      Icons.add_circle_outline_rounded,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Buy Cent or CP',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Transfer directly to our account',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.8),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: Colors.white.withOpacity(0.7),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // ZTC Option (Secondary)
                       Container(
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
                           color: scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: scheme.outline),
                         ),
                         child: Row(
                           children: [
@@ -183,9 +266,9 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Fund this wallet', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  const Text('Fund via ZTC', style: TextStyle(fontWeight: FontWeight.w600)),
                                   Text(
-                                    'Open ZTC → Send to Apps → NaijaLearn, using the Zetra ID above',
+                                    'Open ZTC → Send to Apps → NaijaLearn',
                                     style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
@@ -194,10 +277,10 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
+
+                      const SizedBox(height: 12),
                       Text(
-                        'Your balance updates automatically once a transfer from ZTC completes. '
-                        'Pull down to refresh if you don\'t see it right away.',
+                        'Your balance updates automatically once a transfer completes. Pull down to refresh if you don\'t see it right away.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                       ),
                     ],
