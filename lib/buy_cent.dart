@@ -3,10 +3,24 @@
 // Two-screen payment flow for buying Cent/CP
 // Screen 1: Amount entry
 // Screen 2: Payment confirmation with tappable account details
+//
+// Layout order on Screen 2 (reorganized for clarity):
+//   1. Bank account (primary action — tap to copy)
+//   2. Reference code (critical — must be included in transfer)
+//   3. Amount summary (high-contrast, readable)
+//   4. Numbered payment steps
+//   5. Processing-time notice (sets honest expectations)
+//   6. Security warning (compact, red)
+//   7. WhatsApp escalation button (for scams / stuck payments)
+//   8. Action buttons
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+// Same admin WhatsApp line used in ContactSupportScreen (main.dart).
+const String _adminWhatsAppNumber = '2348056604409';
 
 class BuyCentScreen extends StatefulWidget {
   const BuyCentScreen({super.key});
@@ -18,18 +32,18 @@ class BuyCentScreen extends StatefulWidget {
 class _BuyCentScreenState extends State<BuyCentScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
-  
+
   bool _isCent = true; // true = Cent, false = CP
   bool _loading = false;
   bool _loadingConfig = true;
   String? _error;
-  
+
   String? _currentReference;
   bool _paymentConfirmed = false;
-  
+
   // Payment settings from Supabase
   Map<String, dynamic>? _paymentSettings;
-  
+
   static const int _nairaPerCent = 1;
   static const int _centPerCp = 1000;
 
@@ -81,6 +95,9 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
     return _isCent ? amount : amount * _centPerCp;
   }
 
+  String _formatNaira(int amount) =>
+      '₦${amount.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}.00';
+
   void _goToPaymentScreen() {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
@@ -120,9 +137,13 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
 
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('✓ Payment confirmed! Your wallet will be credited shortly.'),
+              content: Text(
+                '✓ Submitted! Your payment is pending review — this usually '
+                'takes a few minutes, but can occasionally take longer. '
+                "You'll be credited once an admin confirms it.",
+              ),
               backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
+              duration: Duration(seconds: 6),
             ),
           );
 
@@ -134,11 +155,25 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
         setState(() => _error = result?['message'] ?? 'Payment verification failed. Contact admin for assistance.');
       }
     } on PostgrestException catch (e) {
-      setState(() => _error = e.message ?? 'Server error. Contact admin.');
+      setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = 'Something went wrong. Contact admin if payment was made.');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _contactAdminOnWhatsApp() async {
+    final ref = _currentReference ?? '';
+    final message = ref.isEmpty
+        ? "Hi, I need help with a Cent purchase on NaijaLearn."
+        : "Hi, I need help with my Cent purchase on NaijaLearn.\n\nReference: $ref\nAmount: ${_formatNaira(_amountInNaira)}";
+    final uri = Uri.parse('https://wa.me/$_adminWhatsAppNumber?text=${Uri.encodeComponent(message)}');
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open WhatsApp. Please contact admin manually.')),
+      );
     }
   }
 
@@ -169,6 +204,12 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                 Text('Please contact admin for assistance', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 16),
                 FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Go Back')),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _contactAdminOnWhatsApp,
+                  icon: const Icon(Icons.chat_rounded),
+                  label: const Text('Message Admin on WhatsApp'),
+                ),
               ],
             ),
           ),
@@ -185,45 +226,16 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // ===================================================
               // SCREEN 1: Amount Entry
+              // ===================================================
               if (_currentReference == null) ...[
-                // Security Warning
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    border: Border.all(color: Colors.red, width: 2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.warning_rounded, color: Colors.red, size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '⚠️ SECURITY WARNING',
-                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'NEVER send money to any account except the ONE shown in the next screen. Do NOT share your reference code. Any suspicious activity = SCAM. Report to Admin immediately.',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.red.shade700,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                _WarningBanner(
+                  icon: Icons.warning_rounded,
+                  title: 'SECURITY WARNING',
+                  message: 'NEVER send money to any account except the ONE shown '
+                      'in the next screen. Do NOT share your reference code. '
+                      'Any suspicious activity = SCAM. Report to Admin immediately.',
                 ),
 
                 const SizedBox(height: 24),
@@ -331,10 +343,10 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                           ),
                         ),
                         Text(
-                          '₦${_amountInNaira.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}.00',
+                          _formatNaira(_amountInNaira),
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: scheme.primary,
+                            color: scheme.onPrimaryContainer,
                             fontSize: 16,
                           ),
                         ),
@@ -344,26 +356,7 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
 
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: scheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: scheme.error.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_rounded, color: scheme.error, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: TextStyle(color: scheme.error, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _ErrorBox(message: _error!),
                 ],
 
                 const SizedBox(height: 24),
@@ -375,15 +368,21 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                   ),
                 ),
               ]
+              // ===================================================
               // SCREEN 2: Payment Confirmation
+              // ===================================================
               else ...[
+                if (_error != null) ...[
+                  _ErrorBox(message: _error!),
+                  const SizedBox(height: 16),
+                ],
+
+                // ---- 1. Bank account (primary action) ----
                 Text(
-                  'Transfer to this account',
+                  'Step 1 — Transfer to this account',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 16),
-
-                // Tappable Account Details (matching User ID copy style)
+                const SizedBox(height: 10),
                 InkWell(
                   onTap: () async {
                     final number = _paymentSettings?['account_number'] as String? ?? '';
@@ -394,120 +393,107 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                       );
                     }
                   },
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: scheme.surface,
-                      border: Border.all(color: scheme.outline),
-                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: scheme.primary, width: 1.5),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(color: scheme.primary.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 3)),
+                      ],
                     ),
                     child: Row(
                       children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(12)),
+                          child: Icon(Icons.account_balance_rounded, color: scheme.onPrimaryContainer),
+                        ),
+                        const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 _paymentSettings?['bank_name'] as String? ?? 'Not set — contact support',
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: scheme.onSurfaceVariant),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 _paymentSettings?['account_number'] as String? ?? '',
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18, letterSpacing: 1),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, letterSpacing: 1),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 _paymentSettings?['account_name'] as String? ?? '',
-                                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
                               ),
                             ],
                           ),
                         ),
-                        const Icon(Icons.copy_rounded, size: 18),
+                        Icon(Icons.copy_rounded, size: 20, color: scheme.primary),
                       ],
                     ),
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 22),
 
-                // Amount & Reference
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: scheme.primary, width: 1.5),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _DetailRow('Amount to Transfer', '₦${_amountInNaira.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}.00'),
-                      const SizedBox(height: 12),
-                      Container(height: 1, color: Colors.white.withOpacity(0.1)),
-                      const SizedBox(height: 12),
-                      _DetailRow('You Will Receive', '${_isCent ? _amountController.text : (int.tryParse(_amountController.text) ?? 0) * _centPerCp} Cent'),
-                    ],
-                  ),
+                // ---- 2. Reference code (critical) ----
+                Text(
+                  'Step 2 — Use this reference code',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
-
-                const SizedBox(height: 20),
-
-                // Reference Code (ORANGE WARNING)
+                const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.orange, width: 2),
                     borderRadius: BorderRadius.circular(16),
-                    color: Colors.orange.withOpacity(0.05),
+                    color: Colors.orange.withOpacity(0.06),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.security_rounded, color: Colors.orange, size: 22),
+                          const Icon(Icons.security_rounded, color: Colors.orange, size: 22),
                           const SizedBox(width: 8),
-                          Text(
-                            'IMPORTANT: Reference Code',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade700,
+                          Expanded(
+                            child: Text(
+                              'You MUST include this in the transfer description, or we cannot match your payment to your account.',
+                              style: TextStyle(color: Colors.orange.shade900, fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'You MUST use this reference in the transfer description. Without it, we cannot link your payment to your account.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.orange.shade900,
-                          height: 1.5,
-                        ),
-                      ),
                       const SizedBox(height: 14),
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange.withOpacity(0.4)),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              _currentReference ?? '',
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                                color: Colors.orange.shade700,
+                            Expanded(
+                              child: Text(
+                                _currentReference ?? '',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 19,
+                                  fontFamily: 'monospace',
+                                  letterSpacing: 0.5,
+                                  color: Colors.orange.shade800,
+                                ),
                               ),
                             ),
                             IconButton(
-                              icon: Icon(Icons.copy_rounded, color: Colors.orange),
+                              icon: const Icon(Icons.copy_rounded, color: Colors.orange),
                               onPressed: () {
                                 Clipboard.setData(ClipboardData(text: _currentReference ?? ''));
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -522,9 +508,38 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 22),
 
-                // Payment Steps
+                // ---- 3. Amount summary (fixed contrast) ----
+                Text(
+                  'Order Summary',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _DetailRow('Amount to Transfer', _formatNaira(_amountInNaira)),
+                      const SizedBox(height: 12),
+                      Container(height: 1, color: Colors.white.withOpacity(0.25)),
+                      const SizedBox(height: 12),
+                      _DetailRow(
+                        'You Will Receive',
+                        '${_isCent ? _amountController.text : (int.tryParse(_amountController.text) ?? 0) * _centPerCp} Cent',
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 22),
+
+                // ---- 4. Payment steps ----
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -535,40 +550,85 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Payment Steps', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                      Text('How it works', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
-                      _PaymentStep(1, 'Copy account above', 'Tap the account box to copy'),
+                      const _PaymentStep(1, 'Copy the account above', 'Tap the account box to copy'),
                       const SizedBox(height: 8),
-                      _PaymentStep(2, 'Make transfer', 'Use your bank app to send the amount'),
+                      const _PaymentStep(2, 'Make the transfer', 'Use your bank app to send the amount'),
                       const SizedBox(height: 8),
-                      _PaymentStep(3, 'Add reference', 'Paste the reference code above in description'),
+                      const _PaymentStep(3, 'Add the reference', 'Paste the code above in the transfer description'),
                       const SizedBox(height: 8),
-                      _PaymentStep(4, 'Click below', 'Come back here and confirm payment'),
+                      const _PaymentStep(4, 'Tap "I Have Paid"', 'Come back here and confirm below'),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
-                // Help Section
+                // ---- 5. Processing-time notice ----
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: scheme.errorContainer.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: scheme.error.withOpacity(0.3)),
+                    color: Colors.green.withOpacity(0.07),
+                    border: Border.all(color: Colors.green.withOpacity(0.35)),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.schedule_rounded, color: Colors.green.shade700, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'After you confirm, your payment is reviewed by an admin. '
+                          'This usually takes a few minutes but can occasionally take '
+                          'longer — no need to submit twice.',
+                          style: TextStyle(color: Colors.green.shade900, fontSize: 12.5, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- 6. Security warning (compact) ----
+                _WarningBanner(
+                  icon: Icons.warning_rounded,
+                  title: 'Only send to the account above',
+                  message: 'Never transfer to any other account. Never share your '
+                      'reference code with anyone claiming to be admin or support.',
+                  compact: true,
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- 7. WhatsApp escalation ----
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.warning_rounded, color: scheme.error, size: 20),
-                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Any issues or scams?', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                            Text('Contact Admin immediately via Profile settings', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
+                            Text('Issue or suspect a scam?', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                            Text('Message admin directly on WhatsApp', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
                           ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      OutlinedButton.icon(
+                        onPressed: _contactAdminOnWhatsApp,
+                        icon: const Icon(Icons.chat_rounded, size: 18, color: Color(0xFF25D366)),
+                        label: const Text('WhatsApp'),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFF25D366)),
+                          foregroundColor: const Color(0xFF25D366),
                         ),
                       ),
                     ],
@@ -577,7 +637,7 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
 
                 const SizedBox(height: 24),
 
-                // Action Buttons
+                // ---- 8. Action buttons ----
                 SizedBox(
                   height: 54,
                   child: FilledButton.icon(
@@ -592,11 +652,13 @@ class _BuyCentScreenState extends State<BuyCentScreen> {
                 SizedBox(
                   height: 52,
                   child: FilledButton.tonal(
-                    onPressed: _loading ? null : () => setState(() {
-                      _currentReference = null;
-                      _amountController.clear();
-                      _error = null;
-                    }),
+                    onPressed: _loading
+                        ? null
+                        : () => setState(() {
+                              _currentReference = null;
+                              _amountController.clear();
+                              _error = null;
+                            }),
                     child: const Text('Back', style: TextStyle(fontSize: 16)),
                   ),
                 ),
@@ -620,8 +682,8 @@ class _DetailRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white.withOpacity(0.7))),
-        Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
       ],
     );
   }
@@ -656,6 +718,84 @@ class _PaymentStep extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _WarningBanner extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final bool compact;
+
+  const _WarningBanner({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(compact ? 12 : 14),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        border: Border.all(color: Colors.red, width: compact ? 1.5 : 2),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.red, size: compact ? 20 : 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: Colors.red.shade800,
+                    fontWeight: FontWeight.bold,
+                    fontSize: compact ? 12.5 : 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  style: TextStyle(color: Colors.red.shade700, fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  final String message;
+  const _ErrorBox({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.error.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_rounded, color: scheme.error, size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text(message, style: TextStyle(color: scheme.error, fontSize: 13))),
+        ],
+      ),
     );
   }
 }
