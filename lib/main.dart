@@ -65,6 +65,9 @@
 // version check itself.
 
 import 'dart:async';
+import 'models.dart';
+export 'models.dart';
+import 'app_theme.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
