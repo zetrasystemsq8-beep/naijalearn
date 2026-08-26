@@ -20,7 +20,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   List<Map<String, dynamic>> _pendingRequests = [];
   bool _loading = true;
   String? _error;
-  bool _processingId;
+  bool _processingId = false;
 
   Map<String, bool> _actionInProgress = {};
 
