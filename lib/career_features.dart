@@ -47,6 +47,14 @@
 // Zetra ecosystem (Zetra Bot, Connect Bot, NAI Bot, etc.) instead of
 // generic human first names, so it's immediately clear you're practicing
 // against an in-app bot and not a real ZetraMail user.
+//
+// LOBBY VISUAL REFRESH: the "Practice vs Bot" card now uses a real
+// gradient (matching the visual weight of the Connect Baba card right
+// below it) instead of a flat tint that was easy to miss. "Create a
+// Battle" now uses the same tinted-border card idiom already used for
+// the current-tier card in Career Mode, instead of the same flat grey
+// used everywhere else in this file, and its subject chips have real
+// selected/unselected contrast instead of grey-on-grey.
 
 import 'dart:async';
 import 'dart:math';
@@ -1115,21 +1123,37 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.35), borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFF5A623), Color(0xFFD9720A)],
+              ),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(color: const Color(0xFFD9720A).withOpacity(0.32), blurRadius: 14, offset: const Offset(0, 6)),
+              ],
+            ),
             child: Row(children: [
-              const Text('🤖', style: TextStyle(fontSize: 26)),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(14)),
+                child: const Text('🤖', style: TextStyle(fontSize: 22)),
+              ),
               const SizedBox(width: 12),
-              Expanded(
+              const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('No one online?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('Battle a bot instead — same rules, instant start.', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                    Text('No one online?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                    Text('Battle a bot — same rules, instant start.',
+                        style: TextStyle(fontSize: 11.5, color: Colors.white)),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton.tonal(
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFD9720A)),
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BotBattleSetupScreen())),
                 child: const Text('Practice'),
               ),
@@ -1164,11 +1188,23 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
             ]),
           ),
           const SizedBox(height: 24),
-          Text('Create a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: scheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+              child: const Text('⚔️', style: TextStyle(fontSize: 16)),
+            ),
+            const SizedBox(width: 10),
+            Text('Create a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ]),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+              color: scheme.primary.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: scheme.primary.withOpacity(0.28), width: 1.3),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1185,6 +1221,15 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                       label: Text(s.name),
                       selected: isSelected,
                       onSelected: disabled ? null : (_) => _toggleSubject(s.name),
+                      selectedColor: scheme.primary,
+                      checkmarkColor: Colors.white,
+                      backgroundColor: scheme.surface,
+                      side: BorderSide(color: scheme.primary.withOpacity(isSelected ? 0 : 0.4), width: 1.2),
+                      labelStyle: TextStyle(
+                        color: isSelected ? Colors.white : scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     );
                   }).toList(),
                 ),
@@ -1215,6 +1260,10 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                           _playNow = true;
                           _scheduledAt = null;
                         }),
+                        selectedColor: scheme.primary,
+                        backgroundColor: scheme.surface,
+                        side: BorderSide(color: scheme.primary.withOpacity(_playNow ? 0 : 0.4)),
+                        labelStyle: TextStyle(color: _playNow ? Colors.white : scheme.primary, fontWeight: FontWeight.w600),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1225,6 +1274,10 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                             : '${_scheduledAt!.day}/${_scheduledAt!.month} ${_scheduledAt!.hour.toString().padLeft(2, '0')}:${_scheduledAt!.minute.toString().padLeft(2, '0')}'),
                         selected: !_playNow,
                         onSelected: (_) => _pickScheduleTime(),
+                        selectedColor: scheme.primary,
+                        backgroundColor: scheme.surface,
+                        side: BorderSide(color: scheme.primary.withOpacity(!_playNow ? 0 : 0.4)),
+                        labelStyle: TextStyle(color: !_playNow ? Colors.white : scheme.primary, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -1243,11 +1296,23 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          Text('Join a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: scheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+              child: const Text('🔑', style: TextStyle(fontSize: 16)),
+            ),
+            const SizedBox(width: 10),
+            Text('Join a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ]),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+              color: scheme.primary.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: scheme.primary.withOpacity(0.28), width: 1.3),
+            ),
             child: Column(
               children: [
                 TextField(
