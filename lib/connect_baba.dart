@@ -21,6 +21,15 @@
 // career_features.dart) as a third option alongside Live Battle and
 // Practice vs Bot — neither of those was touched or removed.
 //
+// CENT ENTRY FEE: each player pays a flat Cent (¢) entry fee (charged via
+// ZetraPay against the NaijaLearn app-currency balance) right after their
+// match/participant row is created or joined. There's no "cancel match"
+// RPC to compensate with, so unlike Live Quiz Battle's charge-then-
+// rollback-on-failure flow, a Connect Baba charge failure at that exact
+// moment can leave a player in an uncharged lobby — rare, but documented.
+// A flat win bonus is credited once, on the results screen, only for a
+// won duel.
+//
 // REQUIRES: connect_baba.sql (tables + RPCs) run in Supabase first.
 
 import 'dart:async';
@@ -30,6 +39,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart' show Question, kSubjects;
 import 'app_enhancements.dart' show AppProvider;
 import 'zetra_pay.dart';
+import 'wallet_display.dart' show WalletDisplayScreen;
+
+const int kConnectBabaEntryFeeCent = 15;
+const int kConnectBabaWinBonusCent = 10;
 
 /// =========================================================================
 /// MODELS
@@ -246,7 +259,14 @@ class _ConnectBabaLobbyScreenState extends State<ConnectBabaLobbyScreen> {
         questionCount: _questionCount,
         durationSeconds: _durationSeconds,
       );
+      // Charge only after the match genuinely exists — see joinBattle's
+      // comment in career_features.dart for why this ordering matters.
+      final error = await ZetraPay.spendAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: kConnectBabaEntryFeeCent.toDouble());
       if (!mounted) return;
+      if (error != null) {
+        await _showInsufficientFundsDialog();
+        return;
+      }
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ConnectBabaReadyScreen(matchId: result['match_id'] as int, isHost: true),
       ));
@@ -265,7 +285,12 @@ class _ConnectBabaLobbyScreenState extends State<ConnectBabaLobbyScreen> {
     });
     try {
       final result = await ConnectBabaService.instance.joinMatch(_codeController.text);
+      final error = await ZetraPay.spendAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: kConnectBabaEntryFeeCent.toDouble());
       if (!mounted) return;
+      if (error != null) {
+        await _showInsufficientFundsDialog();
+        return;
+      }
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ConnectBabaReadyScreen(matchId: result['match_id'] as int, isHost: false),
       ));
@@ -274,6 +299,31 @@ class _ConnectBabaLobbyScreenState extends State<ConnectBabaLobbyScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _showInsufficientFundsDialog() async {
+    double balance = 0;
+    try {
+      balance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
+    } catch (_) {}
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Not enough Cent'),
+        content: Text('Connect Baba costs $kConnectBabaEntryFeeCent¢. You have ${balance.toStringAsFixed(0)}¢.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()));
+            },
+            child: const Text('Top Up'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -296,13 +346,14 @@ class _ConnectBabaLobbyScreenState extends State<ConnectBabaLobbyScreen> {
               gradient: const LinearGradient(colors: [Color(0xFF7B2FF7), Color(0xFF2D1B4E)]),
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const Row(children: [
-              Text('🧟', style: TextStyle(fontSize: 30)),
-              SizedBox(width: 12),
+            child: Row(children: [
+              const Text('🧟', style: TextStyle(fontSize: 30)),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   "Team up with a friend on another phone. You share ONE boss HP bar — "
-                  "Baba only strikes back if you BOTH miss the same question.",
+                  "Baba only strikes back if you BOTH miss the same question.\n\n"
+                  "Entry: $kConnectBabaEntryFeeCent¢ each · Win bonus: +$kConnectBabaWinBonusCent¢",
                   style: TextStyle(color: Colors.white, fontSize: 12.5),
                 ),
               ),
@@ -880,13 +931,11 @@ class _ConnectBabaResultScreenState extends State<ConnectBabaResultScreen> {
     try {
       final firstClaim = await ConnectBabaService.instance.claimReward(widget.matchId);
       if (firstClaim) {
-        // 5 CP for defeating Baba together — same reward size as a solo
-        // Boss Battle win, since this took two people's correct answers.
-        await ZetraPay.creditAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: 5);
+        await ZetraPay.creditAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: kConnectBabaWinBonusCent.toDouble());
         if (mounted) setState(() => _rewardCredited = true);
       }
     } catch (_) {
-      // Non-fatal — the win itself still shows; CP can be a background retry later.
+      // Non-fatal — the win itself still shows; bonus can retry later.
     }
     if (mounted) setState(() => _claiming = false);
   }
@@ -915,7 +964,7 @@ class _ConnectBabaResultScreenState extends State<ConnectBabaResultScreen> {
             if (won)
               _claiming
                   ? const CircularProgressIndicator()
-                  : Text(_rewardCredited ? '+5 CP earned' : 'Great teamwork!', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+                  : Text(_rewardCredited ? '+$kConnectBabaWinBonusCent¢ earned' : 'Great teamwork!', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
             else
               const Text('Team up again and try a different strategy!', textAlign: TextAlign.center),
             const SizedBox(height: 32),
