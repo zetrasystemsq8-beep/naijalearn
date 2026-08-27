@@ -221,10 +221,21 @@ class NaiWallet {
   NaiWallet._();
   static SupabaseClient get _client => Supabase.instance.client;
 
-  static const int singleMessagePriceCent = 1;
-  static const int packOf15PriceCent = 10;
+  // Pricing raised: 1¢ (1 naira) per message was too low to sustain
+  // Groq API costs at any real scale. New pricing:
+  //   - Single message: 5¢ (5 naira)
+  //   - 15-pack: 40¢ (40 naira) — ~2.67 naira/message, real bulk discount
+  //   - Day pass: unchanged (1 CP — its naira-equivalent is set in ZTC)
+  static const int singleMessagePriceCent = 5;
+  static const int packOf15PriceCent = 40;
   static const int packOf15Credits = 15;
   static const int dayPassPriceCent = 1000;
+
+  /// Human-readable pricing line shown under the chat input, in both
+  /// NaiChatScreen and the legacy NaiMentorScreen. Derived from the
+  /// constants above so the two never drift out of sync again.
+  static String get pricingLabel =>
+      '${singleMessagePriceCent}¢ per message · $packOf15Credits for ${packOf15PriceCent}¢ · 1 CP for unlimited today';
 
   static Future<bool> tryConsumeCredit() async {
     final result = await _client.rpc('nai_consume_message_credit');
@@ -281,7 +292,7 @@ Future<void> _showNaiPaywall(BuildContext context) async {
             const SizedBox(height: 20),
             _PaywallOption(
               title: '1 Message',
-              price: '1¢',
+              price: '${NaiWallet.singleMessagePriceCent}¢',
               onTap: () async {
                 Navigator.pop(sheetContext);
                 final err = await NaiWallet.buySingleMessage();
@@ -292,8 +303,8 @@ Future<void> _showNaiPaywall(BuildContext context) async {
             ),
             const SizedBox(height: 10),
             _PaywallOption(
-              title: '15 Messages',
-              price: '10¢',
+              title: '${NaiWallet.packOf15Credits} Messages',
+              price: '${NaiWallet.packOf15PriceCent}¢',
               subtitle: 'Best value',
               highlight: true,
               onTap: () async {
@@ -511,8 +522,7 @@ class _NaiChatScreenState extends State<NaiChatScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('1¢ per message · 15 for 10¢ · 1 CP for unlimited today',
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              child: Text(NaiWallet.pricingLabel, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
             ),
           ),
           SafeArea(
@@ -882,7 +892,7 @@ class _NaiMentorScreenState extends State<NaiMentorScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('1¢ per message · 15 for 10¢ · 1 CP for unlimited today', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                child: Text(NaiWallet.pricingLabel, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
               ),
             ),
           SafeArea(
