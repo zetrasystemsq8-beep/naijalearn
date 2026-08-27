@@ -55,6 +55,14 @@
 // the current-tier card in Career Mode, instead of the same flat grey
 // used everywhere else in this file, and its subject chips have real
 // selected/unselected contrast instead of grey-on-grey.
+//
+// CENT ENTRY FEES: Live Quiz Battles and Practice-vs-Bot now support an
+// optional Cent (¢) entry fee, charged via ZetraPay against the user's
+// NaijaLearn app-currency balance. Battle creation/join charges happen
+// AFTER the underlying row exists (and roll back cleanly on payment
+// failure) so a failed charge never leaves an orphaned paid battle, and
+// re-joins never double-charge. A flat win bonus is credited on an
+// outright win (never on a tie, never as a payout of pooled entries).
 
 import 'dart:async';
 import 'dart:math';
@@ -66,6 +74,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart' show Question, QuestionRepository, SubjectInfo, kSubjects, ExamInstructionsScreen;
 import 'app_enhancements.dart' show AppProvider, rankTitleForLevel, QuizScreen;
 import 'connect_baba.dart' show ConnectBabaLobbyScreen;
+import 'zetra_pay.dart';
+import 'wallet_display.dart' show WalletDisplayScreen;
 
 /// =========================================================================
 /// SHARED HELPER — daily goal status text (fixes the "40 / 10" bug)
@@ -80,6 +90,54 @@ String dailyGoalStatusText(AppProvider provider) {
     return extra > 0 ? '$goal / $goal completed (+$extra extra)' : '$goal / $goal completed';
   }
   return '$done / $goal questions today';
+}
+
+/// =========================================================================
+/// CENT ENTRY FEE HELPERS — Live Quiz Battles + Practice vs Bot
+/// =========================================================================
+
+const Map<BotDifficulty, int> kBotEntryFeeCent = {
+  BotDifficulty.rookie: 50,
+  BotDifficulty.scholar: 100,
+  BotDifficulty.ace: 200,
+  BotDifficulty.master: 500,
+};
+const int kBattleWinBonusCent = 10;
+
+/// Extracts the fee amount from a 'insufficient_funds:NN' error thrown by
+/// BattleService — returns null for any other error so normal error text
+/// still shows for unrelated failures.
+int? parseInsufficientFundsFee(Object e) {
+  const marker = 'insufficient_funds:';
+  final msg = e.toString();
+  final idx = msg.indexOf(marker);
+  if (idx == -1) return null;
+  return int.tryParse(msg.substring(idx + marker.length).trim());
+}
+
+Future<void> showInsufficientCentDialog(BuildContext context, {required int needed}) async {
+  double balance = 0;
+  try {
+    balance = await ZetraPay.getAppCurrencyBalance(ZetraPay.naijaLearnAppId);
+  } catch (_) {}
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Not enough Cent'),
+      content: Text('This costs $needed¢. You have ${balance.toStringAsFixed(0)}¢. Top up to continue.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(dialogContext);
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()));
+          },
+          child: const Text('Top Up'),
+        ),
+      ],
+    ),
+  );
 }
 
 /// =========================================================================
@@ -560,6 +618,7 @@ class BattleInfo {
   final String? editRequestedBy;
   final String createdBy;
   final DateTime? startedAt;
+  final int entryFeeCent;
 
   BattleInfo({
     required this.id,
@@ -574,6 +633,7 @@ class BattleInfo {
     this.editRequestedBy,
     required this.createdBy,
     this.startedAt,
+    this.entryFeeCent = 0,
   });
 
   factory BattleInfo.fromMap(Map<String, dynamic> m) => BattleInfo(
@@ -589,6 +649,7 @@ class BattleInfo {
         editRequestedBy: m['edit_requested_by'] as String?,
         createdBy: m['created_by'] as String? ?? '',
         startedAt: m['started_at'] != null ? DateTime.tryParse(m['started_at'] as String) : null,
+        entryFeeCent: (m['entry_fee_cent'] as num?)?.toInt() ?? 0,
       );
 
   String get subjectsLabel => subjects.join(' + ');
@@ -666,6 +727,7 @@ class BattleService {
     required List<String> subjects,
     required int perSubjectCount,
     required int maxPlayers,
+    required int entryFeeCent,
     DateTime? scheduledAt,
   }) async {
     final user = _client.auth.currentUser;
@@ -687,11 +749,23 @@ class BattleService {
       'scheduled_at': scheduledAt?.toIso8601String(),
       'max_players': maxPlayers,
       'created_by': user.id,
+      'entry_fee_cent': entryFeeCent,
     }).select().single();
 
     final battle = BattleInfo.fromMap(row);
-    final username = await _currentUsername(user.id);
 
+    // Charge AFTER the battle row exists, so a failed payment never
+    // leaves a paid-for battle stuck in limbo — we just roll the row
+    // back and surface a clean "insufficient funds" error instead.
+    if (entryFeeCent > 0) {
+      final error = await ZetraPay.spendAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: entryFeeCent.toDouble());
+      if (error != null) {
+        await _client.from('battles').delete().eq('id', battle.id);
+        throw StateError('insufficient_funds:$entryFeeCent');
+      }
+    }
+
+    final username = await _currentUsername(user.id);
     await _client.from('battle_participants').insert({
       'battle_id': battle.id,
       'user_id': user.id,
@@ -724,6 +798,17 @@ class BattleService {
       'username': username,
       'ready': false,
     }, onConflict: 'battle_id,user_id');
+
+    // Charge only on a genuinely new join, and only AFTER the participant
+    // row is confirmed — so retrying after a network hiccup never
+    // double-charges (alreadyIn will already be true next time).
+    if (!alreadyIn && battle.entryFeeCent > 0) {
+      final error = await ZetraPay.spendAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: battle.entryFeeCent.toDouble());
+      if (error != null) {
+        await _client.from('battle_participants').delete().eq('battle_id', battle.id).eq('user_id', user.id);
+        throw StateError('insufficient_funds:${battle.entryFeeCent}');
+      }
+    }
 
     return battle;
   }
@@ -1006,6 +1091,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
   final List<String> _subjects = [kSubjects.first.name];
   int _perSubjectCount = 10;
   int _maxPlayers = 2;
+  int _entryFeeCent = 0;
   bool _playNow = true;
   DateTime? _scheduledAt;
   final _codeController = TextEditingController();
@@ -1057,12 +1143,19 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
         subjects: _subjects,
         perSubjectCount: _perSubjectCount,
         maxPlayers: _maxPlayers,
+        entryFeeCent: _entryFeeCent,
         scheduledAt: _playNow ? null : _scheduledAt,
       );
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleReadyScreen(battleId: battle.id, isHost: true)));
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (!mounted) return;
+      final needed = parseInsufficientFundsFee(e);
+      if (needed != null) {
+        await showInsufficientCentDialog(context, needed: needed);
+      } else {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1079,7 +1172,13 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
       if (!mounted) return;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => BattleReadyScreen(battleId: battle.id, isHost: false)));
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (!mounted) return;
+      final needed = parseInsufficientFundsFee(e);
+      if (needed != null) {
+        await showInsufficientCentDialog(context, needed: needed);
+      } else {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1246,6 +1345,18 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                   items: const [2, 3, 4, 5, 6].map((c) => DropdownMenuItem(value: c, child: Text('$c players'))).toList(),
                   onChanged: (v) => setState(() => _maxPlayers = v!),
                   decoration: const InputDecoration(labelText: 'Number of players'),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<int>(
+                  initialValue: _entryFeeCent,
+                  items: const [0, 50, 100, 200, 500]
+                      .map((c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(c == 0 ? 'Free entry' : '$c¢ entry — winner gets +$kBattleWinBonusCent¢'),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setState(() => _entryFeeCent = v!),
+                  decoration: const InputDecoration(labelText: 'Entry fee per player'),
                 ),
                 const SizedBox(height: 14),
                 const Text('When do you want to compete?', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
@@ -1437,6 +1548,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
           subjectsLabel: battleSnapshot.subjectsLabel,
           durationSeconds: battleSnapshot.durationSeconds,
           startedAt: battleSnapshot.startedAt ?? DateTime.now(),
+          entryFeeCent: battleSnapshot.entryFeeCent,
         ),
       ));
     });
@@ -1562,6 +1674,10 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                           Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6)),
                           const SizedBox(height: 4),
                           Text('Up to ${battle.maxPlayers} players', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                          if (battle.entryFeeCent > 0) ...[
+                            const SizedBox(height: 4),
+                            Text('Entry: ${battle.entryFeeCent}¢ per player', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                          ],
                         ]),
                       ),
                       const SizedBox(height: 20),
@@ -1779,6 +1895,7 @@ class BattlePlayScreen extends StatefulWidget {
   final String subjectsLabel;
   final int durationSeconds;
   final DateTime startedAt;
+  final int entryFeeCent;
   const BattlePlayScreen({
     super.key,
     required this.battleId,
@@ -1786,6 +1903,7 @@ class BattlePlayScreen extends StatefulWidget {
     required this.subjectsLabel,
     required this.durationSeconds,
     required this.startedAt,
+    required this.entryFeeCent,
   });
   @override
   State<BattlePlayScreen> createState() => _BattlePlayScreenState();
@@ -1922,6 +2040,12 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
     await provider.recordBattleResult(won: won);
     await provider.addXP(won ? 50 : (tied ? 25 : 10));
     await BattleService.instance.recordMatchResult(won ? 'W' : (tied ? 'T' : 'L'));
+
+    // Cent bonus only applies to paid battles, and only to an outright
+    // win (not a tie) — never a payout of the pooled entries themselves.
+    if (won && widget.entryFeeCent > 0) {
+      await ZetraPay.creditAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: kBattleWinBonusCent.toDouble());
+    }
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
@@ -2250,6 +2374,9 @@ class BattleResultScreen extends StatelessWidget {
 /// Bot opponents are named after NaijaLearn's own Zetra ecosystem (Zetra
 /// Bot, Connect Bot, NAI Bot, etc.) so it's unmistakably an in-app bot
 /// rather than a real ZetraMail user's name.
+///
+/// Bot matches also support a Cent entry fee (charged up-front by
+/// difficulty tier) with a flat win bonus credited on an outright win.
 /// =========================================================================
 
 enum BotDifficulty { rookie, scholar, ace, master }
@@ -2299,6 +2426,7 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
   int _perSubjectCount = 10;
   int _durationSeconds = 240;
   BotDifficulty _difficulty = BotDifficulty.scholar;
+  bool _starting = false;
   static const int _maxSubjects = 4;
   static const List<int> _durationOptions = [120, 180, 240, 300, 360, 420, 480];
 
@@ -2312,7 +2440,7 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
     });
   }
 
-  void _start() {
+  Future<void> _start() async {
     final questions = <Question>[];
     for (final subject in _subjects) {
       final pool = List<Question>.from(QuestionRepository.getForSubject(subject))..shuffle();
@@ -2325,6 +2453,17 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
       );
       return;
     }
+
+    final fee = kBotEntryFeeCent[_difficulty]!;
+    setState(() => _starting = true);
+    final error = await ZetraPay.spendAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: fee.toDouble());
+    if (!mounted) return;
+    setState(() => _starting = false);
+    if (error != null) {
+      await showInsufficientCentDialog(context, needed: fee);
+      return;
+    }
+
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => BotBattlePlayScreen(
         questions: questions,
@@ -2403,7 +2542,7 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
               final profile = kBotProfiles[d]!;
               final isSelected = _difficulty == d;
               return ChoiceChip(
-                label: Text('${profile.label} (~${(profile.accuracy * 100).round()}%)'),
+                label: Text('${profile.label} — ${kBotEntryFeeCent[d]}¢ (~${(profile.accuracy * 100).round()}%)'),
                 selected: isSelected,
                 onSelected: (_) => setState(() => _difficulty = d),
               );
@@ -2414,9 +2553,11 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
             width: double.infinity,
             height: 52,
             child: FilledButton.icon(
-              onPressed: _start,
-              icon: const Icon(Icons.smart_toy_rounded),
-              label: const Text('Start Bot Battle'),
+              onPressed: _starting ? null : _start,
+              icon: _starting
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.smart_toy_rounded),
+              label: Text(_starting ? 'Charging...' : 'Start Bot Battle — ${kBotEntryFeeCent[_difficulty]}¢'),
             ),
           ),
         ],
@@ -2530,7 +2671,8 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
   /// Now" to lock in early — mirrors the human-vs-human battle's
   /// manual-submit option. The bot's final score is whatever it had
   /// racked up by this point (or its full simulated score if it already
-  /// finished all questions before submission).
+  /// finished all questions before submission). A win credits the flat
+  /// Cent bonus; the entry fee itself was already charged up front.
   Future<void> _finishBattle() async {
     if (_submitting) return;
     _submitting = true;
@@ -2544,6 +2686,12 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
 
     await provider.addXP(won ? 30 : (tied ? 15 : 5));
 
+    var bonusCredited = false;
+    if (won) {
+      final error = await ZetraPay.creditAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: kBattleWinBonusCent.toDouble());
+      bonusCredited = error == null;
+    }
+
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
       builder: (_) => BotBattleResultScreen(
@@ -2552,6 +2700,7 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
         total: _total,
         botName: _botName,
         difficultyLabel: _profile.label,
+        bonusCredited: bonusCredited,
       ),
     ));
   }
@@ -2742,6 +2891,7 @@ class BotBattleResultScreen extends StatelessWidget {
   final int total;
   final String botName;
   final String difficultyLabel;
+  final bool bonusCredited;
   const BotBattleResultScreen({
     super.key,
     required this.humanScore,
@@ -2749,6 +2899,7 @@ class BotBattleResultScreen extends StatelessWidget {
     required this.total,
     required this.botName,
     required this.difficultyLabel,
+    this.bonusCredited = false,
   });
 
   @override
@@ -2795,7 +2946,7 @@ class BotBattleResultScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             if (won)
-              const Text('+30 XP', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+              Text(bonusCredited ? '+30 XP • +$kBattleWinBonusCent¢ bonus' : '+30 XP', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
             else if (tied)
               const Text('+15 XP', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))
             else
