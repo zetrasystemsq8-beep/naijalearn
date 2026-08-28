@@ -22,8 +22,14 @@
 // making the Coin Shop's Ocean Theme Pack purchase actually visible
 // across the whole app, not just a cosmetic flag sitting unused.
 //
-// Authentication: NaijaLearn is a client of the existing Zetra ecosystem.
-// Users are NOT created here — they must already have a Zetra account.
+// Authentication: NaijaLearn is a client of the existing Zetra ecosystem
+// for ZetraMail accounts, AND supports NaijaLearn-only self-signup
+// accounts (username + password, no email, no OTP) — see signup_screen.dart
+// and AuthService.signUpWithUsername/loginWithUsername below. LoginScreen
+// routes based on whether the typed identifier contains '@': with '@' it's
+// treated as a ZetraMail login (full flow, mandatory OTP); without '@' it's
+// treated as a NaijaLearn username login (no OTP, straight to HomeScreen).
+//
 // Login is email+password (signInWithPassword), matching how the rest of
 // the Zetra ecosystem (NAI) authenticates. The user types their ZetraMail
 // address; it's resolved to the internal auth_email via the
@@ -32,12 +38,13 @@
 // sees or types it. If the RPC returns null/empty, or the password is
 // wrong, we show "Invalid ZetraMail or password."
 //
-// Verification code step: a code is ALWAYS required after password login,
-// on every single login attempt — not just for unverified profiles. This
-// is a deliberate second factor: knowing the ZetraMail + password alone is
-// not enough to get in, since the code only shows up in the account
-// owner's ZetraMail inbox (via the Zetra ID app). request_otp is called
-// exactly once, right after signInWithPassword succeeds.
+// Verification code step: a code is ALWAYS required after ZetraMail
+// password login, on every single login attempt — not just for unverified
+// profiles. This is a deliberate second factor: knowing the ZetraMail +
+// password alone is not enough to get in, since the code only shows up in
+// the account owner's ZetraMail inbox (via the Zetra ID app). request_otp
+// is called exactly once, right after signInWithPassword succeeds.
+// Self-signup username accounts skip this step entirely (see above).
 //
 // Session-vs-verified tracking: Supabase creates a valid session the
 // instant signInWithPassword succeeds — BEFORE the OTP step runs. So a
@@ -47,10 +54,12 @@
 // them straight into HomeScreen on relaunch, skipping the code entirely.
 // To prevent that, AuthService stores a `nl_otp_verified` flag in
 // Supabase Auth's own per-user metadata: reset to false at the start of
-// every login(), set to true only once verifyCode() succeeds. SplashScreen
-// checks this flag (not just session presence) to decide whether to route
-// to HomeScreen or back to VerifyOtpScreen — and does NOT re-request a
-// code in that second case, since the one already sent is still valid.
+// every login(), set to true only once verifyCode() succeeds (or
+// immediately for self-signup username accounts, which have no OTP step).
+// SplashScreen checks this flag (not just session presence) to decide
+// whether to route to HomeScreen or back to VerifyOtpScreen — and does
+// NOT re-request a code in that second case, since the one already sent
+// is still valid.
 //
 // This does NOT use Supabase's built-in signInWithOtp/verifyOTP (which
 // rejects the .internal auth email domain with "Email address is
@@ -90,6 +99,7 @@ import 'world_challenge.dart';
 import 'study_squads.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
+import 'signup_screen.dart';
 import 'app_update.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
@@ -285,6 +295,70 @@ class AuthService {
     return profile;
   }
 
+  /// Self-serve NaijaLearn-only signup. Creates a real Supabase Auth user
+  /// under a generated internal alias email (username@nlstudent.internal),
+  /// then a matching profiles row via the complete_naijalearn_signup RPC.
+  /// No OTP step — the caller is logged in immediately after this returns.
+  Future<ZetraProfile> signUpWithUsername({
+    required String username,
+    required String password,
+  }) async {
+    final aliasEmail = '$username@nlstudent.internal';
+
+    AuthResponse response;
+    try {
+      response = await _client.auth.signUp(email: aliasEmail, password: password);
+    } on AuthException catch (e) {
+      throw ZetraAuthException(e.message);
+    }
+
+    if (response.user == null || response.session == null) {
+      throw ZetraAuthException('Could not create account. Please try again.');
+    }
+
+    try {
+      await _client.rpc('complete_naijalearn_signup', params: {
+        'p_username': username,
+        'p_alias_email': aliasEmail,
+      });
+    } on PostgrestException catch (e) {
+      throw ZetraAuthException(e.message);
+    }
+
+    // No OTP for self-signup accounts — mark verified immediately.
+    try {
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
+    } catch (e) {
+      debugPrint('[ZetraAuth] Could not set otp-verified flag after signup (non-fatal): $e');
+    }
+
+    return loadCurrentProfile();
+  }
+
+  /// Login for NaijaLearn-only username accounts (identifier typed with no
+  /// @ symbol). Skips resolve_login_email and the OTP step entirely.
+  Future<ZetraProfile> loginWithUsername({
+    required String username,
+    required String password,
+  }) async {
+    final aliasEmail = '$username@nlstudent.internal';
+
+    try {
+      final response = await _client.auth.signInWithPassword(email: aliasEmail, password: password);
+      if (response.user == null) throw ZetraAuthException(invalidCredentialsMessage);
+    } on AuthException {
+      throw ZetraAuthException(invalidCredentialsMessage);
+    }
+
+    try {
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
+    } catch (e) {
+      debugPrint('[ZetraAuth] Could not set otp-verified flag on username login (non-fatal): $e');
+    }
+
+    return loadCurrentProfile();
+  }
+
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
     if (user == null) {
@@ -397,17 +471,22 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String? _validateZetraMail(String? value) {
-    final email = value?.trim() ?? '';
-    if (email.isEmpty) return 'Please enter your ZetraMail address';
-    final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
-    if (!emailRegex.hasMatch(email)) return 'Please enter a valid email';
+    final identifier = value?.trim() ?? '';
+    if (identifier.isEmpty) return 'Please enter your ZetraMail or username';
+    // If it contains '@', validate as an email. Otherwise it's treated
+    // as a NaijaLearn username login — no format restriction beyond
+    // "not empty" here (signup already enforces the real format).
+    if (identifier.contains('@')) {
+      final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
+      if (!emailRegex.hasMatch(identifier)) return 'Please enter a valid email';
+    }
     return null;
   }
 
   String? _validatePassword(String? value) {
     final password = value ?? '';
     if (password.isEmpty) return 'Please enter your password';
-    if (password.length < 8) return 'Password must be at least 8 characters';
+    if (password.length < 6) return 'Password must be at least 6 characters';
     return null;
   }
 
@@ -423,15 +502,29 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     try {
-      // login() always requests a fresh OTP after a successful password
-      // check — so every successful login lands here, on VerifyOtpScreen,
-      // never straight into HomeScreen. Password alone is never enough.
-      await AuthService.instance.login(zetramail: zetramail, password: password);
-      if (!mounted) return;
-     Navigator.of(context).pushAndRemoveUntil(
-  MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
-  (route) => false,
-);
+      if (zetramail.contains('@')) {
+        // Full ZetraMail login — always requests a fresh OTP, so every
+        // successful login lands on VerifyOtpScreen, never straight into
+        // HomeScreen. Password alone is never enough.
+        await AuthService.instance.login(zetramail: zetramail, password: password);
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+          (route) => false,
+        );
+      } else {
+        // No @ symbol typed — treat as a NaijaLearn-only username login.
+        // No OTP step; straight into HomeScreen on success.
+        final profile = await AuthService.instance.loginWithUsername(
+          username: zetramail,
+          password: password,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
+          (route) => false,
+        );
+      }
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -477,7 +570,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Sign in with your ZetraMail address',
+                        'Sign in with your ZetraMail — or your NaijaLearn username',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                       ),
@@ -485,12 +578,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextFormField(
                         controller: _zetramailController,
                         keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.email],
+                        autofillHints: const [AutofillHints.username],
                         textInputAction: TextInputAction.next,
                         validator: _validateZetraMail,
                         decoration: InputDecoration(
-                          labelText: 'ZetraMail address',
-                          hintText: 'you@zetramail.ng',
+                          labelText: 'ZetraMail or username',
+                          hintText: 'you@zetramail.ng or username',
                           prefixIcon: const Icon(Icons.email_outlined),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                         ),
@@ -541,6 +634,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                              ),
+                      child: const Text("Don't have an account? Sign up"),
+                    ),
                     TextButton(
                       onPressed: _loading
                           ? null
