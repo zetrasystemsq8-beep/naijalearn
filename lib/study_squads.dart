@@ -1883,8 +1883,8 @@ class _SquadSettingsScreenState extends State<SquadSettingsScreen> {
 
   Future<void> _confirmAndMonetize() async {
     final price = int.tryParse(_priceController.text) ?? 0;
-    if (price < 0 || price > kSquadMaxJoinPrice) {
-      setState(() => _error = 'Join price must be between 0 and $kSquadMaxJoinPrice Cent.');
+    if (price < 1 || price > kSquadMaxJoinPrice) {
+      setState(() => _error = 'Set a join price between 1 and $kSquadMaxJoinPrice Cent before unlocking.');
       return;
     }
     final confirmed = await showDialog<bool>(

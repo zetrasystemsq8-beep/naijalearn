@@ -307,7 +307,11 @@ class AuthService {
 
     AuthResponse response;
     try {
-      response = await _client.auth.signUp(email: aliasEmail, password: password);
+      response = await _client.auth.signUp(
+        email: aliasEmail,
+        password: password,
+        data: {'username': username},
+      );
     } on AuthException catch (e) {
       throw ZetraAuthException(e.message);
     }
