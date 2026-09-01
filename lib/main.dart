@@ -82,7 +82,7 @@
 
 import 'dart:async';
 import 'dart:convert';
-
+import 'study_plan.dart';
 import 'models.dart';
 export 'models.dart';
 import 'package:flutter/material.dart';
@@ -1678,6 +1678,7 @@ class _StudyTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _MenuTile(icon: Icons.library_books_rounded, label: 'Textbooks', subtitle: 'All subject lessons and notes', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TextbookShelfScreen()))),
+                  _MenuTile(icon: Icons.calendar_month_rounded, label: 'Study Plan', subtitle: 'Your day-by-day plan to exam day', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyPlanScreen()))),
                   _MenuTile(icon: Icons.style_rounded, label: 'Flashcards', subtitle: 'Spaced-repetition revision cards', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlashcardsScreen()))),
                   _MenuTile(icon: Icons.school_rounded, label: 'Mock Exam', subtitle: 'JAMB-style, up to 4 subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
                   _MenuTile(icon: Icons.psychology_alt_rounded, label: 'AI Study Coach', subtitle: 'Personalized focus plan', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
