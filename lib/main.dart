@@ -72,6 +72,13 @@
 // ForceUpdateScreen — a non-dismissible wall — instead of continuing on
 // to auth/session routing. See app_update.dart for the Supabase-backed
 // version check itself.
+//
+// REFERRAL ATTRIBUTION: immediately after the mandatory OTP step
+// succeeds (and before the user ever reaches NaiOnboardingGate/HomeScreen),
+// VerifyOtpScreen checks ReferralService.instance.getMyAttribution(). If
+// the account has no referral code on file yet, the user is routed
+// through ReferralCodeEntryScreen exactly once; if a code is already on
+// file, the flow is unchanged. See referral_code_screen.dart.
 
 import 'dart:async';
 import 'dart:convert';
@@ -101,6 +108,7 @@ import 'nai_mentor.dart';
 import 'guest_mode.dart';
 import 'signup_screen.dart';
 import 'app_update.dart';
+import 'referral_code_screen.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -736,10 +744,34 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
     try {
       final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
-        (route) => false,
-      );
+
+      // Check referral attribution once, right after OTP success, before
+      // ever landing in the app. Existing users with a code already on
+      // file skip this entirely and go straight to NaiOnboardingGate.
+      final attribution = await ReferralService.instance.getMyAttribution();
+      if (!mounted) return;
+
+      if (attribution == null) {
+        // First login, no code on file yet — collect it once. Using
+        // push() (not pushAndRemoveUntil) here keeps this screen mounted
+        // so `context` below stays valid when onDone eventually fires.
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ReferralCodeEntryScreen(
+              onDone: () => Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+                (route) => false,
+              ),
+            ),
+          ),
+        );
+      } else {
+        // Already has a code on file — unchanged flow.
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+          (route) => false,
+        );
+      }
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -2255,11 +2287,21 @@ class ContactSupportScreen extends StatelessWidget {
               final loaded = snap.connectionState == ConnectionState.done;
               final isAdmin = loaded && snap.data != null && snap.data!['is_admin'] == true;
               if (!loaded || !isAdmin) return const SizedBox.shrink();
-              return _MenuTile(
-                icon: Icons.admin_panel_settings_rounded,
-                label: 'Admin',
-                subtitle: 'Manage cent purchase requests',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen())),
+              return Column(
+                children: [
+                  _MenuTile(
+                    icon: Icons.admin_panel_settings_rounded,
+                    label: 'Admin',
+                    subtitle: 'Manage cent purchase requests',
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen())),
+                  ),
+                  _MenuTile(
+                    icon: Icons.link_rounded,
+                    label: 'Referral Stats',
+                    subtitle: 'See signups by referral code',
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen())),
+                  ),
+                ],
               );
             },
           ),
