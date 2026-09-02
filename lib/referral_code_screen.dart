@@ -13,8 +13,16 @@
 // this generates a random UUID once and persists it in
 // SharedPreferences — stable across app restarts on the same device,
 // which is enough for the fraud-flagging signal server-side.
+//
+// DEBUG INSTRUMENTATION (temporary): _submit() now logs the full
+// exception type and stack trace via debugPrint whenever submitCode()
+// throws, so the "Null check operator used on a null value" crash can
+// be traced to its exact origin (client-side Dart vs. the Supabase RPC
+// response itself). Remove the debugPrint block once the root cause is
+// found and fixed.
 
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -69,10 +77,12 @@ class ReferralService {
 
   Future<Map<String, dynamic>> submitCode(String code) async {
     final deviceId = await DeviceIdService.instance.getDeviceId();
+    debugPrint('[Referral] submitCode() calling RPC with p_code="${code.trim()}", p_device_id="$deviceId"');
     final result = await _client.rpc('submit_referral_code', params: {
       'p_code': code.trim(),
       'p_device_id': deviceId,
     });
+    debugPrint('[Referral] submit_referral_code RPC raw result: $result (type: ${result.runtimeType})');
     return Map<String, dynamic>.from(result as Map);
   }
 
@@ -125,7 +135,14 @@ class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
       await ReferralService.instance.submitCode(_codeController.text);
       if (!mounted) return;
       widget.onDone();
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // DEBUG: full type + stack trace so the exact throwing line can be
+      // identified. Check `flutter logs` / your device's logcat output
+      // for a block starting with "[Referral] EXCEPTION".
+      debugPrint('[Referral] EXCEPTION during submitCode(): '
+          'runtimeType=${e.runtimeType}, toString="$e"');
+      debugPrint('[Referral] STACK TRACE:\n$stackTrace');
+
       if (!mounted) return;
       final message = e.toString().replaceFirst('PostgrestException(message: ', '').split(',').first;
       setState(() => _error = message.isNotEmpty ? message : 'Invalid code. Please check and try again.');
