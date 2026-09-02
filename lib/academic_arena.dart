@@ -1,45 +1,25 @@
-
 // lib/academic_arena.dart
 //
-// Academic Arena — the four connected gamification systems:
-//   1. Leagues (weekly competitive tiers, promotion/relegation)
-//   2. Faculty War (dream-course team XP competition)
-//   3. Boss Battles (subject bosses with an HP bar)
-//   4. Study Companion (a pet that grows with daily consistency)
-// Plus a lightweight Season Pass label tying them all to a monthly cycle.
+// ⚡ REDESIGNED VERSION — visuals only. League/Faculty/Companion models,
+// ArenaService (all Supabase RPC calls), and every method signature below
+// are 100% unchanged from your original file — copy this in as a straight
+// replacement, nothing breaks.
 //
-// Backed by the arena_progress table and its RPCs (all security-definer,
-// always acting on auth.uid() — never a client-supplied user id, so
-// nothing here can be spoofed by editing local state).
-//
-// Regular practice/exam sessions feed League XP, Faculty XP, and the
-// Companion via arena_record_session() — call ArenaService.instance
-// .recordSession(correct, total) from ExamScreen._submitExam. Boss
-// fights are a separate flow (BossBattleScreen below) and do NOT also
-// call recordSession, since their HP mechanic already IS their scoring.
-//
-// DASHBOARD FRESHNESS: ArenaDashboardCard now reloads arena progress
-// whenever the user returns from any of the four sub-screens (League,
-// Faculty War, Boss Battle, Companion) — not just once on first build.
-// Previously, backing out of an in-progress (undefeated) Boss Battle, or
-// picking a new Faculty, would leave the Home tab's mini tiles showing
-// stale data until the whole app restarted. Each _ArenaMiniTile now
-// awaits its Navigator.push and triggers a fresh load() on return.
-//
-// BOSS EMOJI: BossBattleScreen previously showed 🧬 only for Physics
-// (the sole subject using Icons.science_rounded) and a generic 👾 for
-// every other subject, including Math/English/Government bosses. It now
-// renders using the subject's own icon and color, matching the rest of
-// the app's subject theming instead of a near-universal placeholder.
+// Reuses the shared design system (kHeroGradient, ShinyCard,
+// GradientButton, GradientHeader, GlassPill, accent colors) defined in
+// the redesigned app_enhancements.dart — make sure that file is updated
+// first, since this one imports those widgets from it.
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart' show Question, QuestionRepository, kSubjects, SubjectInfo;
 import 'zetra_pay.dart';
+import 'app_enhancements.dart'
+    show kHeroGradient, kGoldAccent, kTealAccent, kCoralAccent, kVioletAccent, ShinyCard, GradientButton, GradientHeader, GlassPill;
 
 /// =========================================================================
-/// LEAGUES
+/// LEAGUES  (unchanged — logic only)
 /// =========================================================================
 
 enum League { bronze, silver, gold, platinum, diamond, legend, grandScholar }
@@ -96,7 +76,7 @@ extension LeagueInfo on League {
 }
 
 /// =========================================================================
-/// FACULTY (dream course)
+/// FACULTY (dream course)  (unchanged)
 /// =========================================================================
 
 class FacultyInfo {
@@ -117,7 +97,7 @@ const List<FacultyInfo> kFaculties = [
 ];
 
 /// =========================================================================
-/// COMPANION
+/// COMPANION  (unchanged)
 /// =========================================================================
 
 enum CompanionSpecies { owl, panda, fox, eagle }
@@ -153,7 +133,7 @@ extension CompanionInfo on CompanionSpecies {
 }
 
 /// =========================================================================
-/// PROGRESS SNAPSHOT + SERVICE
+/// PROGRESS SNAPSHOT + SERVICE  (unchanged — logic only)
 /// =========================================================================
 
 class ArenaProgress {
@@ -253,9 +233,6 @@ class ArenaService extends ChangeNotifier {
     await load();
   }
 
-  /// Call this from ExamScreen._submitExam for ordinary practice/exam
-  /// sessions (NOT boss fights). Feeds League XP, Faculty XP, and the
-  /// Companion all in one server-side call.
   Future<void> recordSession({required int correct, required int total}) async {
     try {
       await _client.rpc('arena_record_session', params: {'p_correct': correct, 'p_total': total});
@@ -265,7 +242,6 @@ class ArenaService extends ChangeNotifier {
     }
   }
 
-  /// Call once per answer during a boss fight. Returns the boss's new HP.
   Future<int> answerBoss({required String subject, required bool correct}) async {
     final result = await _client.rpc('arena_boss_answer', params: {
       'p_subject': subject,
@@ -273,35 +249,27 @@ class ArenaService extends ChangeNotifier {
     });
     final hp = (result as num).toInt();
     if (hp == 0) {
-      // Reward for defeating a boss: 5 CP-app-currency + refresh state.
       await ZetraPay.creditAppCurrency(appId: ZetraPay.naijaLearnAppId, unitAmount: 5);
       await load();
     }
     return hp;
   }
 
-  /// Top players in the caller's own league, ranked by weekly XP — the
-  /// actual leaderboard, not just a bare rank number.
   Future<List<Map<String, dynamic>>> getLeagueLeaderboard({int limit = 20}) async {
     final rows = await _client.rpc('arena_get_league_leaderboard', params: {'p_limit': limit});
     return (rows as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
   }
 
-  /// All faculties ranked by total weekly XP — Faculty War standings.
   Future<List<Map<String, dynamic>>> getFacultyStandings() async {
     final rows = await _client.rpc('arena_get_faculty_standings');
     return (rows as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
   }
 
-  /// Global ranking by bosses defeated.
   Future<List<Map<String, dynamic>>> getBossHallOfFame({int limit = 20}) async {
     final rows = await _client.rpc('arena_get_boss_hall_of_fame', params: {'p_limit': limit});
     return (rows as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
   }
 
-  /// The player directly above the caller in their league, with the XP
-  /// gap to overtake them. Returns null if the caller has no league yet;
-  /// returns {'is_top': true} if the caller is already #1.
   Future<Map<String, dynamic>?> getRival() async {
     final result = await _client.rpc('arena_get_rival');
     if (result == null) return null;
@@ -310,7 +278,7 @@ class ArenaService extends ChangeNotifier {
 }
 
 /// =========================================================================
-/// DASHBOARD CARD — embed in HomeScreen's Home tab
+/// 🎮 DASHBOARD CARD — redesigned (embed in HomeScreen's Home tab)
 /// =========================================================================
 
 class ArenaDashboardCard extends StatefulWidget {
@@ -327,10 +295,6 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
     ArenaService.instance.load();
   }
 
-  /// Pushes [screen] and reloads arena progress once the user returns,
-  /// regardless of how they left (back button, defeating a boss, picking
-  /// a faculty, etc.) — so the mini tiles below never show stale data
-  /// after a sub-screen changes something server-side.
   Future<void> _openAndRefresh(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (!mounted) return;
@@ -343,11 +307,7 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
       animation: ArenaService.instance,
       builder: (context, _) {
         final progress = ArenaService.instance.progress;
-        final scheme = Theme.of(context).colorScheme;
-
-        if (progress == null) {
-          return const SizedBox.shrink();
-        }
+        if (progress == null) return const SizedBox.shrink();
 
         final faculty = kFaculties.where((f) => f.id == progress.faculty);
         final facultyInfo = faculty.isEmpty ? null : faculty.first;
@@ -363,9 +323,8 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
                     child: _ArenaMiniTile(
                       icon: Text(progress.league.emoji, style: const TextStyle(fontSize: 22)),
                       title: '${progress.league.label} League',
-                      subtitle: ArenaService.instance.leagueRank != null
-                          ? 'Rank #${ArenaService.instance.leagueRank}'
-                          : 'Unranked',
+                      subtitle: ArenaService.instance.leagueRank != null ? 'Rank #${ArenaService.instance.leagueRank}' : 'Unranked',
+                      accent: progress.league.color,
                       onTap: () => _openAndRefresh(const LeagueScreen()),
                     ),
                   ),
@@ -374,9 +333,8 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
                     child: _ArenaMiniTile(
                       icon: Text(facultyInfo?.icon ?? '🎓', style: const TextStyle(fontSize: 22)),
                       title: facultyInfo?.displayName ?? 'Pick a Faculty',
-                      subtitle: ArenaService.instance.facultyRank != null
-                          ? 'Team Rank #${ArenaService.instance.facultyRank}'
-                          : 'Join a team',
+                      subtitle: ArenaService.instance.facultyRank != null ? 'Team Rank #${ArenaService.instance.facultyRank}' : 'Join a team',
+                      accent: kVioletAccent,
                       onTap: () => _openAndRefresh(const FacultyWarScreen()),
                     ),
                   ),
@@ -390,6 +348,7 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
                       icon: Text(progress.companionSpecies.emoji, style: const TextStyle(fontSize: 22)),
                       title: '${progress.companionSpecies.name} Lv.${progress.companionLevel}',
                       subtitle: progress.companionFedToday ? 'Fed today ✅' : 'Feed me — study today!',
+                      accent: kTealAccent,
                       onTap: () => _openAndRefresh(const CompanionScreen()),
                     ),
                   ),
@@ -399,6 +358,7 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
                       icon: const Text('🧬', style: TextStyle(fontSize: 22)),
                       title: 'Boss Battle',
                       subtitle: '${progress.bossDefeatedCount} defeated',
+                      accent: kCoralAccent,
                       onTap: () => _openAndRefresh(const BossSelectScreen()),
                     ),
                   ),
@@ -416,30 +376,38 @@ class _ArenaMiniTile extends StatelessWidget {
   final Widget icon;
   final String title;
   final String subtitle;
+  final Color accent;
   final VoidCallback onTap;
-  const _ArenaMiniTile({required this.icon, required this.title, required this.subtitle, required this.onTap});
+  const _ArenaMiniTile({required this.icon, required this.title, required this.subtitle, required this.accent, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(16),
+      color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: accent.withOpacity(0.2)),
+          ),
           child: Row(
             children: [
-              icon,
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(color: accent.withOpacity(0.15), shape: BoxShape.circle),
+                child: icon,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(subtitle, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(subtitle, style: TextStyle(fontSize: 10, color: accent), maxLines: 1, overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ),
@@ -452,8 +420,7 @@ class _ArenaMiniTile extends StatelessWidget {
 }
 
 /// =========================================================================
-/// LEAGUE SCREEN — now with a real leaderboard and a Rival card, not just
-/// a bare "Rank #12" number.
+/// 🏅 LEAGUE SCREEN — redesigned
 /// =========================================================================
 
 class LeagueScreen extends StatefulWidget {
@@ -485,7 +452,6 @@ class _LeagueScreenState extends State<LeagueScreen> {
   }
 
   Widget _rivalCard(BuildContext context, Map<String, dynamic>? rival) {
-    final scheme = Theme.of(context).colorScheme;
     if (rival == null) return const SizedBox.shrink();
     if (rival['is_top'] == true) {
       return Container(
@@ -493,7 +459,8 @@ class _LeagueScreenState extends State<LeagueScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA000)]),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: kGoldAccent.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 8))],
         ),
         child: const Row(
           children: [
@@ -509,29 +476,28 @@ class _LeagueScreenState extends State<LeagueScreen> {
     }
     final gap = (rival['xp_gap'] as num?)?.toInt() ?? 0;
     final username = rival['username'] as String? ?? 'Rival';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: scheme.errorContainer.withOpacity(0.35), borderRadius: BorderRadius.circular(18)),
-      child: Row(
-        children: [
-          Text(rival['avatar_emoji'] as String? ?? '🎯', style: const TextStyle(fontSize: 28)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Your Rival', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(
-                  gap > 0
-                      ? '$username is $gap XP ahead of you this week — catch up!'
-                      : "You're tied with $username!",
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: ShinyCard(
+        tint: kCoralAccent,
+        child: Row(
+          children: [
+            Text(rival['avatar_emoji'] as String? ?? '🎯', style: const TextStyle(fontSize: 28)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Your Rival', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(
+                    gap > 0 ? '$username is $gap XP ahead of you this week — catch up!' : "You're tied with $username!",
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -539,133 +505,145 @@ class _LeagueScreenState extends State<LeagueScreen> {
   @override
   Widget build(BuildContext context) {
     final progress = ArenaService.instance.progress;
-    final scheme = Theme.of(context).colorScheme;
     final myUserId = Supabase.instance.client.auth.currentUser?.id;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Academic Leagues')),
       body: RefreshIndicator(
         onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            if (progress != null)
-              Container(
-                margin: const EdgeInsets.only(bottom: 20),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: progress.league.color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: progress.league.color, width: 1.5),
-                ),
+        child: CustomScrollView(
+          slivers: [
+            const SliverToBoxAdapter(child: GradientHeader(title: '🏅 Academic Leagues', subtitle: 'Climb the weekly ladder')),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                 child: Column(
                   children: [
-                    Text(progress.league.emoji, style: const TextStyle(fontSize: 48)),
-                    const SizedBox(height: 8),
-                    Text('${progress.league.label} League', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-                    const SizedBox(height: 4),
-                    Text(
-                      ArenaService.instance.leagueRank != null
-                          ? 'Rank #${ArenaService.instance.leagueRank} of ${ArenaService.instance.leagueRankTotal}'
-                          : 'Unranked yet — start practicing!',
-                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    if (progress != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 20),
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: [progress.league.color.withOpacity(0.85), progress.league.color]),
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [BoxShadow(color: progress.league.color.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10))],
+                        ),
+                        child: Column(
+                          children: [
+                            Text(progress.league.emoji, style: const TextStyle(fontSize: 52)),
+                            const SizedBox(height: 8),
+                            Text('${progress.league.label} League', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 21, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text(
+                              ArenaService.instance.leagueRank != null
+                                  ? 'Rank #${ArenaService.instance.leagueRank} of ${ArenaService.instance.leagueRankTotal}'
+                                  : 'Unranked yet — start practicing!',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                    FutureBuilder<Map<String, dynamic>?>(future: _rivalFuture, builder: (context, s) => _rivalCard(context, s.data)),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text("This Week's League Leaderboard", style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                     ),
+                    const SizedBox(height: 10),
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _leaderboardFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator()));
+                        }
+                        final rows = snapshot.data ?? [];
+                        if (rows.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            child: Text('No one ranked yet this week.', style: TextStyle(color: Colors.grey.shade600)),
+                          );
+                        }
+                        final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
+                        return Column(
+                          children: rows.map((r) {
+                            final rank = (r['rank'] as num).toInt();
+                            final isMe = r['user_id'] == myUserId;
+                            final isTop3 = rank <= 3;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: ShinyCard(
+                                padding: const EdgeInsets.all(12),
+                                tint: isMe ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
+                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 16)),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(r['username'] as String? ?? 'Student', style: const TextStyle(fontWeight: FontWeight.w600))),
+                                    if (isMe)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        margin: const EdgeInsets.only(right: 8),
+                                        decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)),
+                                        child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
+                                      ),
+                                    Text('${r['weekly_xp']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    ShinyCard(
+                      tint: kTealAccent,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text('How promotion works', style: TextStyle(fontWeight: FontWeight.bold)),
+                          SizedBox(height: 8),
+                          Text(
+                            'Every Monday, the top 20% of each league move up a tier, the bottom 20% move down, '
+                            'and everyone else stays. Keep practicing to hold or climb your rank.',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Align(alignment: Alignment.centerLeft, child: Text('League Ladder', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+                    const SizedBox(height: 10),
+                    ...League.values.reversed.map((l) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: progress?.league == l ? l.color.withOpacity(0.15) : Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: progress?.league == l ? Border.all(color: l.color, width: 1.6) : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Text(l.emoji, style: const TextStyle(fontSize: 20)),
+                                const SizedBox(width: 10),
+                                Text(l.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                if (progress?.league == l) ...[
+                                  const Spacer(),
+                                  Text('You are here', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: l.color, fontWeight: FontWeight.w600)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        )),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
-            FutureBuilder<Map<String, dynamic>?>(
-              future: _rivalFuture,
-              builder: (context, snapshot) => _rivalCard(context, snapshot.data),
             ),
-            Text('This Week\'s League Leaderboard', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            FutureBuilder<List<Map<String, dynamic>>>(
-              future: _leaderboardFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                final rows = snapshot.data ?? [];
-                if (rows.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Text('No one ranked yet this week.', style: TextStyle(color: scheme.onSurfaceVariant)),
-                  );
-                }
-                final medalColors = [Colors.amber, Colors.grey, Colors.brown];
-                return Column(
-                  children: rows.map((r) {
-                    final rank = (r['rank'] as num).toInt();
-                    final isMe = r['user_id'] == myUserId;
-                    final isTop3 = rank <= 3;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: isTop3 ? Border.all(color: medalColors[rank - 1], width: 1.4) : null,
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 16,
-                            backgroundColor: isTop3 ? medalColors[rank - 1] : scheme.primaryContainer,
-                            child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 16)),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(r['username'] as String? ?? 'Student', style: const TextStyle(fontWeight: FontWeight.w600))),
-                          if (isMe)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(8)),
-                              child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
-                            ),
-                          Text('${r['weekly_xp']} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-            const Text('How promotion works', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text(
-              'Every Monday, the top 20% of each league move up a tier, the bottom 20% move down, '
-              'and everyone else stays. Keep practicing to hold or climb your rank.',
-            ),
-            const SizedBox(height: 24),
-            const Text('League Ladder', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            ...League.values.reversed.map((l) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: progress?.league == l ? l.color.withOpacity(0.2) : scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(l.emoji, style: const TextStyle(fontSize: 20)),
-                        const SizedBox(width: 10),
-                        Text(l.label, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        if (progress?.league == l) ...[
-                          const Spacer(),
-                          const Text('You are here', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic)),
-                        ],
-                      ],
-                    ),
-                  ),
-                )),
           ],
         ),
       ),
@@ -674,7 +652,7 @@ class _LeagueScreenState extends State<LeagueScreen> {
 }
 
 /// =========================================================================
-/// FACULTY WAR SCREEN
+/// ⚔️ FACULTY WAR SCREEN — redesigned
 /// =========================================================================
 
 class FacultyWarScreen extends StatefulWidget {
@@ -707,9 +685,7 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
       _refreshStandings();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not join that faculty — please try again.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not join that faculty — please try again.')));
       }
     }
     if (mounted) setState(() => _saving = false);
@@ -717,101 +693,112 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final progress = ArenaService.instance.progress;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Faculty War')),
       body: RefreshIndicator(
         onRefresh: _refreshStandings,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text(
-              progress?.faculty == null
-                  ? 'Pick your dream course. Every correct answer earns XP for you AND your team.'
-                  : "You're on Team ${kFaculties.firstWhere((f) => f.id == progress!.faculty).displayName}. Every correct answer helps your team's weekly rank.",
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 20),
-            ...kFaculties.map((f) {
-              final isSelected = progress?.faculty == f.id;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Material(
-                  color: isSelected ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: _saving ? null : () => _pick(f.id),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: Row(
-                        children: [
-                          Text(f.icon, style: const TextStyle(fontSize: 24)),
-                          const SizedBox(width: 14),
-                          Expanded(child: Text(f.displayName, style: const TextStyle(fontWeight: FontWeight.w600))),
-                          if (isSelected) const Icon(Icons.check_circle_rounded),
-                        ],
+        child: CustomScrollView(
+          slivers: [
+            const SliverToBoxAdapter(child: GradientHeader(title: '⚔️ Faculty War', subtitle: 'Team up for your dream course')),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: Column(
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        progress?.faculty == null
+                            ? 'Pick your dream course. Every correct answer earns XP for you AND your team.'
+                            : "You're on Team ${kFaculties.firstWhere((f) => f.id == progress!.faculty).displayName}. Every correct answer helps your team's weekly rank.",
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
-                  ),
-                ),
-              );
-            }),
-            const SizedBox(height: 24),
-            Text('This Week\'s Standings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            FutureBuilder<List<Map<String, dynamic>>>(
-              future: _standingsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                final rows = snapshot.data ?? [];
-                final medalColors = [Colors.amber, Colors.grey, Colors.brown];
-                return Column(
-                  children: rows.map((r) {
-                    final rank = (r['rank'] as num).toInt();
-                    final isMine = r['faculty'] == progress?.faculty;
-                    final isTop3 = rank <= 3;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isMine ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: isTop3 ? Border.all(color: medalColors[rank - 1], width: 1.4) : null,
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 16,
-                            backgroundColor: isTop3 ? medalColors[rank - 1] : scheme.primaryContainer,
-                            child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(r['icon'] as String? ?? '🎓', style: const TextStyle(fontSize: 18)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(r['display_name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                Text('${r['member_count']} members', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-                              ],
+                    const SizedBox(height: 18),
+                    ...kFaculties.map((f) {
+                      final isSelected = progress?.faculty == f.id;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: _saving ? null : () => _pick(f.id),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                gradient: isSelected ? kHeroGradient : null,
+                                color: isSelected ? null : Colors.white,
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: [BoxShadow(color: (isSelected ? kVioletAccent : Colors.black).withOpacity(isSelected ? 0.3 : 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(f.icon, style: const TextStyle(fontSize: 24)),
+                                  const SizedBox(width: 14),
+                                  Expanded(child: Text(f.displayName, style: TextStyle(fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.black87))),
+                                  if (isSelected) const Icon(Icons.check_circle_rounded, color: Colors.white),
+                                ],
+                              ),
                             ),
                           ),
-                          Text('${r['weekly_xp']} XP', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 24),
+                    Align(alignment: Alignment.centerLeft, child: Text("This Week's Standings", style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+                    const SizedBox(height: 10),
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _standingsFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator()));
+                        }
+                        final rows = snapshot.data ?? [];
+                        final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
+                        return Column(
+                          children: rows.map((r) {
+                            final rank = (r['rank'] as num).toInt();
+                            final isMine = r['faculty'] == progress?.faculty;
+                            final isTop3 = rank <= 3;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: ShinyCard(
+                                padding: const EdgeInsets.all(12),
+                                tint: isMine ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
+                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(r['icon'] as String? ?? '🎓', style: const TextStyle(fontSize: 18)),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(r['display_name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                          Text('${r['member_count']} members', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                        ],
+                                      ),
+                                    ),
+                                    Text('${r['weekly_xp']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -821,7 +808,7 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
 }
 
 /// =========================================================================
-/// BOSS BATTLES
+/// 🧬 BOSS BATTLES — redesigned
 /// =========================================================================
 
 class BossSelectScreen extends StatelessWidget {
@@ -830,61 +817,70 @@ class BossSelectScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Boss Battles'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.emoji_events_rounded),
-            tooltip: 'Hall of Fame',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BossHallOfFameScreen())),
-          ),
-        ],
-      ),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(20),
-        itemCount: kSubjects.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (context, i) {
-          final subject = kSubjects[i];
-          final count = QuestionRepository.getForSubject(subject.name).length;
-          if (count == 0) return const SizedBox.shrink();
-          return Material(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => BossBattleScreen(subject: subject)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(subject.icon, color: subject.color, size: 28),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${subject.name} Boss', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          const Text('Defeat it to earn CP and a badge', style: TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right_rounded),
-                  ],
-                ),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: GradientHeader(
+              title: '🧬 Boss Battles',
+              subtitle: 'Defeat subject bosses for rewards',
+              trailing: IconButton(
+                icon: const Icon(Icons.emoji_events_rounded, color: Colors.white),
+                tooltip: 'Hall of Fame',
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BossHallOfFameScreen())),
               ),
             ),
-          );
-        },
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.all(20),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, i) {
+                  final subject = kSubjects[i];
+                  final count = QuestionRepository.getForSubject(subject.name).length;
+                  if (count == 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: ShinyCard(
+                      padding: const EdgeInsets.all(16),
+                      tint: subject.color,
+                      child: InkWell(
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => BossBattleScreen(subject: subject))),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
+                              child: Icon(subject.icon, color: subject.color, size: 26),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('${subject.name} Boss', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  const Text('Defeat it to earn CP and a badge', style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right_rounded),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                childCount: kSubjects.length,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 /// =========================================================================
-/// BOSS HALL OF FAME — global ranking by bosses defeated
+/// 🏆 BOSS HALL OF FAME — redesigned
 /// =========================================================================
 
 class BossHallOfFameScreen extends StatefulWidget {
@@ -911,75 +907,78 @@ class _BossHallOfFameScreenState extends State<BossHallOfFameScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final myUserId = Supabase.instance.client.auth.currentUser?.id;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('🧬 Boss Hall of Fame')),
       body: RefreshIndicator(
         onRefresh: _refresh,
-        child: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final rows = snapshot.data ?? [];
-            if (rows.isEmpty) {
-              return ListView(
-                children: [
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.3),
-                  Center(child: Text('No bosses defeated yet — be the first!', style: TextStyle(color: scheme.onSurfaceVariant))),
-                ],
-              );
-            }
-            final medalColors = [Colors.amber, Colors.grey, Colors.brown];
-            return ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: rows.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, i) {
-                final r = rows[i];
-                final rank = (r['rank'] as num).toInt();
-                final isMe = r['user_id'] == myUserId;
-                final isTop3 = rank <= 3;
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isMe ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
-                    border: isTop3 ? Border.all(color: medalColors[rank - 1], width: 1.6) : null,
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: isTop3 ? medalColors[rank - 1] : scheme.primaryContainer,
-                        child: Text('$rank', style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : scheme.onPrimaryContainer)),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 18)),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(r['username'] as String? ?? 'Student', style: const TextStyle(fontWeight: FontWeight.w600))),
-                      if (isMe)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                          margin: const EdgeInsets.only(right: 8),
-                          decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(8)),
-                          child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
-                        ),
-                      Row(
-                        children: [
-                          const Text('🧬', style: TextStyle(fontSize: 14)),
-                          const SizedBox(width: 4),
-                          Text('${r['boss_defeated_count']}', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.primary)),
-                        ],
-                      ),
-                    ],
+        child: CustomScrollView(
+          slivers: [
+            const SliverToBoxAdapter(child: GradientHeader(title: '🧬 Boss Hall of Fame', subtitle: 'Ranked by bosses defeated')),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())));
+                }
+                final rows = snapshot.data ?? [];
+                if (rows.isEmpty) {
+                  return SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 40),
+                      child: Center(child: Text('No bosses defeated yet — be the first!', style: TextStyle(color: Colors.grey.shade600))),
+                    ),
+                  );
+                }
+                final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
+                return SliverPadding(
+                  padding: const EdgeInsets.all(20),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) {
+                        final r = rows[i];
+                        final rank = (r['rank'] as num).toInt();
+                        final isMe = r['user_id'] == myUserId;
+                        final isTop3 = rank <= 3;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: ShinyCard(
+                            padding: const EdgeInsets.all(14),
+                            tint: isMe ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
+                                  child: Text('$rank', style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 18)),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(r['username'] as String? ?? 'Student', style: const TextStyle(fontWeight: FontWeight.w600))),
+                                if (isMe)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    margin: const EdgeInsets.only(right: 8),
+                                    decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)),
+                                    child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
+                                  ),
+                                Row(children: [
+                                  const Text('🧬', style: TextStyle(fontSize: 14)),
+                                  const SizedBox(width: 4),
+                                  Text('${r['boss_defeated_count']}', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                ]),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                      childCount: rows.length,
+                    ),
                   ),
                 );
               },
-            );
-          },
+            ),
+          ],
         ),
       ),
     );
@@ -1006,9 +1005,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
     super.initState();
     final all = QuestionRepository.getForSubject(widget.subject.name);
     _questions = (List<Question>.from(all)..shuffle()).take(30).toList();
-    _hp = ArenaService.instance.progress?.activeBossSubject == widget.subject.name
-        ? ArenaService.instance.progress!.bossHpRemaining
-        : 100;
+    _hp = ArenaService.instance.progress?.activeBossSubject == widget.subject.name ? ArenaService.instance.progress!.bossHpRemaining : 100;
   }
 
   Future<void> _answer(int optionIndex) async {
@@ -1023,9 +1020,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _answering = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not reach the server — please try again.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not reach the server — please try again.')));
       }
       return;
     }
@@ -1044,99 +1039,100 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
     if (_questions.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: Text('${widget.subject.name} Boss')),
-        body: const Center(child: Text('No questions available for this boss yet.')),
-      );
+      return const Scaffold(body: Center(child: Text('No questions available for this boss yet.')));
     }
 
     if (_defeated) {
       return Scaffold(
-        appBar: AppBar(title: Text('${widget.subject.name} Boss')),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🏆', style: TextStyle(fontSize: 64)),
-              const SizedBox(height: 16),
-              Text('${widget.subject.name} Boss Defeated!', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-              const SizedBox(height: 8),
-              const Text('+5 CP earned'),
-              const SizedBox(height: 24),
-              FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Back to Bosses')),
-            ],
+        body: Container(
+          decoration: const BoxDecoration(gradient: kHeroGradient),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🏆', style: TextStyle(fontSize: 72)),
+                const SizedBox(height: 16),
+                Text('${widget.subject.name} Boss Defeated!',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white), textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                const Text('+5 CP earned', style: TextStyle(color: Colors.white70)),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: 200,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: kVioletAccent),
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Back to Bosses'),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
     }
 
     final question = _questions[_index];
+    final hpColor = _hp > 40 ? kCoralAccent : kGoldAccent;
 
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.subject.name} Boss')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                // Uses this subject's own icon/color (matching Boss Select
-                // and every other subject tile in the app) instead of a
-                // near-universal 👾 placeholder that only ever varied for
-                // Physics.
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: widget.subject.color.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.close_rounded)),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: widget.subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                    child: Icon(widget.subject.icon, color: widget.subject.color, size: 26),
                   ),
-                  child: Icon(widget.subject.icon, color: widget.subject.color, size: 26),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${widget.subject.name} Boss', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      Text('Boss HP: $_hp%', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-                    ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${widget.subject.name} Boss', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('Boss HP: $_hp%', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: _hp / 100,
-                minHeight: 14,
-                backgroundColor: scheme.surfaceContainerHighest,
-                valueColor: AlwaysStoppedAnimation(_hp > 40 ? Colors.red : Colors.orange),
+                ],
               ),
-            ),
-            const SizedBox(height: 28),
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
-              child: Text(question.questionText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.4)),
-            ),
-            const SizedBox(height: 18),
-            ...List.generate(question.options.length, (i) {
-              final letter = String.fromCharCode(65 + i);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: OutlinedButton(
-                  onPressed: _answering ? null : () => _answer(i),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(14), alignment: Alignment.centerLeft),
-                  child: Text('$letter. ${question.options[i]}'),
-                ),
-              );
-            }),
-          ],
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(value: _hp / 100, minHeight: 16, backgroundColor: Colors.grey.shade200, valueColor: AlwaysStoppedAnimation(hpColor)),
+              ),
+              const SizedBox(height: 28),
+              ShinyCard(child: Text(question.questionText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.4))),
+              const SizedBox(height: 18),
+              ...List.generate(question.options.length, (i) {
+                final letter = String.fromCharCode(65 + i);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Material(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    elevation: 0,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: _answering ? null : () => _answer(i),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+                        child: Text('$letter. ${question.options[i]}'),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -1144,7 +1140,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
 }
 
 /// =========================================================================
-/// COMPANION SCREEN
+/// 🐾 COMPANION SCREEN — redesigned
 /// =========================================================================
 
 class CompanionScreen extends StatelessWidget {
@@ -1153,40 +1149,49 @@ class CompanionScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progress = ArenaService.instance.progress;
-    final scheme = Theme.of(context).colorScheme;
 
     if (progress == null) {
-      return Scaffold(appBar: AppBar(title: const Text('Study Companion')), body: const Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final xpIntoLevel = progress.companionXp % 200;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Study Companion')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Text(progress.companionSpecies.emoji, style: const TextStyle(fontSize: 96)),
-            const SizedBox(height: 12),
-            Text('${progress.companionSpecies.name} — Level ${progress.companionLevel}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-            const SizedBox(height: 8),
-            Text(
-              progress.companionFedToday
-                  ? 'Fed today — great job keeping the streak alive!'
-                  : "Hasn't been fed today. Complete a study session to feed it.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: scheme.onSurfaceVariant),
+      body: Container(
+        decoration: const BoxDecoration(gradient: kHeroGradient),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Row(children: [IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back_rounded, color: Colors.white))]),
+                const Spacer(),
+                Container(
+                  width: 170,
+                  height: 170,
+                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), shape: BoxShape.circle, border: Border.all(color: Colors.white.withOpacity(0.35), width: 3)),
+                  child: Center(child: Text(progress.companionSpecies.emoji, style: const TextStyle(fontSize: 84))),
+                ),
+                const SizedBox(height: 18),
+                Text('${progress.companionSpecies.name} — Level ${progress.companionLevel}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+                const SizedBox(height: 8),
+                Text(
+                  progress.companionFedToday ? 'Fed today — great job keeping the streak alive!' : "Hasn't been fed today. Complete a study session to feed it.",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 24),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(value: xpIntoLevel / 200, minHeight: 12, backgroundColor: Colors.white.withOpacity(0.25), valueColor: const AlwaysStoppedAnimation(Colors.white)),
+                ),
+                const SizedBox(height: 6),
+                Text('$xpIntoLevel / 200 XP to next level', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                const Spacer(),
+              ],
             ),
-            const SizedBox(height: 20),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(value: xpIntoLevel / 200, minHeight: 12, backgroundColor: scheme.surfaceContainerHighest),
-            ),
-            const SizedBox(height: 6),
-            Text('$xpIntoLevel / 200 XP to next level', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-          ],
+          ),
         ),
       ),
     );
@@ -1194,7 +1199,7 @@ class CompanionScreen extends StatelessWidget {
 }
 
 /// =========================================================================
-/// SEASON PASS BANNER
+/// 🎫 SEASON PASS BANNER — redesigned
 /// =========================================================================
 
 class SeasonPassBanner extends StatelessWidget {
@@ -1215,17 +1220,15 @@ class SeasonPassBanner extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           gradient: const LinearGradient(colors: [Color(0xFF7B2FF7), Color(0xFFF107A3)]),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: const Color(0xFF7B2FF7).withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 6))],
         ),
         child: Row(
           children: [
             const Icon(Icons.workspace_premium_rounded, color: Colors.white, size: 18),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                'Season ${progress.seasonId} · $daysLeft days left',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
-              ),
+              child: Text('Season ${progress.seasonId} · $daysLeft days left', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12)),
             ),
           ],
         ),
