@@ -773,9 +773,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               : () => Navigator.of(context).push(
                                     MaterialPageRoute(builder: (_) => const SignUpScreen()),
                                   ),
-                          child: const Text(
+                          child: Text(
                             "Don't have an account? Sign up",
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                            style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600),
                           ),
                         ),
                         TextButton(
@@ -786,7 +786,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           child: Text(
                             'Continue as Guest',
-                            style: TextStyle(color: Colors.white.withOpacity(0.85)),
+                            style: TextStyle(color: scheme.onSurfaceVariant),
                           ),
                         ),
                       ],
