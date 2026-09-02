@@ -3,13 +3,17 @@
 // Five new features bundled together so main.dart only needs one import:
 // 1. Flashcards + Spaced Repetition (Supabase-backed)
 // 2. Cent Shop (Supabase-backed, real ZTC currency): Daily Login Bonus,
-//    Streak Freeze, equippable Avatar Frames, equippable Titles, and an
-//    activatable Ocean Theme — all now actually functional, not just
-//    cosmetic placeholders. Currency is real Cent via ZetraPay/ZTC, not
-//    a wrapped in-app coin.
-// 3. Spin Wheel Rewards (spends into Cent Shop, awards XP via AppProvider)
-//    — "already spun today" is now persisted via CoinService instead of
-//    a static in-memory variable, so it survives app restarts.
+//    Streak Freeze, equippable Avatar Frames, equippable Titles, an
+//    activatable Ocean Theme, AND a Spin-Exclusive Collection of frames/
+//    titles that can ONLY be won from the Daily Spin — never purchased
+//    with Cent. Currency is real Cent via ZetraPay/ZTC, not a wrapped
+//    in-app coin.
+// 3. Spin Wheel Rewards — redesigned: XP-only currency rewards (varied
+//    amounts, weighted so big wins are rare) plus a chance at winning a
+//    spin-exclusive frame/title outright. Cent/CP is NEVER awarded from
+//    the wheel — Cent is real money-adjacent currency (via ZTC) and
+//    isn't something to hand out as a random prize. "Already spun today"
+//    is persisted via CoinService so it survives app restarts.
 // 4. Multi-Exam Countdown (Supabase-backed, tracks several exams at once)
 // 5. Topic Mastery Tracker (Supabase-backed) + Focus Mode
 //
@@ -21,7 +25,8 @@
 // NOTE: In-app Cent top-up has been removed. Users fund their NaijaLearn
 // balance exclusively via ZTC (Send to Apps > NaijaLearn). CoinService
 // still only reads the real balance from the shared ZTC ledger — it
-// never lets the user buy Cent from inside this app.
+// never lets the user buy Cent from inside this app, and the Spin Wheel
+// never mints Cent out of thin air either.
 
 import 'dart:async';
 import 'dart:math';
@@ -432,8 +437,10 @@ class _FlashcardReviewScreenState extends State<FlashcardReviewScreen> {
 /// 2. CENT SHOP + DAILY LOGIN BONUS + STREAK FREEZE + EQUIPPABLE ITEMS
 /// =========================================================================
 /// Currency is real Cent (via ZetraPay/ZTC), not a wrapped in-app coin.
-/// Any free reward (daily login, spin wheel) is capped at 10 Cent per
-/// award — enforced both here and server-side in credit_app_currency.
+/// Any free reward (daily login) is capped at 10 Cent per award —
+/// enforced both here and server-side in credit_app_currency. The Spin
+/// Wheel no longer hands out Cent/CP at all (see SpinWheelScreen below) —
+/// it awards XP and a chance at Spin-Exclusive items instead.
 ///
 /// Funding is ZTC-only: there is no in-app "buy Cent" flow. Users open
 /// ZTC, tap Send to Apps > NaijaLearn, and this screen's balance updates
@@ -453,6 +460,27 @@ class ShopItem {
     required this.cost,
     required this.category,
     required this.usefulness,
+  });
+}
+
+/// A frame/title that can ONLY be won from the Daily Spin — never sold
+/// in the Cent Shop for any amount of Cent. Shown in its own "Spin-
+/// Exclusive Collection" section so players can see what they're
+/// missing and chase it via spins, not their wallet.
+class SpinExclusiveItem {
+  final String id;
+  final String name;
+  final String emoji;
+  final String category; // 'frame' | 'title'
+  final String rarity; // 'Rare' | 'Epic' | 'Legendary'
+  final Color rarityColor;
+  const SpinExclusiveItem({
+    required this.id,
+    required this.name,
+    required this.emoji,
+    required this.category,
+    required this.rarity,
+    required this.rarityColor,
   });
 }
 
@@ -548,6 +576,51 @@ class CoinService extends ChangeNotifier {
     ),
   ];
 
+  /// Never purchasable — only ever granted by SpinWheelScreen when the
+  /// wheel lands on one of these. See grantSpinExclusiveItem below.
+  static const List<SpinExclusiveItem> spinExclusiveItems = [
+    SpinExclusiveItem(
+      id: 'spin_frame_neon',
+      name: 'Neon Avatar Frame',
+      emoji: '⚡',
+      category: 'frame',
+      rarity: 'Rare',
+      rarityColor: Color(0xFF00E5FF),
+    ),
+    SpinExclusiveItem(
+      id: 'spin_title_lucky',
+      name: 'Lucky Title',
+      emoji: '🍀',
+      category: 'title',
+      rarity: 'Rare',
+      rarityColor: Color(0xFF00E5FF),
+    ),
+    SpinExclusiveItem(
+      id: 'spin_frame_diamond',
+      name: 'Diamond Avatar Frame',
+      emoji: '💎',
+      category: 'frame',
+      rarity: 'Epic',
+      rarityColor: Color(0xFFB388FF),
+    ),
+    SpinExclusiveItem(
+      id: 'spin_title_legend',
+      name: 'Legend Title',
+      emoji: '👑',
+      category: 'title',
+      rarity: 'Epic',
+      rarityColor: Color(0xFFB388FF),
+    ),
+    SpinExclusiveItem(
+      id: 'spin_frame_galaxy',
+      name: 'Galaxy Avatar Frame',
+      emoji: '🌌',
+      category: 'frame',
+      rarity: 'Legendary',
+      rarityColor: Color(0xFFFFD700),
+    ),
+  ];
+
   String _todayKey() {
     final d = DateTime.now();
     return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -636,17 +709,6 @@ class CoinService extends ChangeNotifier {
     }
   }
 
-  /// Awards Cent (capped at 10 per call, matching the server-side cap).
-  /// Used by the Spin Wheel and anywhere else that hands out free Cent.
-  Future<bool> addCents(int amount) async {
-    final capped = amount > 10 ? 10 : amount;
-    final error = await ZetraPay.creditAppCurrency(appId: _appId, unitAmount: capped.toDouble());
-    if (error != null) return false;
-    _cents += capped;
-    notifyListeners();
-    return true;
-  }
-
   /// Re-reads the authoritative balance from the shared ZTC ledger.
   /// Call this after returning from ZTC (or on pull-to-refresh) so a
   /// funding transfer done there shows up here without a full re-init.
@@ -685,6 +747,18 @@ class CoinService extends ChangeNotifier {
     }
 
     _ownedItemIds.add(item.id);
+    notifyListeners();
+    await _pushLocal();
+    return true;
+  }
+
+  /// Grants a Spin-Exclusive item outright — no Cent involved, called
+  /// only by SpinWheelScreen when the wheel lands on an item segment.
+  /// Returns false if the item is already owned (caller falls back to a
+  /// bonus-XP consolation instead of "winning" a duplicate).
+  Future<bool> grantSpinExclusiveItem(String id) async {
+    if (_ownedItemIds.contains(id)) return false;
+    _ownedItemIds.add(id);
     notifyListeners();
     await _pushLocal();
     return true;
@@ -729,6 +803,12 @@ class CoinService extends ChangeNotifier {
         return const Color(0xFFFFD700);
       case 'frame_fire':
         return Colors.deepOrange;
+      case 'spin_frame_neon':
+        return const Color(0xFF00E5FF);
+      case 'spin_frame_diamond':
+        return const Color(0xFFB388FF);
+      case 'spin_frame_galaxy':
+        return const Color(0xFFFFD700);
       default:
         return null;
     }
@@ -740,6 +820,10 @@ class CoinService extends ChangeNotifier {
         return '📖 Scholar';
       case 'title_genius':
         return '🧠 Genius';
+      case 'spin_title_lucky':
+        return '🍀 Lucky';
+      case 'spin_title_legend':
+        return '👑 Legend';
       default:
         return null;
     }
@@ -816,6 +900,115 @@ class _PurchaseCelebrationDialogState extends State<_PurchaseCelebrationDialog>
                 child: FilledButton(
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Awesome!'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Celebration shown when a Spin-Exclusive item is won from the wheel —
+/// visually distinct from a Cent Shop purchase (rarity-colored glow,
+/// "WON!" framing instead of "Purchased") so it reads as a real prize.
+Future<void> showSpinWinCelebration(BuildContext context, SpinExclusiveItem item) {
+  return showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => _SpinWinCelebrationDialog(item: item),
+  );
+}
+
+class _SpinWinCelebrationDialog extends StatefulWidget {
+  final SpinExclusiveItem item;
+  const _SpinWinCelebrationDialog({required this.item});
+
+  @override
+  State<_SpinWinCelebrationDialog> createState() => _SpinWinCelebrationDialogState();
+}
+
+class _SpinWinCelebrationDialogState extends State<_SpinWinCelebrationDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    _scale = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [const Color(0xFF12122A), widget.item.rarityColor.withOpacity(0.25)],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: widget.item.rarityColor, width: 1.6),
+            boxShadow: [
+              BoxShadow(color: widget.item.rarityColor.withOpacity(0.5), blurRadius: 32, spreadRadius: 2),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: widget.item.rarityColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: widget.item.rarityColor),
+                ),
+                child: Text(
+                  widget.item.rarity.toUpperCase(),
+                  style: TextStyle(
+                    color: widget.item.rarityColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(widget.item.emoji, style: const TextStyle(fontSize: 68)),
+              const SizedBox(height: 14),
+              const Text('YOU WON!',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 0.5),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 6),
+              Text(widget.item.name,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white70),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: widget.item.rarityColor,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Claim It!', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -908,9 +1101,101 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
     }
   }
 
+  Widget _spinExclusiveTile(BuildContext context, CoinService coinService, SpinExclusiveItem item) {
+    final owned = coinService.owns(item.id);
+    final scheme = Theme.of(context).colorScheme;
+
+    Widget action;
+    if (!owned) {
+      action = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock_rounded, size: 14, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Text('Spin only', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          ],
+        ),
+      );
+    } else if (item.category == 'frame') {
+      final equipped = coinService.equippedFrameId == item.id;
+      action = OutlinedButton(
+        onPressed: () => coinService.equipFrame(equipped ? null : item.id),
+        child: Text(equipped ? 'Unequip' : 'Equip'),
+      );
+    } else {
+      final equipped = coinService.equippedTitleId == item.id;
+      action = OutlinedButton(
+        onPressed: () => coinService.equipTitle(equipped ? null : item.id),
+        child: Text(equipped ? 'Unequip' : 'Equip'),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: owned
+              ? [item.rarityColor.withOpacity(0.16), Colors.transparent]
+              : [scheme.surfaceContainerHighest, scheme.surfaceContainerHighest],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: owned ? item.rarityColor.withOpacity(0.6) : scheme.outlineVariant.withOpacity(0.3)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Opacity(
+            opacity: owned ? 1 : 0.35,
+            child: Text(item.emoji, style: const TextStyle(fontSize: 28)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(item.name,
+                          style: TextStyle(fontWeight: FontWeight.w600, color: owned ? null : scheme.onSurfaceVariant)),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: item.rarityColor.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(item.rarity,
+                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: item.rarityColor)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(owned ? 'Won from Daily Spin 🎉' : 'Only from Daily Spin',
+                    style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          action,
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final coinService = context.watch<CoinService>();
+    final scheme = Theme.of(context).colorScheme;
 
     if (!coinService.isLoaded) {
       return Scaffold(
@@ -926,35 +1211,29 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
-              child: RefreshIndicator(
-                onRefresh: coinService.refreshBalance,
-                child: GestureDetector(
-                  onTap: coinService.refreshBalance,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.monetization_on_rounded, color: Colors.amber, size: 18),
-                      const SizedBox(width: 4),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+              child: GestureDetector(
+                onTap: coinService.refreshBalance,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.monetization_on_rounded, color: Colors.amber, size: 18),
+                    const SizedBox(width: 4),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${coinService.cp} CP',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        if (coinService.leftoverCent > 0)
                           Text(
-                            '${coinService.cp} CP',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            '+${coinService.leftoverCent} Cent',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                           ),
-                          if (coinService.leftoverCent > 0)
-                            Text(
-                              '+${coinService.leftoverCent} Cent',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -963,39 +1242,64 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: coinService.refreshBalance,
-        child: ListView.separated(
+        child: ListView(
           padding: const EdgeInsets.all(16),
-          itemCount: CoinService.shopItems.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final item = CoinService.shopItems[index];
-            return Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(16),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    Text(item.emoji, style: const TextStyle(fontSize: 28)),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          Text(_statusSubtitle(coinService, item),
-                              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        ],
-                      ),
+          children: [
+            Text('Cent Store', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            ...CoinService.shopItems.map((item) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Material(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(
+                      children: [
+                        Text(item.emoji, style: const TextStyle(fontSize: 28)),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 2),
+                              Text(_statusSubtitle(coinService, item),
+                                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildActionButton(context, coinService, item),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    _buildActionButton(context, coinService, item),
-                  ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            }),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Icon(Icons.casino_rounded, color: scheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text('Spin-Exclusive Collection',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'These can never be bought — only won from the Daily Spin.',
+              style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            ...CoinService.spinExclusiveItems.map((item) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _spinExclusiveTile(context, coinService, item),
+              );
+            }),
+          ],
         ),
       ),
     );
@@ -1003,17 +1307,35 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
 }
 
 /// =========================================================================
-/// 3. SPIN WHEEL REWARDS
+/// 3. SPIN WHEEL REWARDS — redesigned
 /// =========================================================================
-/// Every Cent segment is capped at 10 — matching the server-side cap in
-/// credit_app_currency, so nothing here can ever award more than that.
+/// The wheel NEVER awards Cent or CP — Cent is real currency funded via
+/// ZTC, not something to hand out as a random prize. Every non-XP
+/// segment either lands on "Try Again" or a chance at a Spin-Exclusive
+/// item (see CoinService.spinExclusiveItems). Bigger XP wins and item
+/// wins are intentionally rarer than small XP wins, via weighted
+/// selection rather than a flat uniform pick — so the wheel feels like a
+/// real gamble instead of a coin-flip between the same few outcomes.
+///
+/// Visual style: dark "tomorrow-tech" wheel — deep navy/charcoal base,
+/// neon segment glows, a glowing pointer, and a holographic-style result
+/// card, distinct from the rest of the app's lighter Material theme.
 
 class _WheelSegment {
   final String label;
   final Color color;
-  final int? cents;
+  final IconData icon;
   final int? xp;
-  const _WheelSegment(this.label, this.color, {this.cents, this.xp});
+  final String? spinItemId; // id into CoinService.spinExclusiveItems
+  final double weight; // relative odds — higher wins more often
+  const _WheelSegment({
+    required this.label,
+    required this.color,
+    required this.icon,
+    this.xp,
+    this.spinItemId,
+    required this.weight,
+  });
 }
 
 class SpinWheelScreen extends StatefulWidget {
@@ -1026,17 +1348,47 @@ class SpinWheelScreen extends StatefulWidget {
 class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   bool _spinning = false;
-  String? _result;
+  String? _resultLabel;
+  Color? _resultColor;
 
-  static const List<_WheelSegment> _segments = [
-    _WheelSegment('4 Cent', Colors.amber, cents: 4),
-    _WheelSegment('20 XP', Colors.deepPurple, xp: 20),
-    _WheelSegment('6 Cent', Colors.orange, cents: 6),
-    _WheelSegment('Try again', Colors.grey),
-    _WheelSegment('10 Cent', Colors.green, cents: 10),
-    _WheelSegment('40 XP', Colors.indigo, xp: 40),
-    _WheelSegment('8 Cent', Colors.redAccent, cents: 8),
-    _WheelSegment('10 XP', Colors.teal, xp: 10),
+  // 10 segments — mostly XP at varied amounts (small amounts common,
+  // big amounts rare), one guaranteed dud, and 3 item-chance segments
+  // pulling from the rarer end of CoinService.spinExclusiveItems.
+  static final List<_WheelSegment> _segments = [
+    const _WheelSegment(label: '10 XP', color: Color(0xFF00E5FF), icon: Icons.bolt_rounded, xp: 10, weight: 22),
+    const _WheelSegment(label: '15 XP', color: Color(0xFF7C4DFF), icon: Icons.bolt_rounded, xp: 15, weight: 20),
+    const _WheelSegment(label: 'Try Again', color: Color(0xFF546E7A), icon: Icons.replay_rounded, weight: 16),
+    const _WheelSegment(label: '25 XP', color: Color(0xFF00BFA5), icon: Icons.bolt_rounded, xp: 25, weight: 14),
+    _WheelSegment(
+      label: 'Neon Frame',
+      color: const Color(0xFF00E5FF),
+      icon: Icons.auto_awesome_rounded,
+      spinItemId: 'spin_frame_neon',
+      weight: 8,
+    ),
+    const _WheelSegment(label: '40 XP', color: Color(0xFFFF6E40), icon: Icons.bolt_rounded, xp: 40, weight: 8),
+    _WheelSegment(
+      label: 'Lucky Title',
+      color: const Color(0xFF00E5FF),
+      icon: Icons.auto_awesome_rounded,
+      spinItemId: 'spin_title_lucky',
+      weight: 5,
+    ),
+    const _WheelSegment(label: '60 XP', color: Color(0xFFFFD740), icon: Icons.bolt_rounded, xp: 60, weight: 4),
+    _WheelSegment(
+      label: 'Diamond Frame',
+      color: const Color(0xFFB388FF),
+      icon: Icons.diamond_rounded,
+      spinItemId: 'spin_frame_diamond',
+      weight: 2,
+    ),
+    _WheelSegment(
+      label: 'JACKPOT — Galaxy Frame',
+      color: const Color(0xFFFFD700),
+      icon: Icons.stars_rounded,
+      spinItemId: 'spin_frame_galaxy',
+      weight: 1,
+    ),
   ];
 
   @override
@@ -1051,81 +1403,192 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
     super.dispose();
   }
 
+  _WheelSegment _pickWeighted() {
+    final totalWeight = _segments.fold<double>(0, (sum, s) => sum + s.weight);
+    final roll = Random().nextDouble() * totalWeight;
+    double cumulative = 0;
+    for (final s in _segments) {
+      cumulative += s.weight;
+      if (roll <= cumulative) return s;
+    }
+    return _segments.first;
+  }
+
   void _spin() {
     final coinService = context.read<CoinService>();
     if (!coinService.canSpinToday || _spinning) return;
     setState(() {
       _spinning = true;
-      _result = null;
+      _resultLabel = null;
+      _resultColor = null;
     });
 
-    final segment = _segments[Random().nextInt(_segments.length)];
+    final segment = _pickWeighted();
     _controller.forward(from: 0).whenComplete(() async {
       await coinService.recordSpin();
-      if (segment.cents != null) {
-        await coinService.addCents(segment.cents!);
-      }
+
       if (segment.xp != null) {
         context.read<AppProvider>().addXP(segment.xp!);
       }
-      if (mounted) {
-        setState(() {
-          _spinning = false;
-          _result = segment.label;
-        });
+
+      SpinExclusiveItem? wonItem;
+      bool duplicateFallback = false;
+      if (segment.spinItemId != null) {
+        final granted = await coinService.grantSpinExclusiveItem(segment.spinItemId!);
+        if (granted) {
+          wonItem = CoinService.spinExclusiveItems.firstWhere((i) => i.id == segment.spinItemId);
+        } else {
+          // Already owned — convert to a consolation XP bump instead of
+          // "winning" a duplicate that does nothing.
+          duplicateFallback = true;
+          context.read<AppProvider>().addXP(30);
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _spinning = false;
+        _resultLabel = duplicateFallback ? 'Already owned — +30 XP bonus!' : segment.label;
+        _resultColor = segment.color;
+      });
+
+      if (wonItem != null && mounted) {
+        await showSpinWinCelebration(context, wonItem);
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final coinService = context.watch<CoinService>();
     final alreadySpunToday = !coinService.canSpinToday;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Daily Spin')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RotationTransition(
-                turns: Tween(begin: 0.0, end: 6.0).animate(
-                  CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-                ),
-                child: Container(
-                  width: 220,
-                  height: 220,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: SweepGradient(colors: _segments.map((s) => s.color).toList()),
-                    border: Border.all(color: scheme.outline, width: 4),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.star_rounded, color: Colors.white, size: 32),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-              if (_result != null)
-                Text('You won: $_result!',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: FilledButton(
-                  onPressed: (alreadySpunToday || _spinning) ? null : _spin,
-                  child: Text(alreadySpunToday
-                      ? 'Come back tomorrow'
-                      : (_spinning ? 'Spinning...' : 'Spin Now')),
-                ),
-              ),
-            ],
+      backgroundColor: const Color(0xFF0B0E1A),
+      appBar: AppBar(
+        title: const Text('Daily Spin'),
+        backgroundColor: const Color(0xFF0B0E1A),
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Stack(
+        children: [
+          // Ambient glow blobs for the "tomorrow tech" backdrop.
+          Positioned(
+            top: -80,
+            left: -60,
+            child: Container(
+              width: 220,
+              height: 220,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF7C4DFF).withOpacity(0.18)),
+            ),
           ),
-        ),
+          Positioned(
+            bottom: -100,
+            right: -60,
+            child: Container(
+              width: 260,
+              height: 260,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF00E5FF).withOpacity(0.12)),
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Spin for XP — and a shot at a Spin-Exclusive prize',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                    ),
+                    const SizedBox(height: 28),
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 260,
+                          height: 260,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(color: const Color(0xFF00E5FF).withOpacity(0.35), blurRadius: 50, spreadRadius: 4),
+                            ],
+                          ),
+                        ),
+                        RotationTransition(
+                          turns: Tween(begin: 0.0, end: 8.0).animate(
+                            CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+                          ),
+                          child: Container(
+                            width: 240,
+                            height: 240,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: SweepGradient(colors: _segments.map((s) => s.color).toList()),
+                              border: Border.all(color: Colors.white.withOpacity(0.15), width: 3),
+                            ),
+                            child: Center(
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0B0E1A),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
+                                ),
+                                child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 28),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: -6,
+                          child: Icon(Icons.arrow_drop_down_rounded, size: 48, color: Colors.white.withOpacity(0.9)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 36),
+                    if (_resultLabel != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: (_resultColor ?? Colors.white).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: (_resultColor ?? Colors.white).withOpacity(0.6)),
+                        ),
+                        child: Text(
+                          'You won: $_resultLabel!',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: (alreadySpunToday || _spinning) ? Colors.white24 : const Color(0xFF00E5FF),
+                          foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                          elevation: 0,
+                        ),
+                        onPressed: (alreadySpunToday || _spinning) ? null : _spin,
+                        child: Text(
+                          alreadySpunToday ? 'Come back tomorrow' : (_spinning ? 'Spinning...' : 'Spin Now'),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
