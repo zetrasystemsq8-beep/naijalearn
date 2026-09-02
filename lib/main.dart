@@ -79,6 +79,12 @@
 // the account has no referral code on file yet, the user is routed
 // through ReferralCodeEntryScreen exactly once; if a code is already on
 // file, the flow is unchanged. See referral_code_screen.dart.
+//
+// LOGIN SCREEN VISUAL STYLE: bright gradient backdrop (primary → tertiary
+// → surface) with soft decorative glow circles, a glassy white input
+// card, and a solid white elevated primary button — matching the same
+// treatment as SignUpScreen (see signup_screen.dart) for a consistent,
+// vibrant look across both auth screens.
 
 import 'dart:async';
 import 'dart:convert';
@@ -551,123 +557,246 @@ class _LoginScreenState extends State<LoginScreen> {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              // Scrollable content up top — grows/shrinks with keyboard,
-              // but the primary action stays docked at the bottom below.
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Container(
-                        width: 88,
-                        height: 88,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: scheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Icon(Icons.school_rounded, size: 46, color: scheme.primary),
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        'Welcome to NaijaLearn',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Sign in with your ZetraMail — or your NaijaLearn username',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-                      ),
-                      const SizedBox(height: 32),
-                      TextFormField(
-                        controller: _zetramailController,
-                        keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.username],
-                        textInputAction: TextInputAction.next,
-                        validator: _validateZetraMail,
-                        decoration: InputDecoration(
-                          labelText: 'ZetraMail or username',
-                          hintText: 'you@zetramail.ng or username',
-                          prefixIcon: const Icon(Icons.email_outlined),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        autofillHints: const [AutofillHints.password],
-                        textInputAction: TextInputAction.done,
-                        validator: _validatePassword,
-                        onFieldSubmitted: (_) => _continue(),
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                          ),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                      ),
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 12),
-                        Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
-                      ],
-                    ],
-                  ),
-                ),
+      body: Stack(
+        children: [
+          // Vibrant multi-color gradient backdrop — "shiny lovable" look,
+          // matching SignUpScreen for a consistent bright auth experience.
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  scheme.primary.withOpacity(0.85),
+                  scheme.tertiary.withOpacity(0.65),
+                  scheme.surface,
+                ],
+                stops: const [0.0, 0.28, 0.55],
               ),
-              // Primary action pinned to the bottom of the screen.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: 52,
-                      child: FilledButton(
-                        onPressed: _loading ? null : _continue,
-                        child: _loading
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                              )
-                            : const Text('Log In', style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: _loading
-                          ? null
-                          : () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const SignUpScreen()),
-                              ),
-                      child: const Text("Don't have an account? Sign up"),
-                    ),
-                    TextButton(
-                      onPressed: _loading
-                          ? null
-                          : () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const GuestHomeScreen()),
-                              ),
-                      child: const Text('Continue as Guest'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+          // Soft decorative glow blobs for depth.
+          Positioned(
+            top: -60,
+            right: -40,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.12),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 140,
+            left: -50,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: scheme.tertiary.withOpacity(0.18),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  // Scrollable content up top — grows/shrinks with keyboard,
+                  // but the primary action stays docked at the bottom below.
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [Colors.white, Color(0xFFEFEFFF)],
+                                ),
+                                borderRadius: BorderRadius.circular(30),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.25),
+                                    blurRadius: 24,
+                                    offset: const Offset(0, 12),
+                                  ),
+                                ],
+                              ),
+                              child: Icon(Icons.school_rounded, size: 52, color: scheme.primary),
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          Text(
+                            'Welcome to NaijaLearn',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sign in with your ZetraMail — or your NaijaLearn username',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                          ),
+                          const SizedBox(height: 32),
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.96),
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.12),
+                                  blurRadius: 30,
+                                  offset: const Offset(0, 14),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                TextFormField(
+                                  controller: _zetramailController,
+                                  keyboardType: TextInputType.emailAddress,
+                                  autofillHints: const [AutofillHints.username],
+                                  textInputAction: TextInputAction.next,
+                                  validator: _validateZetraMail,
+                                  decoration: InputDecoration(
+                                    labelText: 'ZetraMail or username',
+                                    hintText: 'you@zetramail.ng or username',
+                                    filled: true,
+                                    fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
+                                    prefixIcon: Icon(Icons.email_outlined, color: scheme.primary),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: _passwordController,
+                                  obscureText: _obscurePassword,
+                                  autofillHints: const [AutofillHints.password],
+                                  textInputAction: TextInputAction.done,
+                                  validator: _validatePassword,
+                                  onFieldSubmitted: (_) => _continue(),
+                                  decoration: InputDecoration(
+                                    labelText: 'Password',
+                                    filled: true,
+                                    fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
+                                    prefixIcon: Icon(Icons.lock_outline_rounded, color: scheme.primary),
+                                    suffixIcon: IconButton(
+                                      icon: Icon(
+                                        _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_errorMessage != null) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.error_outline_rounded, size: 18, color: scheme.error),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Primary action pinned to the bottom of the screen.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 56,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                              backgroundColor: Colors.white,
+                              foregroundColor: scheme.primary,
+                              elevation: 6,
+                              shadowColor: Colors.black.withOpacity(0.3),
+                            ),
+                            onPressed: _loading ? null : _continue,
+                            child: _loading
+                                ? SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2.4, color: scheme.primary),
+                                  )
+                                : const Text('Log In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextButton(
+                          onPressed: _loading
+                              ? null
+                              : () => Navigator.of(context).push(
+                                    MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                                  ),
+                          child: const Text(
+                            "Don't have an account? Sign up",
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _loading
+                              ? null
+                              : () => Navigator.of(context).push(
+                                    MaterialPageRoute(builder: (_) => const GuestHomeScreen()),
+                                  ),
+                          child: Text(
+                            'Continue as Guest',
+                            style: TextStyle(color: Colors.white.withOpacity(0.85)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
