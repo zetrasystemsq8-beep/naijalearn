@@ -165,7 +165,7 @@ class StudyCoachScreen extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           'Based on subject-level accuracy — the question bank isn\'t tagged by topic, so this reflects whole subjects, not sub-topics.',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 14),
                         ...weakest.map((e) {
@@ -188,7 +188,7 @@ class StudyCoachScreen extends StatelessWidget {
                                     ),
                                   ]),
                                   const SizedBox(height: 8),
-                                  Text('Estimated JAMB gain if you improve this: +$predictedGain marks', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                  Text('Estimated JAMB gain if you improve this: +$predictedGain marks', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                   const SizedBox(height: 12),
                                   GradientButton(
                                     label: 'Practice this subject',
@@ -344,7 +344,7 @@ class _ScorePredictorScreenState extends State<ScorePredictorScreen> {
                   ],
                   const SizedBox(height: 16),
                   Text('This is an estimate from your practice accuracy — not an official JAMB score.',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600), textAlign: TextAlign.center),
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
                 ],
               ),
             ),
@@ -364,6 +364,7 @@ class _SelectChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -374,12 +375,12 @@ class _SelectChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             gradient: selected ? kHeroGradient : null,
-            color: selected ? null : (disabled ? Colors.grey.shade100 : Colors.white),
+            color: selected ? null : (disabled ? scheme.surfaceContainerHighest.withOpacity(0.5) : scheme.surfaceContainerHighest),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: selected ? Colors.transparent : Colors.grey.shade300),
+            border: Border.all(color: selected ? Colors.transparent : scheme.outlineVariant),
             boxShadow: selected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
           ),
-          child: Text(label, style: TextStyle(color: selected ? Colors.white : (disabled ? Colors.grey.shade400 : Colors.black87), fontWeight: FontWeight.w600, fontSize: 13)),
+          child: Text(label, style: TextStyle(color: selected ? Colors.white : (disabled ? scheme.onSurfaceVariant.withOpacity(0.5) : scheme.onSurface), fontWeight: FontWeight.w600, fontSize: 13)),
         ),
       ),
     );
@@ -460,17 +461,17 @@ class CareerModeScreen extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: isCurrent ? t.color.withOpacity(0.15) : Colors.grey.shade50,
+                          color: isCurrent ? t.color.withOpacity(0.15) : Theme.of(context).colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(16),
                           border: isCurrent ? Border.all(color: t.color, width: 1.6) : null,
                         ),
                         child: Row(children: [
-                          Icon(t.icon, color: reached ? t.color : Colors.grey.shade400),
+                          Icon(t.icon, color: reached ? t.color : Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4)),
                           const SizedBox(width: 12),
-                          Expanded(child: Text(t.title, style: TextStyle(fontWeight: FontWeight.w600, color: reached ? null : Colors.grey.shade400))),
-                          Text('Lv. ${t.minLevel}+', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                          Expanded(child: Text(t.title, style: TextStyle(fontWeight: FontWeight.w600, color: reached ? null : Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4)))),
+                          Text('Lv. ${t.minLevel}+', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           const SizedBox(width: 8),
-                          Icon(reached ? Icons.lock_open_rounded : Icons.lock_outline_rounded, size: 16, color: reached ? kTealAccent : Colors.grey.shade400),
+                          Icon(reached ? Icons.lock_open_rounded : Icons.lock_outline_rounded, size: 16, color: reached ? kTealAccent : Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4)),
                         ]),
                       ),
                     );
@@ -478,7 +479,7 @@ class CareerModeScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   Align(alignment: Alignment.centerLeft, child: Text('Your Avatar', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
                   const SizedBox(height: 4),
-                  Align(alignment: Alignment.centerLeft, child: Text('Unlocked as you rank up', style: TextStyle(fontSize: 12, color: Colors.grey.shade600))),
+                  Align(alignment: Alignment.centerLeft, child: Text('Unlocked as you rank up', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant))),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 10,
@@ -491,7 +492,7 @@ class CareerModeScreen extends StatelessWidget {
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             gradient: isSelected ? kHeroGradient : null,
-                            color: isSelected ? null : Colors.grey.shade100,
+                            color: isSelected ? null : Theme.of(context).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: isSelected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
                           ),
@@ -565,7 +566,7 @@ class _HallOfFameScreenState extends State<HallOfFameScreen> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('All-time top students (min. 5 practice attempts)', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+              child: Text('All-time top students (min. 5 practice attempts)', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ),
           ),
           FutureBuilder<List<Map<String, dynamic>>>(
@@ -576,7 +577,7 @@ class _HallOfFameScreenState extends State<HallOfFameScreen> {
               }
               final rows = snapshot.data ?? [];
               if (rows.isEmpty) {
-                return SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.only(top: 40), child: Center(child: Text('No entries yet for $_subject.', style: TextStyle(color: Colors.grey.shade600)))));
+                return SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.only(top: 40), child: Center(child: Text('No entries yet for $_subject.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)))));
               }
               final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
               return SliverPadding(
@@ -975,7 +976,7 @@ class MatchHistoryStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (results.isEmpty) {
-      return Text('No battles played yet', style: TextStyle(fontSize: 12, color: Colors.grey.shade600));
+      return Text('No battles played yet', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant));
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1548,10 +1549,10 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                 const SizedBox(height: 6),
                                 Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6, color: kVioletAccent)),
                                 const SizedBox(height: 4),
-                                Text('Up to ${battle.maxPlayers} players', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                Text('Up to ${battle.maxPlayers} players', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 if (battle.entryFeeCent > 0) ...[
                                   const SizedBox(height: 4),
-                                  Text('Entry: ${battle.entryFeeCent}¢ per player', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                  Text('Entry: ${battle.entryFeeCent}¢ per player', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 ],
                               ]),
                             ),
@@ -1564,7 +1565,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                     const Icon(Icons.menu_book_rounded, size: 18, color: kVioletAccent),
                                     const SizedBox(width: 8),
                                     Expanded(child: Text(battle.subjectsLabel, style: const TextStyle(fontWeight: FontWeight.bold))),
-                                    Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                    Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                   ]),
                                   if (battle.scheduledAt != null) ...[
                                     const SizedBox(height: 8),
@@ -1575,7 +1576,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                         _scheduleReached
                                             ? 'Scheduled time reached'
                                             : 'Starts at ${battle.scheduledAt!.hour.toString().padLeft(2, '0')}:${battle.scheduledAt!.minute.toString().padLeft(2, '0')} on ${battle.scheduledAt!.day}/${battle.scheduledAt!.month}',
-                                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                                       ),
                                     ]),
                                   ],
@@ -1627,7 +1628,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                               );
                             }),
                             if (notReadyNames.isNotEmpty && _participants.length >= 2) ...[
-                              Text('Waiting on: ${notReadyNames.join(', ')}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                              Text('Waiting on: ${notReadyNames.join(', ')}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                               const SizedBox(height: 8),
                             ],
                             if (!widget.isHost)
@@ -1651,7 +1652,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                             ],
                             if (!_scheduleReached) ...[
                               const SizedBox(height: 8),
-                              Text('Battle will auto-start once the scheduled time arrives.', style: TextStyle(fontSize: 11, color: Colors.grey.shade600), textAlign: TextAlign.center),
+                              Text('Battle will auto-start once the scheduled time arrives.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
                             ],
                           ],
                         ),
@@ -1700,7 +1701,7 @@ class _SubjectEditSheetState extends State<_SubjectEditSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
       padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1967,28 +1968,32 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
                         final isSelected = _selectedAnswers[_index] == i;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: () => _selectOption(i),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  gradient: isSelected ? kHeroGradient : null,
-                                  color: isSelected ? null : Colors.white,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                          child: Builder(builder: (context) {
+                            final scheme = Theme.of(context).colorScheme;
+                            final isDark = Theme.of(context).brightness == Brightness.dark;
+                            return Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => _selectOption(i),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    gradient: isSelected ? kHeroGradient : null,
+                                    color: isSelected ? null : scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                                  ),
+                                  child: Row(children: [
+                                    CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : scheme.surface, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : scheme.onSurfaceVariant))),
+                                    const SizedBox(width: 14),
+                                    Expanded(child: Text(q.options[i], style: TextStyle(color: isSelected ? Colors.white : scheme.onSurface))),
+                                  ]),
                                 ),
-                                child: Row(children: [
-                                  CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : Colors.grey.shade100, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : Colors.black54))),
-                                  const SizedBox(width: 14),
-                                  Expanded(child: Text(q.options[i], style: TextStyle(color: isSelected ? Colors.white : Colors.black87))),
-                                ]),
                               ),
-                            ),
-                          ),
+                            );
+                          }),
                         );
                       }),
                     ],
@@ -2102,7 +2107,7 @@ class BattleResultScreen extends StatelessWidget {
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox.shrink();
                   return Column(children: [
-                    Text('Your Last 5', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    Text('Your Last 5', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     const SizedBox(height: 8),
                     MatchHistoryStrip(results: snapshot.data!),
                   ]);
@@ -2214,7 +2219,7 @@ class _BotBattleSetupScreenState extends State<BotBattleSetupScreen> {
                     child: Row(children: [
                       const Text('🤖', style: TextStyle(fontSize: 28)),
                       const SizedBox(width: 12),
-                      Expanded(child: Text('No one to battle right now? Practice against a bot — same timer, same pressure, instant match.', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600))),
+                      Expanded(child: Text('No one to battle right now? Practice against a bot — same timer, same pressure, instant match.', style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant))),
                     ]),
                   ),
                   const SizedBox(height: 20),
@@ -2433,28 +2438,32 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
                         final isSelected = _selectedAnswers[_index] == i;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: () => _selectOption(i),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  gradient: isSelected ? kHeroGradient : null,
-                                  color: isSelected ? null : Colors.white,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                          child: Builder(builder: (context) {
+                            final scheme = Theme.of(context).colorScheme;
+                            final isDark = Theme.of(context).brightness == Brightness.dark;
+                            return Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => _selectOption(i),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    gradient: isSelected ? kHeroGradient : null,
+                                    color: isSelected ? null : scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                                  ),
+                                  child: Row(children: [
+                                    CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : scheme.surface, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : scheme.onSurfaceVariant))),
+                                    const SizedBox(width: 14),
+                                    Expanded(child: Text(q.options[i], style: TextStyle(color: isSelected ? Colors.white : scheme.onSurface))),
+                                  ]),
                                 ),
-                                child: Row(children: [
-                                  CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : Colors.grey.shade100, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : Colors.black54))),
-                                  const SizedBox(width: 14),
-                                  Expanded(child: Text(q.options[i], style: TextStyle(color: isSelected ? Colors.white : Colors.black87))),
-                                ]),
                               ),
-                            ),
-                          ),
+                            );
+                          }),
                         );
                       }),
                     ],
@@ -2511,7 +2520,7 @@ class BotBattleResultScreen extends StatelessWidget {
               const SizedBox(height: 14),
               Text(tied ? "It's a Tie!" : (won ? 'You Won! 🏆' : 'Bot Wins This One'), style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
               const SizedBox(height: 6),
-              Text('vs $botName ($difficultyLabel)', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              Text('vs $botName ($difficultyLabel)', style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               const SizedBox(height: 28),
               ShinyCard(
                 child: Column(children: [
@@ -2534,7 +2543,7 @@ class BotBattleResultScreen extends StatelessWidget {
               else
                 const Text('+5 XP for the practice', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Practice battles don\'t count toward your Live Battle record.', style: TextStyle(fontSize: 11, color: Colors.grey.shade600), textAlign: TextAlign.center),
+              Text('Practice battles don\'t count toward your Live Battle record.', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
               const Spacer(),
               Row(children: [
                 Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.refresh_rounded), label: const Text('Rematch'), onPressed: () => Navigator.of(context).pop(), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))))),
@@ -2641,7 +2650,7 @@ class _MistakesVaultScreenState extends State<MistakesVaultScreen> {
                 return SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(30),
-                    child: Text('No mistakes tracked yet — nice! Wrong answers from your practice sessions will show up here for targeted review.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600)),
+                    child: Text('No mistakes tracked yet — nice! Wrong answers from your practice sessions will show up here for targeted review.', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   ),
                 );
               }
@@ -2669,7 +2678,7 @@ class _MistakesVaultScreenState extends State<MistakesVaultScreen> {
                             children: [
                               Row(children: [
                                 Expanded(child: Text(subject, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                                Text('${items.length} question${items.length == 1 ? '' : 's'}', style: TextStyle(color: Colors.grey.shade600)),
+                                Text('${items.length} question${items.length == 1 ? '' : 's'}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                               ]),
                               const SizedBox(height: 12),
                               GradientButton(
@@ -2784,7 +2793,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               final rows = snapshot.data ?? [];
               if (rows.isEmpty) {
                 return SliverToBoxAdapter(
-                  child: Padding(padding: const EdgeInsets.all(30), child: Text('No bookmarks yet. Star any question in the Review screen to save it here.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600))),
+                  child: Padding(padding: const EdgeInsets.all(30), child: Text('No bookmarks yet. Star any question in the Review screen to save it here.', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
                 );
               }
               final ids = rows.map((r) => r['question_id'] as String).toSet();
