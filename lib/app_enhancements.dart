@@ -75,7 +75,7 @@ class ShinyCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8)),
         ],
-        border: tint != null ? Border.all(color: tint.withOpacity(0.22)) : null,
+        border: tint != null ? Border.all(color: tint!.withOpacity(0.22)) : null,
       ),
       child: child,
     );
