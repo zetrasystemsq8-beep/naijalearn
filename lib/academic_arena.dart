@@ -558,7 +558,7 @@ class _LeagueScreenState extends State<LeagueScreen> {
                         if (rows.isEmpty) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 16),
-                            child: Text('No one ranked yet this week.', style: TextStyle(color: Colors.grey.shade600)),
+                            child: Text('No one ranked yet this week.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           );
                         }
                         final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
@@ -622,7 +622,7 @@ class _LeagueScreenState extends State<LeagueScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: progress?.league == l ? l.color.withOpacity(0.15) : Colors.grey.shade50,
+                              color: progress?.league == l ? l.color.withOpacity(0.15) : Theme.of(context).colorScheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(16),
                               border: progress?.league == l ? Border.all(color: l.color, width: 1.6) : null,
                             ),
@@ -725,23 +725,27 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(18),
                             onTap: _saving ? null : () => _pick(f.id),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                              decoration: BoxDecoration(
-                                gradient: isSelected ? kHeroGradient : null,
-                                color: isSelected ? null : Colors.white,
-                                borderRadius: BorderRadius.circular(18),
-                                boxShadow: [BoxShadow(color: (isSelected ? kVioletAccent : Colors.black).withOpacity(isSelected ? 0.3 : 0.05), blurRadius: 12, offset: const Offset(0, 4))],
-                              ),
-                              child: Row(
-                                children: [
-                                  Text(f.icon, style: const TextStyle(fontSize: 24)),
-                                  const SizedBox(width: 14),
-                                  Expanded(child: Text(f.displayName, style: TextStyle(fontWeight: FontWeight.w600, color: isSelected ? Colors.white : Colors.black87))),
-                                  if (isSelected) const Icon(Icons.check_circle_rounded, color: Colors.white),
-                                ],
-                              ),
-                            ),
+                            child: Builder(builder: (context) {
+                              final scheme = Theme.of(context).colorScheme;
+                              final isDark = Theme.of(context).brightness == Brightness.dark;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                decoration: BoxDecoration(
+                                  gradient: isSelected ? kHeroGradient : null,
+                                  color: isSelected ? null : scheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: isDark ? null : [BoxShadow(color: (isSelected ? kVioletAccent : Colors.black).withOpacity(isSelected ? 0.3 : 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(f.icon, style: const TextStyle(fontSize: 24)),
+                                    const SizedBox(width: 14),
+                                    Expanded(child: Text(f.displayName, style: TextStyle(fontWeight: FontWeight.w600, color: isSelected ? Colors.white : scheme.onSurface))),
+                                    if (isSelected) const Icon(Icons.check_circle_rounded, color: Colors.white),
+                                  ],
+                                ),
+                              );
+                            }),
                           ),
                         ),
                       );
@@ -782,7 +786,7 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(r['display_name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                          Text('${r['member_count']} members', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                          Text('${r['member_count']} members', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                         ],
                                       ),
                                     ),
@@ -926,7 +930,7 @@ class _BossHallOfFameScreenState extends State<BossHallOfFameScreen> {
                   return SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.only(top: 40),
-                      child: Center(child: Text('No bosses defeated yet — be the first!', style: TextStyle(color: Colors.grey.shade600))),
+                      child: Center(child: Text('No bosses defeated yet — be the first!', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
                     ),
                   );
                 }
@@ -1097,7 +1101,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('${widget.subject.name} Boss', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('Boss HP: $_hp%', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        Text('Boss HP: $_hp%', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -1106,7 +1110,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
               const SizedBox(height: 8),
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(value: _hp / 100, minHeight: 16, backgroundColor: Colors.grey.shade200, valueColor: AlwaysStoppedAnimation(hpColor)),
+                child: LinearProgressIndicator(value: _hp / 100, minHeight: 16, backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest, valueColor: AlwaysStoppedAnimation(hpColor)),
               ),
               const SizedBox(height: 28),
               ShinyCard(child: Text(question.questionText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.4))),
@@ -1116,7 +1120,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Material(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(16),
                     elevation: 0,
                     child: InkWell(
