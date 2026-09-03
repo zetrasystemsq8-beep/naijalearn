@@ -17,7 +17,7 @@ dependencies:
 
   # ZetraMail Authentication
   flutter_dotenv: ^5.1.0
-  supabase_flutter: ^2.5.6
+  supabase_flutter: ^2.8.0
 
   # Notifications
   flutter_local_notifications: ^19.4.0
