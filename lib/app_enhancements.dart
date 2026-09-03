@@ -75,7 +75,7 @@ class ShinyCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8)),
         ],
-        border: tint != null ? Border.all(color: tint!.withOpacity(0.22)) : null,
+        border: tint != null ? Border.all(color: tint.withOpacity(0.22)) : null,
       ),
       child: child,
     );
@@ -1320,7 +1320,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
         child: Container(
           padding: const EdgeInsets.all(28),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(28),
             boxShadow: [BoxShadow(color: kVioletAccent.withOpacity(0.25), blurRadius: 30, offset: const Offset(0, 14))],
           ),
@@ -1338,7 +1338,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
               Text(_headline, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 8),
               Text('You scored ${widget.score} out of ${widget.total}',
-                  style: TextStyle(color: Colors.grey.shade600), textAlign: TextAlign.center),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1350,7 +1350,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
               ),
               const SizedBox(height: 18),
               Text('"${QuoteService.getRandomQuote()}"',
-                  style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: Colors.grey.shade600),
+                  style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   textAlign: TextAlign.center),
               const SizedBox(height: 22),
               GradientButton(label: 'Continue', onPressed: () => Navigator.of(context).pop()),
@@ -1439,7 +1439,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Your Rank', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                Text('Your Rank', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
                                 Text('#$myRank', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                               ],
                             ),
@@ -1477,7 +1477,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   return SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.only(top: 30),
-                      child: Center(child: Text('No entries yet. Be the first!', style: TextStyle(color: Colors.grey.shade600))),
+                      child: Center(child: Text('No entries yet. Be the first!', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
                     ),
                   );
                 }
@@ -1529,7 +1529,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                                         ],
                                       ),
                                       Text('${rankTitleForLevel(e.level)} (Lv. ${e.level}) • 🔥${e.streak}d',
-                                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                     ],
                                   ),
                                 ),
@@ -1601,7 +1601,7 @@ class _MockExamScreenState extends State<MockExamScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   const SizedBox(height: 4),
                   Text('Great for practising subject combinations together.',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
@@ -1631,7 +1631,7 @@ class _MockExamScreenState extends State<MockExamScreen> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Text('Total: ${selectedSubjects.length * perSubjectCount} questions',
-                          style: TextStyle(color: Colors.grey.shade600), textAlign: TextAlign.center),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
                     ),
                   GradientButton(
                     label: 'Start Mock Exam',
@@ -1696,6 +1696,7 @@ class _SelectChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1706,14 +1707,14 @@ class _SelectChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             gradient: selected ? kHeroGradient : null,
-            color: selected ? null : (disabled ? Colors.grey.shade100 : Colors.white),
+            color: selected ? null : (disabled ? scheme.surfaceContainerHighest.withOpacity(0.5) : scheme.surfaceContainerHighest),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: selected ? Colors.transparent : Colors.grey.shade300),
+            border: Border.all(color: selected ? Colors.transparent : scheme.outlineVariant),
             boxShadow: selected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
           ),
           child: Text(label,
               style: TextStyle(
-                color: selected ? Colors.white : (disabled ? Colors.grey.shade400 : Colors.black87),
+                color: selected ? Colors.white : (disabled ? scheme.onSurfaceVariant.withOpacity(0.5) : scheme.onSurface),
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
               )),
@@ -1923,6 +1924,8 @@ class _QuizScreenState extends State<QuizScreen> {
                       ...List.generate(options.length, (i) {
                         final isSelected = _selectedAnswers[_currentIndex] == i;
                         final letter = String.fromCharCode(65 + i);
+                        final scheme = Theme.of(context).colorScheme;
+                        final isDark = Theme.of(context).brightness == Brightness.dark;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: Material(
@@ -1935,28 +1938,30 @@ class _QuizScreenState extends State<QuizScreen> {
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
                                   gradient: isSelected ? kHeroGradient : null,
-                                  color: isSelected ? null : Colors.white,
+                                  color: isSelected ? null : scheme.surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(18),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: isSelected ? kVioletAccent.withOpacity(0.35) : Colors.black.withOpacity(0.05),
-                                      blurRadius: isSelected ? 16 : 10,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
+                                  boxShadow: isDark
+                                      ? null
+                                      : [
+                                          BoxShadow(
+                                            color: isSelected ? kVioletAccent.withOpacity(0.35) : Colors.black.withOpacity(0.05),
+                                            blurRadius: isSelected ? 16 : 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
                                 ),
                                 child: Row(
                                   children: [
                                     CircleAvatar(
                                       radius: 14,
-                                      backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : Colors.grey.shade100,
+                                      backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : scheme.surface,
                                       child: Text(letter,
-                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.black54)),
+                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? Colors.white : scheme.onSurfaceVariant)),
                                     ),
                                     const SizedBox(width: 14),
                                     Expanded(
                                       child: Text(options[i],
-                                          style: TextStyle(fontSize: 15, color: isSelected ? Colors.white : Colors.black87)),
+                                          style: TextStyle(fontSize: 15, color: isSelected ? Colors.white : scheme.onSurface)),
                                     ),
                                   ],
                                 ),
@@ -2087,40 +2092,44 @@ class _JambCalculatorSheetState extends State<_JambCalculatorSheet> {
   }
 
   Widget _button(String label, {Gradient? gradient, Color? fg, VoidCallback? onTap}) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: AspectRatio(
-          aspectRatio: 1.3,
-          child: Material(
-            color: gradient == null ? Colors.grey.shade100 : null,
-            borderRadius: BorderRadius.circular(16),
-            child: Ink(
-              decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(16)),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: onTap ?? () => _inputDigit(label),
-                child: Center(
-                  child: Text(label, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: fg ?? Colors.black87)),
+    return Builder(builder: (context) {
+      final scheme = Theme.of(context).colorScheme;
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: AspectRatio(
+            aspectRatio: 1.3,
+            child: Material(
+              color: gradient == null ? scheme.surfaceContainerHighest : null,
+              borderRadius: BorderRadius.circular(16),
+              child: Ink(
+                decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(16)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: onTap ?? () => _inputDigit(label),
+                  child: Center(
+                    child: Text(label, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: fg ?? scheme.onSurface)),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      decoration: BoxDecoration(color: scheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
       padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Center(
-            child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
+            child: Container(width: 44, height: 4, decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(4))),
           ),
           const SizedBox(height: 14),
           Align(alignment: Alignment.centerLeft, child: Text('Calculator', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
@@ -2302,12 +2311,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: LinearProgressIndicator(
                             value: provider.dailyGoalProgress,
                             minHeight: 10,
-                            backgroundColor: Colors.grey.shade200,
+                            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                             valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? kTealAccent : kVioletAccent),
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text(dailyGoalStatusText(provider), style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        Text(dailyGoalStatusText(provider), style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -2339,7 +2348,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   stats.badges.isEmpty
                       ? Align(
                           alignment: Alignment.centerLeft,
-                          child: Text('No badges yet — keep practising!', style: TextStyle(color: Colors.grey.shade600)))
+                          child: Text('No badges yet — keep practising!', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)))
                       : Column(
                           children: stats.badges.map((b) {
                             return Padding(
@@ -2361,7 +2370,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         children: [
                                           Text(b, style: const TextStyle(fontWeight: FontWeight.w700)),
                                           if (_badgeDescriptions[b] != null)
-                                            Text(_badgeDescriptions[b]!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                            Text(_badgeDescriptions[b]!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                         ],
                                       ),
                                     ),
@@ -2467,13 +2476,13 @@ class AnalyticsScreen extends StatelessWidget {
                       children: [
                         const Text('Overall Performance', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 12),
-                        _statLine('Total XP', '${stats.xp}'),
-                        _statLine('Rank', '${rankTitleForLevel(stats.level)} (Lv. ${stats.level})'),
-                        _statLine('Streak', '${stats.streak} days'),
-                        _statLine('Badges earned', '${stats.badges.length}'),
-                        _statLine('Questions attempted', '${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
-                        _statLine('Study time', '${provider.totalStudyMinutes} minutes'),
-                        _statLine('Quizzes completed', '${stats.quizzesCompleted}'),
+                        _statLine(context, 'Total XP', '${stats.xp}'),
+                        _statLine(context, 'Rank', '${rankTitleForLevel(stats.level)} (Lv. ${stats.level})'),
+                        _statLine(context, 'Streak', '${stats.streak} days'),
+                        _statLine(context, 'Badges earned', '${stats.badges.length}'),
+                        _statLine(context, 'Questions attempted', '${stats.subjectAttempts.values.fold(0, (a, b) => a + b)}'),
+                        _statLine(context, 'Study time', '${provider.totalStudyMinutes} minutes'),
+                        _statLine(context, 'Quizzes completed', '${stats.quizzesCompleted}'),
                       ],
                     ),
                   ),
@@ -2510,7 +2519,7 @@ class AnalyticsScreen extends StatelessWidget {
                                         decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(6)),
                                       ),
                                       const SizedBox(height: 4),
-                                      Text(e.key, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                      Text(e.key, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                     ],
                                   ),
                                 ),
@@ -2519,7 +2528,7 @@ class AnalyticsScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Text('Weekly Accuracy', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey.shade600)),
+                        Text('Weekly Accuracy', style: TextStyle(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         const SizedBox(height: 8),
                         ...weeklyAcc.map((e) => Padding(
                               padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2532,7 +2541,7 @@ class AnalyticsScreen extends StatelessWidget {
                                       child: LinearProgressIndicator(
                                         value: (e.value / 100).clamp(0.0, 1.0),
                                         minHeight: 8,
-                                        backgroundColor: Colors.grey.shade200,
+                                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                                         valueColor: const AlwaysStoppedAnimation(kTealAccent),
                                       ),
                                     ),
@@ -2569,14 +2578,14 @@ class AnalyticsScreen extends StatelessWidget {
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text('$attempted attempted • ${masteryLabel(tier)}', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                            Text('$attempted attempted • ${masteryLabel(tier)}', style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                             const SizedBox(height: 8),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(6),
                               child: LinearProgressIndicator(
                                 value: (score / 100).clamp(0.0, 1.0),
                                 minHeight: 6,
-                                backgroundColor: Colors.grey.shade200,
+                                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                                 valueColor: AlwaysStoppedAnimation(masteryColor(tier)),
                               ),
                             ),
@@ -2595,12 +2604,12 @@ class AnalyticsScreen extends StatelessWidget {
     );
   }
 
-  Widget _statLine(String label, String value) => Padding(
+  Widget _statLine(BuildContext context, String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: TextStyle(color: Colors.grey.shade600)),
+            Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
           ],
         ),
@@ -2619,19 +2628,20 @@ class GoalSelectorSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<AppProvider>(context);
+    final scheme = Theme.of(context).colorScheme;
 
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      decoration: BoxDecoration(color: scheme.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4)))),
+          Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(4)))),
           const SizedBox(height: 16),
           Text('Set Daily Goal', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text('How many questions do you want to answer each day?', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+          Text('How many questions do you want to answer each day?', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(
             spacing: 10,
@@ -2746,7 +2756,7 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
               GlassPillOnLight(icon: Icons.school_rounded, text: 'Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min'),
               const SizedBox(height: 10),
               Text('Earn 2 XP per minute studied (up to 120 min per session)',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600), textAlign: TextAlign.center),
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
               const SizedBox(height: 30),
               Container(
                 width: 220,
@@ -2792,7 +2802,7 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
                 ),
               ),
               const Spacer(),
-              Text('"$_quote"', style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: Colors.grey.shade600), textAlign: TextAlign.center),
+              Text('"$_quote"', style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
               const SizedBox(height: 12),
             ],
           ),
@@ -2868,7 +2878,7 @@ class WeeklyStatsScreen extends StatelessWidget {
                                       child: LinearProgressIndicator(
                                         value: maxXp == 0 ? 0 : e.value / maxXp,
                                         minHeight: 12,
-                                        backgroundColor: Colors.grey.shade200,
+                                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                                         valueColor: const AlwaysStoppedAnimation(kGoldAccent),
                                       ),
                                     ),
@@ -2900,7 +2910,7 @@ class WeeklyStatsScreen extends StatelessWidget {
                                       child: LinearProgressIndicator(
                                         value: (e.value / 100).clamp(0.0, 1.0),
                                         minHeight: 12,
-                                        backgroundColor: Colors.grey.shade200,
+                                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                                         valueColor: AlwaysStoppedAnimation(e.value >= 70 ? kTealAccent : (e.value >= 50 ? kGoldAccent : kCoralAccent)),
                                       ),
                                     ),
