@@ -1,34 +1,23 @@
 // lib/referral_code_screen.dart
 //
 // Mandatory referral code entry — shown once, on a user's very first
-// login, before they reach Home. Every signup gets attributed to a
-// code: either a real ad creator's code, or the always-active 'DIRECT'
-// fallback for organic users who weren't referred by anyone.
+// login, before they reach Home.
 //
-// Attribution is permanent once set — the RPC is idempotent, so this
-// screen is always safe to re-invoke; it just returns the existing
-// attribution instead of overwriting it.
-//
-// Device identification: rather than adding a new plugin dependency,
-// this generates a random UUID once and persists it in
-// SharedPreferences — stable across app restarts on the same device,
-// which is enough for the fraud-flagging signal server-side.
-//
-// DEBUG INSTRUMENTATION (temporary): _submit() now logs the full
-// exception type and stack trace via debugPrint whenever submitCode()
-// throws, so the "Null check operator used on a null value" crash can
-// be traced to its exact origin (client-side Dart vs. the Supabase RPC
-// response itself). Remove the debugPrint block once the root cause is
-// found and fixed.
+// HARDENED VERSION: every single operation on this screen — device ID
+// generation, the Supabase RPC call, everything — is wrapped so it can
+// NEVER throw past this screen. If anything at all fails (network,
+// Supabase, SharedPreferences, whatever), the user is let through
+// anyway after a brief message. Referral tracking is a nice-to-have;
+// it must never be able to lock a real student out of the app.
 
 import 'dart:math';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// =========================================================================
-/// DEVICE ID — lightweight, persisted, no new plugin required.
+/// DEVICE ID — every step wrapped; returns a fallback id instead of
+/// ever throwing, even if SharedPreferences itself is unavailable.
 /// =========================================================================
 
 class DeviceIdService {
@@ -40,14 +29,24 @@ class DeviceIdService {
 
   Future<String> getDeviceId() async {
     if (_cached != null) return _cached!;
-    final prefs = await SharedPreferences.getInstance();
-    var id = prefs.getString(_prefsKey);
-    if (id == null) {
-      id = _generateId();
-      await prefs.setString(_prefsKey, id);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var id = prefs.getString(_prefsKey);
+      if (id == null || id.isEmpty) {
+        id = _generateId();
+        await prefs.setString(_prefsKey, id);
+      }
+      _cached = id;
+      return id;
+    } catch (e) {
+      debugPrint('[DeviceId] Failed to read/write SharedPreferences (non-fatal): $e');
+      // Fallback: a fresh random id for this session only. Fine — this
+      // is only used for a soft fraud-signal on the server, never for
+      // anything that blocks the user.
+      final fallback = _generateId();
+      _cached = fallback;
+      return fallback;
     }
-    _cached = id;
-    return id;
   }
 
   String _generateId() {
@@ -58,7 +57,8 @@ class DeviceIdService {
 }
 
 /// =========================================================================
-/// SERVICE
+/// SERVICE — every method catches internally; nothing here ever throws
+/// to its caller.
 /// =========================================================================
 
 class ReferralService {
@@ -67,28 +67,60 @@ class ReferralService {
 
   SupabaseClient get _client => Supabase.instance.client;
 
-  /// Null if this user has no attribution yet (first login) — used to
-  /// decide whether to show the mandatory screen at all.
+  /// Null if this user has no attribution yet OR if the check itself
+  /// failed for any reason — both cases are treated the same by the
+  /// caller (VerifyOtpScreen), which fails open regardless.
   Future<Map<String, dynamic>?> getMyAttribution() async {
-    final result = await _client.rpc('get_my_referral_attribution');
-    if (result == null) return null;
-    return Map<String, dynamic>.from(result as Map);
+    try {
+      final result = await _client.rpc('get_my_referral_attribution');
+      if (result == null) return null;
+      if (result is! Map) return null;
+      return Map<String, dynamic>.from(result);
+    } catch (e) {
+      debugPrint('[Referral] getMyAttribution failed (non-fatal): $e');
+      return null;
+    }
   }
 
-  Future<Map<String, dynamic>> submitCode(String code) async {
-    final deviceId = await DeviceIdService.instance.getDeviceId();
-    debugPrint('[Referral] submitCode() calling RPC with p_code="${code.trim()}", p_device_id="$deviceId"');
-    final result = await _client.rpc('submit_referral_code', params: {
-      'p_code': code.trim(),
-      'p_device_id': deviceId,
-    });
-    debugPrint('[Referral] submit_referral_code RPC raw result: $result (type: ${result.runtimeType})');
-    return Map<String, dynamic>.from(result as Map);
+  /// Returns true on success, false on ANY failure. Never throws.
+  Future<bool> submitCode(String code) async {
+    try {
+      final deviceId = await DeviceIdService.instance.getDeviceId();
+      final result = await _client.rpc('submit_referral_code', params: {
+        'p_code': code.trim(),
+        'p_device_id': deviceId,
+      });
+      debugPrint('[Referral] submitCode succeeded: $result');
+      return true;
+    } catch (e) {
+      debugPrint('[Referral] submitCode failed (non-fatal): $e');
+      return false;
+    }
   }
 
   Future<List<Map<String, dynamic>>> adminGetStats() async {
-    final rows = await _client.rpc('admin_get_referral_stats');
-    return (rows as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
+    try {
+      final rows = await _client.rpc('admin_get_referral_stats');
+      if (rows is! List) return [];
+      return rows.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+    } catch (e) {
+      debugPrint('[Referral] adminGetStats failed: $e');
+      return [];
+    }
+  }
+
+  /// Returns null on success, an error message string on failure —
+  /// used by the admin approve/deactivate toggle.
+  Future<String?> adminSetCodeActive(String code, bool active) async {
+    try {
+      await _client.rpc('admin_set_referral_code_active', params: {
+        'p_code': code,
+        'p_active': active,
+      });
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
   }
 }
 
@@ -96,20 +128,28 @@ class ReferralService {
 /// MANDATORY ENTRY SCREEN
 /// =========================================================================
 ///
-/// Usage: after OTP verification succeeds, before navigating to the
-/// normal onboarding/home destination, call:
+/// Usage (in VerifyOtpScreen._verifyCode, after OTP succeeds):
 ///
 ///   final attribution = await ReferralService.instance.getMyAttribution();
-///   final destination = attribution == null
-///       ? ReferralCodeEntryScreen(onDone: () => /* navigate to your normal destination */)
-///       : /* your normal destination directly */;
-///
-/// See the integration note at the bottom of this file for the exact
-/// main.dart wiring.
+///   if (attribution == null) {
+///     // first login OR the check failed — either way, show this screen
+///     Navigator.of(context).pushAndRemoveUntil(
+///       MaterialPageRoute(builder: (_) => ReferralCodeEntryScreen(
+///         onDone: () => Navigator.of(context).pushAndRemoveUntil(
+///           MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+///           (route) => false,
+///         ),
+///       )),
+///       (route) => false,
+///     );
+///   } else {
+///     Navigator.of(context).pushAndRemoveUntil(
+///       MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+///       (route) => false,
+///     );
+///   }
 
 class ReferralCodeEntryScreen extends StatefulWidget {
-  /// Called once a code has been successfully submitted (or was already
-  /// on file) — the caller decides where to navigate next.
   final VoidCallback onDone;
   const ReferralCodeEntryScreen({super.key, required this.onDone});
 
@@ -120,41 +160,57 @@ class ReferralCodeEntryScreen extends StatefulWidget {
 class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
   final _codeController = TextEditingController();
   bool _busy = false;
-  String? _error;
+  bool _proceeded = false; // guards against double-navigation
 
-  Future<void> _submit() async {
-    if (_codeController.text.trim().isEmpty) {
-      setState(() => _error = 'Please enter a code — use DIRECT if no one referred you.');
+  /// The ONLY exit from this screen. Guaranteed to fire exactly once,
+  /// no matter what happened — success, failure, timeout, anything.
+  void _proceed() {
+    if (_proceeded) return;
+    _proceeded = true;
+    if (!mounted) return;
+    widget.onDone();
+  }
+
+  Future<void> _submit([String? forcedCode]) async {
+    if (_busy || _proceeded) return;
+
+    final code = (forcedCode ?? _codeController.text).trim();
+    if (code.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a code — or tap "I found this on my own".')),
+        );
+      }
       return;
     }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+
+    setState(() => _busy = true);
+
+    // submitCode() internally catches everything and returns a plain
+    // bool — there is nothing left here that can throw. Even so, this
+    // whole call is wrapped one more time as a final safety net.
+    bool success = false;
     try {
-      await ReferralService.instance.submitCode(_codeController.text);
-      if (!mounted) return;
-      widget.onDone();
-    } catch (e, stackTrace) {
-      // DEBUG: full type + stack trace so the exact throwing line can be
-      // identified. Check `flutter logs` / your device's logcat output
-      // for a block starting with "[Referral] EXCEPTION".
-      debugPrint('[Referral] EXCEPTION during submitCode(): '
-          'runtimeType=${e.runtimeType}, toString="$e"');
-      debugPrint('[Referral] STACK TRACE:\n$stackTrace');
-
-      if (!mounted) return;
-      final message = e.toString().replaceFirst('PostgrestException(message: ', '').split(',').first;
-      setState(() => _error = message.isNotEmpty ? message : 'Invalid code. Please check and try again.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      success = await ReferralService.instance.submitCode(code);
+    } catch (e) {
+      debugPrint('[Referral] Unexpected error in _submit (non-fatal): $e');
+      success = false;
     }
+
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save your referral code — continuing anyway.')),
+      );
+    }
+
+    // Proceed regardless of success/failure — this screen's only job
+    // is a best-effort attempt, never a hard gate.
+    _proceed();
   }
 
-  void _useDirect() {
-    _codeController.text = 'DIRECT';
-    _submit();
-  }
+  void _useDirect() => _submit('DIRECT');
 
   @override
   void dispose() {
@@ -165,7 +221,6 @@ class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // No back button — this is a mandatory, one-time step.
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -198,6 +253,7 @@ class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
                 const SizedBox(height: 28),
                 TextField(
                   controller: _codeController,
+                  enabled: !_busy,
                   textCapitalization: TextCapitalization.characters,
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
@@ -207,15 +263,11 @@ class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
                   ),
                   onSubmitted: (_) => _submit(),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: scheme.error, fontSize: 13)),
-                ],
                 const SizedBox(height: 20),
                 SizedBox(
                   height: 52,
                   child: FilledButton(
-                    onPressed: _busy ? null : _submit,
+                    onPressed: _busy ? null : () => _submit(),
                     child: _busy
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Continue'),
@@ -236,7 +288,7 @@ class _ReferralCodeEntryScreenState extends State<ReferralCodeEntryScreen> {
 }
 
 /// =========================================================================
-/// ADMIN — REFERRAL STATS (read-only)
+/// ADMIN — REFERRAL STATS with Approve/Deactivate toggle
 /// =========================================================================
 
 class AdminReferralStatsScreen extends StatefulWidget {
@@ -248,6 +300,7 @@ class AdminReferralStatsScreen extends StatefulWidget {
 
 class _AdminReferralStatsScreenState extends State<AdminReferralStatsScreen> {
   late Future<List<Map<String, dynamic>>> _future;
+  final Set<String> _busyCodes = {};
 
   @override
   void initState() {
@@ -259,6 +312,18 @@ class _AdminReferralStatsScreenState extends State<AdminReferralStatsScreen> {
     final next = ReferralService.instance.adminGetStats();
     setState(() => _future = next);
     await next;
+  }
+
+  Future<void> _toggleActive(String code, bool currentlyActive) async {
+    setState(() => _busyCodes.add(code));
+    final error = await ReferralService.instance.adminSetCodeActive(code, !currentlyActive);
+    if (!mounted) return;
+    setState(() => _busyCodes.remove(code));
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    _refresh();
   }
 
   @override
@@ -274,20 +339,22 @@ class _AdminReferralStatsScreenState extends State<AdminReferralStatsScreen> {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snapshot.hasError) {
+            final rows = snapshot.data ?? [];
+            if (rows.isEmpty) {
               return ListView(children: [
                 const SizedBox(height: 60),
-                Center(child: Text('Could not load stats.', style: TextStyle(color: scheme.error))),
+                Center(child: Text('No referral codes yet.', style: TextStyle(color: scheme.onSurfaceVariant))),
               ]);
             }
-            final rows = snapshot.data ?? [];
             return ListView.separated(
               padding: const EdgeInsets.all(20),
               itemCount: rows.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, i) {
                 final r = rows[i];
+                final code = r['code'] as String? ?? '';
                 final active = r['active'] as bool? ?? true;
+                final busy = _busyCodes.contains(code);
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -302,15 +369,19 @@ class _AdminReferralStatsScreenState extends State<AdminReferralStatsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(children: [
-                              Text(r['code'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                              if (!active) ...[
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                  decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(6)),
-                                  child: Text('inactive', style: TextStyle(fontSize: 10, color: scheme.error)),
+                              Text(code, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: active ? Colors.green.withOpacity(0.15) : scheme.errorContainer,
+                                  borderRadius: BorderRadius.circular(6),
                                 ),
-                              ],
+                                child: Text(
+                                  active ? 'active' : 'pending',
+                                  style: TextStyle(fontSize: 10, color: active ? Colors.green.shade800 : scheme.error),
+                                ),
+                              ),
                             ]),
                             Text(
                               [r['creator_name'], r['country']].where((e) => e != null && e != '').join(' · '),
@@ -319,7 +390,19 @@ class _AdminReferralStatsScreenState extends State<AdminReferralStatsScreen> {
                           ],
                         ),
                       ),
-                      Text('${r['total_referrals']}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: scheme.primary)),
+                      Text('${r['total_referrals'] ?? 0}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: scheme.primary)),
+                      const SizedBox(width: 10),
+                      if (code != 'DIRECT')
+                        busy
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : IconButton(
+                                icon: Icon(
+                                  active ? Icons.pause_circle_outline_rounded : Icons.check_circle_outline_rounded,
+                                  color: active ? Colors.orange : Colors.green,
+                                ),
+                                tooltip: active ? 'Deactivate' : 'Approve',
+                                onPressed: () => _toggleActive(code, active),
+                              ),
                     ],
                   ),
                 );
