@@ -5,7 +5,7 @@
 // are 100% unchanged from your original file — copy this in as a straight
 // replacement, nothing breaks.
 //
-// Reuses the shared design system (kHeroGradient, ShinyCard,
+// Reuses the shared design system (AppTheme.heroGradient(context), ShinyCard,
 // GradientButton, GradientHeader, GlassPill, accent colors) defined in
 // the redesigned app_enhancements.dart — make sure that file is updated
 // first, since this one imports those widgets from it.
@@ -15,8 +15,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart' show Question, QuestionRepository, kSubjects, SubjectInfo;
 import 'zetra_pay.dart';
+import 'app_theme.dart' show AppTheme;
 import 'app_enhancements.dart'
-    show kHeroGradient, kGoldAccent, kTealAccent, kCoralAccent, kVioletAccent, ShinyCard, GradientButton, GradientHeader, GlassPill;
+    show kGoldAccent, kTealAccent, kCoralAccent, ShinyCard, GradientButton, GradientHeader, GlassPill;
 
 /// =========================================================================
 /// LEAGUES  (unchanged — logic only)
@@ -334,7 +335,7 @@ class _ArenaDashboardCardState extends State<ArenaDashboardCard> {
                       icon: Text(facultyInfo?.icon ?? '🎓', style: const TextStyle(fontSize: 22)),
                       title: facultyInfo?.displayName ?? 'Pick a Faculty',
                       subtitle: ArenaService.instance.facultyRank != null ? 'Team Rank #${ArenaService.instance.facultyRank}' : 'Join a team',
-                      accent: kVioletAccent,
+                      accent: Theme.of(context).colorScheme.primary,
                       onTap: () => _openAndRefresh(const FacultyWarScreen()),
                     ),
                   ),
@@ -571,13 +572,13 @@ class _LeagueScreenState extends State<LeagueScreen> {
                               padding: const EdgeInsets.only(bottom: 8),
                               child: ShinyCard(
                                 padding: const EdgeInsets.all(12),
-                                tint: isMe ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                                tint: isMe ? Theme.of(context).colorScheme.primary : (isTop3 ? medalColors[rank - 1] : null),
                                 child: Row(
                                   children: [
                                     CircleAvatar(
                                       radius: 16,
-                                      backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
-                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                      backgroundColor: isTop3 ? medalColors[rank - 1] : Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : Theme.of(context).colorScheme.primary)),
                                     ),
                                     const SizedBox(width: 10),
                                     Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 16)),
@@ -587,10 +588,10 @@ class _LeagueScreenState extends State<LeagueScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         margin: const EdgeInsets.only(right: 8),
-                                        decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)),
+                                        decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(8)),
                                         child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
                                       ),
-                                    Text('${r['weekly_xp']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                    Text('${r['weekly_xp']} XP', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                                   ],
                                 ),
                               ),
@@ -731,10 +732,10 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
                               return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                 decoration: BoxDecoration(
-                                  gradient: isSelected ? kHeroGradient : null,
+                                  gradient: isSelected ? AppTheme.heroGradient(context) : null,
                                   color: isSelected ? null : scheme.surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(18),
-                                  boxShadow: isDark ? null : [BoxShadow(color: (isSelected ? kVioletAccent : Colors.black).withOpacity(isSelected ? 0.3 : 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+                                  boxShadow: isDark ? null : [BoxShadow(color: (isSelected ? Theme.of(context).colorScheme.primary : Colors.black).withOpacity(isSelected ? 0.3 : 0.05), blurRadius: 12, offset: const Offset(0, 4))],
                                 ),
                                 child: Row(
                                   children: [
@@ -770,13 +771,13 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
                               padding: const EdgeInsets.only(bottom: 8),
                               child: ShinyCard(
                                 padding: const EdgeInsets.all(12),
-                                tint: isMine ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                                tint: isMine ? Theme.of(context).colorScheme.primary : (isTop3 ? medalColors[rank - 1] : null),
                                 child: Row(
                                   children: [
                                     CircleAvatar(
                                       radius: 16,
-                                      backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
-                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                      backgroundColor: isTop3 ? medalColors[rank - 1] : Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                                      child: Text('$rank', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : Theme.of(context).colorScheme.primary)),
                                     ),
                                     const SizedBox(width: 10),
                                     Text(r['icon'] as String? ?? '🎓', style: const TextStyle(fontSize: 18)),
@@ -790,7 +791,7 @@ class _FacultyWarScreenState extends State<FacultyWarScreen> {
                                         ],
                                       ),
                                     ),
-                                    Text('${r['weekly_xp']} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                    Text('${r['weekly_xp']} XP', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                                   ],
                                 ),
                               ),
@@ -948,12 +949,12 @@ class _BossHallOfFameScreenState extends State<BossHallOfFameScreen> {
                           padding: const EdgeInsets.only(bottom: 10),
                           child: ShinyCard(
                             padding: const EdgeInsets.all(14),
-                            tint: isMe ? kVioletAccent : (isTop3 ? medalColors[rank - 1] : null),
+                            tint: isMe ? Theme.of(context).colorScheme.primary : (isTop3 ? medalColors[rank - 1] : null),
                             child: Row(
                               children: [
                                 CircleAvatar(
-                                  backgroundColor: isTop3 ? medalColors[rank - 1] : kVioletAccent.withOpacity(0.12),
-                                  child: Text('$rank', style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                  backgroundColor: isTop3 ? medalColors[rank - 1] : Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                                  child: Text('$rank', style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : Theme.of(context).colorScheme.primary)),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(r['avatar_emoji'] as String? ?? '🙂', style: const TextStyle(fontSize: 18)),
@@ -963,13 +964,13 @@ class _BossHallOfFameScreenState extends State<BossHallOfFameScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                     margin: const EdgeInsets.only(right: 8),
-                                    decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)),
+                                    decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(8)),
                                     child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
                                   ),
                                 Row(children: [
                                   const Text('🧬', style: TextStyle(fontSize: 14)),
                                   const SizedBox(width: 4),
-                                  Text('${r['boss_defeated_count']}', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                  Text('${r['boss_defeated_count']}', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                                 ]),
                               ],
                             ),
@@ -1050,7 +1051,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
     if (_defeated) {
       return Scaffold(
         body: Container(
-          decoration: const BoxDecoration(gradient: kHeroGradient),
+          decoration: BoxDecoration(gradient: AppTheme.heroGradient(context)),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1065,7 +1066,7 @@ class _BossBattleScreenState extends State<BossBattleScreen> {
                 SizedBox(
                   width: 200,
                   child: FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: kVioletAccent),
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Theme.of(context).colorScheme.primary),
                     onPressed: () => Navigator.pop(context),
                     child: const Text('Back to Bosses'),
                   ),
@@ -1162,7 +1163,7 @@ class CompanionScreen extends StatelessWidget {
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: kHeroGradient),
+        decoration: BoxDecoration(gradient: AppTheme.heroGradient(context)),
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24),
