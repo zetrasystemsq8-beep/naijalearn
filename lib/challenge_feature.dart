@@ -188,11 +188,14 @@ class ChallengeDeepLinkListener {
     final appLinks = AppLinks();
 
     // Cold start: app was launched fresh BY tapping the link.
+    // NOTE: app_links renamed this from getInitialAppLink() to
+    // getInitialLink() as of package version ~6.4.0 — using the old name
+    // fails the build with "isn't defined for the type 'AppLinks'".
     try {
-      final initial = await appLinks.getInitialAppLink();
+      final initial = await appLinks.getInitialLink();
       if (initial != null) _handle(initial, navigatorKey);
     } catch (e) {
-      debugPrint('[ChallengeDeepLink] getInitialAppLink failed: $e');
+      debugPrint('[ChallengeDeepLink] getInitialLink failed: $e');
     }
 
     // Warm start: app was already running in the background.
