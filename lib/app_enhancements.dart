@@ -7,7 +7,7 @@
 // New design system used across every screen in this file (also reuse
 // these constants/helpers when you redesign other files, so the whole
 // app matches):
-//   kHeroGradient   — violet gradient for headers/primary buttons
+//   AppTheme.heroGradient(context)   — violet gradient for headers/primary buttons
 //   kGoldAccent     — XP / streak / rewards
 //   kTealAccent     — progress / study / positive
 //   kCoralAccent    — urgency / warnings
@@ -24,6 +24,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'notification_service.dart';
+import 'app_theme.dart' show AppTheme;
 import 'questions_english.dart';
 import 'main.dart' show QuestionNavigatorSheet, QuestionStatus;
 import 'questions_mathematics.dart';
@@ -43,21 +44,21 @@ import 'career_features.dart' show dailyGoalStatusText;
 import 'features5.dart' show CoinService;
 
 // =============================================================================
-// 🎨 DESIGN SYSTEM — shared across every screen in this file
+// 🎨 DESIGN SYSTEM — shared across every screen in this file.
+// Colors are derived from Theme.of(context).colorScheme / AppTheme, NEVER
+// hardcoded — that's what makes this correct in both light AND dark mode,
+// and what stops the brand gradient from clashing with the rest of the
+// theme (previous version hardcoded an unrelated purple).
 // =============================================================================
 
-const kHeroGradient = LinearGradient(
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
-  colors: [Color(0xFF6C3EF4), Color(0xFF9B6BFF)],
-);
-const Color kGoldAccent = Color(0xFFFFB020);
-const Color kTealAccent = Color(0xFF14B8A6);
-const Color kCoralAccent = Color(0xFFFF6B6B);
-const Color kVioletAccent = Color(0xFF6C3EF4);
+const Color kGoldAccent = Color(0xFFD97706); // matches AppColors.xp
+const Color kTealAccent = Color(0xFF16A34A); // matches AppColors.success
+const Color kCoralAccent = Color(0xFFDC2626); // matches AppColors.error
 
 /// Soft-shadow rounded card — replaces flat `surfaceContainerHighest`
-/// fills everywhere in this file.
+/// fills everywhere in this file. Theme-aware: no shadow in dark mode
+/// (shadows read as pale halos on dark backgrounds), full contrast tint
+/// in both modes.
 class ShinyCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -67,52 +68,54 @@ class ShinyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: tint?.withOpacity(0.08) ?? scheme.surface,
+        color: tint != null ? tint.withOpacity(isDark ? 0.16 : 0.08) : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8)),
-        ],
-        border: tint != null ? Border.all(color: tint!.withOpacity(0.22)) : null,
+        boxShadow: isDark ? null : [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8))],
+        border: tint != null ? Border.all(color: tint.withOpacity(isDark ? 0.35 : 0.22)) : null,
       ),
-      child: child,
+      child: DefaultTextStyle.merge(style: TextStyle(color: scheme.onSurface), child: child),
     );
   }
 }
 
-/// Gradient pill button with a colored drop shadow — replaces flat
-/// FilledButton for primary actions.
+/// Gradient pill button with a colored drop shadow. Defaults to the
+/// theme's own hero gradient (derived from colorScheme.primary) — pass a
+/// different `gradient` only for a deliberately different accent (e.g.
+/// destructive actions in coral/red).
 class GradientButton extends StatelessWidget {
   final String label;
   final IconData? icon;
   final VoidCallback? onPressed;
-  final Gradient gradient;
+  final Gradient? gradient;
   final double height;
   const GradientButton({
     super.key,
     required this.label,
     this.icon,
     required this.onPressed,
-    this.gradient = kHeroGradient,
+    this.gradient,
     this.height = 52,
   });
 
   @override
   Widget build(BuildContext context) {
     final disabled = onPressed == null;
+    final resolvedGradient = gradient ?? AppTheme.heroGradient(context);
     return SizedBox(
       width: double.infinity,
       height: height,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: disabled ? null : gradient,
-          color: disabled ? Colors.grey.withOpacity(0.3) : null,
+          gradient: disabled ? null : resolvedGradient,
+          color: disabled ? Theme.of(context).colorScheme.onSurface.withOpacity(0.12) : null,
           borderRadius: BorderRadius.circular(16),
           boxShadow: disabled
               ? null
-              : [BoxShadow(color: (gradient.colors.first).withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 6))],
+              : [BoxShadow(color: (resolvedGradient.colors.first).withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 6))],
         ),
         child: Material(
           color: Colors.transparent,
@@ -136,24 +139,34 @@ class GradientButton extends StatelessWidget {
 }
 
 /// Reusable gradient header block — used at the top of every redesigned
-/// screen instead of a flat AppBar.
+/// screen instead of a flat AppBar. ALWAYS includes a back button unless
+/// explicitly told not to (root/tab screens pass showBackButton: false).
 class GradientHeader extends StatelessWidget {
   final String title;
   final String? subtitle;
   final Widget? trailing;
-  const GradientHeader({super.key, required this.title, this.subtitle, this.trailing});
+  final bool showBackButton;
+  const GradientHeader({super.key, required this.title, this.subtitle, this.trailing, this.showBackButton = true});
 
   @override
   Widget build(BuildContext context) {
+    final canPop = Navigator.of(context).canPop();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 56, 20, 26),
-      decoration: const BoxDecoration(
-        gradient: kHeroGradient,
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
+      padding: const EdgeInsets.fromLTRB(12, 50, 20, 26),
+      decoration: BoxDecoration(
+        gradient: AppTheme.heroGradient(context),
+        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
       ),
       child: Row(
         children: [
+          if (showBackButton && canPop)
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              onPressed: () => Navigator.of(context).maybePop(),
+            )
+          else
+            const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -173,7 +186,8 @@ class GradientHeader extends StatelessWidget {
   }
 }
 
-/// Glassy stat pill used inside GradientHeader areas.
+/// Glassy stat pill used inside GradientHeader areas — white-on-gradient
+/// is correct in both modes since the gradient background doesn't change.
 class GlassPill extends StatelessWidget {
   final IconData icon;
   final String value;
@@ -1322,7 +1336,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog> with SingleTicke
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(28),
-            boxShadow: [BoxShadow(color: kVioletAccent.withOpacity(0.25), blurRadius: 30, offset: const Offset(0, 14))],
+            boxShadow: [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.25), blurRadius: 30, offset: const Offset(0, 14))],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1426,12 +1440,12 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                     child: ShinyCard(
-                      tint: kVioletAccent,
+                      tint: Theme.of(context).colorScheme.primary,
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(gradient: kHeroGradient, shape: BoxShape.circle),
+                            decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), shape: BoxShape.circle),
                             child: const Icon(Icons.person_pin_circle_rounded, color: Colors.white, size: 22),
                           ),
                           const SizedBox(width: 14),
@@ -1451,7 +1465,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                               child: Text('In Top 7', style: TextStyle(color: kTealAccent, fontSize: 11, fontWeight: FontWeight.w700)),
                             ),
                           const SizedBox(width: 10),
-                          Text('${myEntry.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                          Text('${myEntry.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                         ],
                       ),
                     ),
@@ -1494,19 +1508,19 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                           padding: const EdgeInsets.only(bottom: 10),
                           child: ShinyCard(
                             padding: const EdgeInsets.all(14),
-                            tint: isMe ? kVioletAccent : (isTop3 ? medalColors[i] : null),
+                            tint: isMe ? Theme.of(context).colorScheme.primary : (isTop3 ? medalColors[i] : null),
                             child: Row(
                               children: [
                                 Container(
                                   width: 34,
                                   height: 34,
                                   decoration: BoxDecoration(
-                                    color: isTop3 ? medalColors[i] : kVioletAccent.withOpacity(0.12),
+                                    color: isTop3 ? medalColors[i] : Theme.of(context).colorScheme.primary.withOpacity(0.12),
                                     shape: BoxShape.circle,
                                   ),
                                   alignment: Alignment.center,
                                   child: Text('${i + 1}',
-                                      style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : kVioletAccent)),
+                                      style: TextStyle(fontWeight: FontWeight.bold, color: isTop3 ? Colors.white : Theme.of(context).colorScheme.primary)),
                                 ),
                                 const SizedBox(width: 14),
                                 Expanded(
@@ -1522,7 +1536,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                                             const SizedBox(width: 6),
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                              decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)),
+                                              decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(8)),
                                               child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white)),
                                             ),
                                           ],
@@ -1533,7 +1547,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                                     ],
                                   ),
                                 ),
-                                Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                                Text('${e.xp} XP', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                               ],
                             ),
                           ),
@@ -1706,11 +1720,11 @@ class _SelectChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            gradient: selected ? kHeroGradient : null,
+            gradient: selected ? AppTheme.heroGradient(context) : null,
             color: selected ? null : (disabled ? scheme.surfaceContainerHighest.withOpacity(0.5) : scheme.surfaceContainerHighest),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: selected ? Colors.transparent : scheme.outlineVariant),
-            boxShadow: selected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
+            boxShadow: selected ? [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
           ),
           child: Text(label,
               style: TextStyle(
@@ -1861,7 +1875,7 @@ class _QuizScreenState extends State<QuizScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-              decoration: const BoxDecoration(gradient: kHeroGradient),
+              decoration: BoxDecoration(gradient: AppTheme.heroGradient(context)),
               child: Column(
                 children: [
                   Row(
@@ -1937,14 +1951,14 @@ class _QuizScreenState extends State<QuizScreen> {
                                 duration: const Duration(milliseconds: 150),
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  gradient: isSelected ? kHeroGradient : null,
+                                  gradient: isSelected ? AppTheme.heroGradient(context) : null,
                                   color: isSelected ? null : scheme.surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(18),
                                   boxShadow: isDark
                                       ? null
                                       : [
                                           BoxShadow(
-                                            color: isSelected ? kVioletAccent.withOpacity(0.35) : Colors.black.withOpacity(0.05),
+                                            color: isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.35) : Colors.black.withOpacity(0.05),
                                             blurRadius: isSelected ? 16 : 10,
                                             offset: const Offset(0, 4),
                                           ),
@@ -2137,19 +2151,19 @@ class _JambCalculatorSheetState extends State<_JambCalculatorSheet> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(18)),
             alignment: Alignment.centerRight,
             child: Text(_display, style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
           const SizedBox(height: 14),
-          Row(children: [_button('7'), _button('8'), _button('9'), _button('÷', gradient: kHeroGradient, fg: Colors.white, onTap: () => _setOperator('÷'))]),
-          Row(children: [_button('4'), _button('5'), _button('6'), _button('×', gradient: kHeroGradient, fg: Colors.white, onTap: () => _setOperator('×'))]),
-          Row(children: [_button('1'), _button('2'), _button('3'), _button('-', gradient: kHeroGradient, fg: Colors.white, onTap: () => _setOperator('-'))]),
+          Row(children: [_button('7'), _button('8'), _button('9'), _button('÷', gradient: AppTheme.heroGradient(context), fg: Colors.white, onTap: () => _setOperator('÷'))]),
+          Row(children: [_button('4'), _button('5'), _button('6'), _button('×', gradient: AppTheme.heroGradient(context), fg: Colors.white, onTap: () => _setOperator('×'))]),
+          Row(children: [_button('1'), _button('2'), _button('3'), _button('-', gradient: AppTheme.heroGradient(context), fg: Colors.white, onTap: () => _setOperator('-'))]),
           Row(children: [
             _button('C', gradient: const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]), fg: Colors.white, onTap: _clear),
             _button('0'),
             _button('.', onTap: _inputDecimal),
-            _button('+', gradient: kHeroGradient, fg: Colors.white, onTap: () => _setOperator('+')),
+            _button('+', gradient: AppTheme.heroGradient(context), fg: Colors.white, onTap: () => _setOperator('+')),
           ]),
           const SizedBox(height: 8),
           GradientButton(label: '=', onPressed: _equals, height: 52),
@@ -2227,12 +2241,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 56, 20, 32),
-              decoration: const BoxDecoration(
-                gradient: kHeroGradient,
+              decoration: BoxDecoration(
+                gradient: AppTheme.heroGradient(context),
                 borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
               ),
               child: Column(
                 children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Material(
+                      color: Colors.white.withOpacity(0.16),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => Navigator.of(context).maybePop(),
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Container(
                     width: 96,
                     height: 96,
@@ -2277,7 +2307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     children: [
                       _StatChip(label: 'Study (min)', value: '${provider.totalStudyMinutes}', color: kTealAccent),
                       const SizedBox(width: 10),
-                      _StatChip(label: 'Quizzes', value: '${stats.quizzesCompleted}', color: kVioletAccent),
+                      _StatChip(label: 'Quizzes', value: '${stats.quizzesCompleted}', color: Theme.of(context).colorScheme.primary),
                       const SizedBox(width: 10),
                       _StatChip(label: 'Goals Met', value: '${stats.goalsMetCount}', color: const Color(0xFFEC4899)),
                     ],
@@ -2312,7 +2342,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             value: provider.dailyGoalProgress,
                             minHeight: 10,
                             backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? kTealAccent : kVioletAccent),
+                            valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? kTealAccent : Theme.of(context).colorScheme.primary),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -2388,7 +2418,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         labelText: 'Change your name',
                         border: InputBorder.none,
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.check_circle_rounded, color: kVioletAccent),
+                          icon: Icon(Icons.check_circle_rounded, color: Theme.of(context).colorScheme.primary),
                           onPressed: () {
                             if (_nameController.text.trim().isNotEmpty) {
                               provider.setUserName(_nameController.text);
@@ -2470,7 +2500,7 @@ class AnalyticsScreen extends StatelessWidget {
               child: Column(
                 children: [
                   ShinyCard(
-                    tint: kVioletAccent,
+                    tint: Theme.of(context).colorScheme.primary,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -2516,7 +2546,7 @@ class AnalyticsScreen extends StatelessWidget {
                                       const SizedBox(height: 4),
                                       Container(
                                         height: 50 * heightFactor + 6,
-                                        decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(6)),
+                                        decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(6)),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(e.key, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -2753,6 +2783,13 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ),
               GlassPillOnLight(icon: Icons.school_rounded, text: 'Today: ${provider.studyMinutesToday} min • All-time: ${provider.totalStudyMinutes} min'),
               const SizedBox(height: 10),
               Text('Earn 2 XP per minute studied (up to 120 min per session)',
@@ -2763,8 +2800,8 @@ class _StudyTimerScreenState extends State<StudyTimerScreen> {
                 height: 220,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: kHeroGradient,
-                  boxShadow: [BoxShadow(color: kVioletAccent.withOpacity(0.35), blurRadius: 30, offset: const Offset(0, 12))],
+                  gradient: AppTheme.heroGradient(context),
+                  boxShadow: [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.35), blurRadius: 30, offset: const Offset(0, 12))],
                 ),
                 child: Center(
                   child: Text(_formatted,
@@ -2822,13 +2859,13 @@ class GlassPillOnLight extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(color: kVioletAccent.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: kVioletAccent),
+          Icon(icon, size: 15, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 8),
-          Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: kVioletAccent)),
+          Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary)),
         ],
       ),
     );
