@@ -5,7 +5,7 @@
 // call below are 100% unchanged from your original file — copy this in
 // as a straight replacement, nothing breaks.
 //
-// Reuses the shared design system (kHeroGradient, ShinyCard,
+// Reuses the shared design system (AppTheme.heroGradient(context), ShinyCard,
 // GradientButton, GradientHeader, GlassPill, accent colors) defined in
 // the redesigned app_enhancements.dart — make sure that file (and
 // academic_arena.dart) are updated first.
@@ -18,16 +18,15 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart' show Question, QuestionRepository, SubjectInfo, kSubjects, ExamInstructionsScreen;
+import 'app_theme.dart' show AppTheme;
 import 'app_enhancements.dart'
     show
         AppProvider,
         rankTitleForLevel,
         QuizScreen,
-        kHeroGradient,
         kGoldAccent,
         kTealAccent,
         kCoralAccent,
-        kVioletAccent,
         ShinyCard,
         GradientButton,
         GradientHeader,
@@ -312,9 +311,9 @@ class _ScorePredictorScreenState extends State<ScorePredictorScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      gradient: kHeroGradient,
+                      gradient: AppTheme.heroGradient(context),
                       borderRadius: BorderRadius.circular(24),
-                      boxShadow: [BoxShadow(color: kVioletAccent.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 10))],
+                      boxShadow: [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 10))],
                     ),
                     child: Column(children: [
                       const Text('Predicted UTME Total', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
@@ -331,7 +330,7 @@ class _ScorePredictorScreenState extends State<ScorePredictorScreen> {
                           padding: const EdgeInsets.all(14),
                           child: Row(children: [
                             Expanded(child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600))),
-                            Text(e.value.round().toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent, fontSize: 16)),
+                            Text(e.value.round().toString(), style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary, fontSize: 16)),
                           ]),
                         ),
                       )),
@@ -374,11 +373,11 @@ class _SelectChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            gradient: selected ? kHeroGradient : null,
+            gradient: selected ? AppTheme.heroGradient(context) : null,
             color: selected ? null : (disabled ? scheme.surfaceContainerHighest.withOpacity(0.5) : scheme.surfaceContainerHighest),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: selected ? Colors.transparent : scheme.outlineVariant),
-            boxShadow: selected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
+            boxShadow: selected ? [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
           ),
           child: Text(label, style: TextStyle(color: selected ? Colors.white : (disabled ? scheme.onSurfaceVariant.withOpacity(0.5) : scheme.onSurface), fontWeight: FontWeight.w600, fontSize: 13)),
         ),
@@ -491,10 +490,10 @@ class CareerModeScreen extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            gradient: isSelected ? kHeroGradient : null,
+                            gradient: isSelected ? AppTheme.heroGradient(context) : null,
                             color: isSelected ? null : Theme.of(context).colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(16),
-                            boxShadow: isSelected ? [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
+                            boxShadow: isSelected ? [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : null,
                           ),
                           child: Text(emoji, style: const TextStyle(fontSize: 28)),
                         ),
@@ -593,12 +592,12 @@ class _HallOfFameScreenState extends State<HallOfFameScreen> {
                           padding: const EdgeInsets.all(14),
                           tint: isTop3 ? medalColors[i] : null,
                           child: Row(children: [
-                            CircleAvatar(backgroundColor: isTop3 ? medalColors[i] : kVioletAccent.withOpacity(0.12), child: Text('${i + 1}', style: TextStyle(color: isTop3 ? Colors.white : kVioletAccent, fontWeight: FontWeight.bold))),
+                            CircleAvatar(backgroundColor: isTop3 ? medalColors[i] : Theme.of(context).colorScheme.primary.withOpacity(0.12), child: Text('${i + 1}', style: TextStyle(color: isTop3 ? Colors.white : Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold))),
                             const SizedBox(width: 12),
                             Text((r['avatar_emoji'] as String?) ?? '🙂', style: const TextStyle(fontSize: 20)),
                             const SizedBox(width: 8),
                             Expanded(child: Text(r['username'] as String? ?? 'Student', style: const TextStyle(fontWeight: FontWeight.w600))),
-                            Text('${((r['best_score'] as num?) ?? 0).toStringAsFixed(0)}%', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                            Text('${((r['best_score'] as num?) ?? 0).toStringAsFixed(0)}%', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                           ]),
                         ),
                       );
@@ -1033,7 +1032,7 @@ class _BattleConnectingOverlayState extends State<_BattleConnectingOverlay> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(gradient: kHeroGradient.scale(0.92)),
+      decoration: BoxDecoration(gradient: AppTheme.heroGradient(context).scale(0.92)),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1189,7 +1188,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                   ShinyCard(
                     padding: const EdgeInsets.all(14),
                     child: Row(children: [
-                      const Icon(Icons.history_rounded, color: kVioletAccent),
+                      Icon(Icons.history_rounded, color: Theme.of(context).colorScheme.primary),
                       const SizedBox(width: 10),
                       const Text('Last 5', style: TextStyle(fontWeight: FontWeight.bold)),
                       const Spacer(),
@@ -1258,7 +1257,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                   Align(alignment: Alignment.centerLeft, child: Text('Create a Battle', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
                   const SizedBox(height: 10),
                   ShinyCard(
-                    tint: kVioletAccent,
+                    tint: Theme.of(context).colorScheme.primary,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1543,11 +1542,11 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             ShinyCard(
-                              tint: kVioletAccent,
+                              tint: Theme.of(context).colorScheme.primary,
                               child: Column(children: [
                                 const Text('Share this code', style: TextStyle(fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 6),
-                                Text(battle.code, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6, color: kVioletAccent)),
+                                Text(battle.code, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 6, color: Theme.of(context).colorScheme.primary)),
                                 const SizedBox(height: 4),
                                 Text('Up to ${battle.maxPlayers} players', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 if (battle.entryFeeCent > 0) ...[
@@ -1562,7 +1561,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(children: [
-                                    const Icon(Icons.menu_book_rounded, size: 18, color: kVioletAccent),
+                                    Icon(Icons.menu_book_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
                                     const SizedBox(width: 8),
                                     Expanded(child: Text(battle.subjectsLabel, style: const TextStyle(fontWeight: FontWeight.bold))),
                                     Text('${battle.perSubjectCount}/subject', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -1605,7 +1604,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: ShinyCard(
                                   padding: const EdgeInsets.all(12),
-                                  tint: isMe ? kVioletAccent : null,
+                                  tint: isMe ? Theme.of(context).colorScheme.primary : null,
                                   child: Row(children: [
                                     Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 20)),
                                     const SizedBox(width: 10),
@@ -1614,7 +1613,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                                         Flexible(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
                                         if (isMe) ...[
                                           const SizedBox(width: 6),
-                                          Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)), child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white))),
+                                          Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(8)), child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white))),
                                         ],
                                         if (isHostPlayer) ...[
                                           const SizedBox(width: 6),
@@ -1641,7 +1640,7 @@ class _BattleReadyScreenState extends State<BattleReadyScreen> {
                               label: myReady ? 'Not Ready' : "I'm Ready",
                               icon: myReady ? Icons.close_rounded : Icons.check_circle_outline_rounded,
                               onPressed: battle.status == 'waiting' ? _toggleReady : null,
-                              gradient: myReady ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : kHeroGradient,
+                              gradient: myReady ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : AppTheme.heroGradient(context),
                             ),
                             if (canManualStart) ...[
                               const SizedBox(height: 10),
@@ -1921,7 +1920,7 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                decoration: BoxDecoration(gradient: isLowTime ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : kHeroGradient),
+                decoration: BoxDecoration(gradient: isLowTime ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : AppTheme.heroGradient(context)),
                 child: Column(
                   children: [
                     Row(children: [
@@ -1980,10 +1979,10 @@ class _BattlePlayScreenState extends State<BattlePlayScreen> {
                                   duration: const Duration(milliseconds: 150),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    gradient: isSelected ? kHeroGradient : null,
+                                    gradient: isSelected ? AppTheme.heroGradient(context) : null,
                                     color: isSelected ? null : scheme.surfaceContainerHighest,
                                     borderRadius: BorderRadius.circular(16),
-                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
                                   ),
                                   child: Row(children: [
                                     CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : scheme.surface, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : scheme.onSurfaceVariant))),
@@ -2073,9 +2072,9 @@ class BattleResultScreen extends StatelessWidget {
                     final medalColors = [const Color(0xFFFFD700), const Color(0xFFC0C0C0), const Color(0xFFCD7F32)];
                     return ShinyCard(
                       padding: const EdgeInsets.all(14),
-                      tint: isMe ? kVioletAccent : (isTop ? kGoldAccent : null),
+                      tint: isMe ? Theme.of(context).colorScheme.primary : (isTop ? kGoldAccent : null),
                       child: Row(children: [
-                        CircleAvatar(backgroundColor: i < 3 ? medalColors[i] : kVioletAccent.withOpacity(0.12), child: Text('${i + 1}', style: TextStyle(color: i < 3 ? Colors.white : kVioletAccent, fontWeight: FontWeight.bold))),
+                        CircleAvatar(backgroundColor: i < 3 ? medalColors[i] : Theme.of(context).colorScheme.primary.withOpacity(0.12), child: Text('${i + 1}', style: TextStyle(color: i < 3 ? Colors.white : Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold))),
                         const SizedBox(width: 12),
                         Text(p.avatarEmoji ?? '🙂', style: const TextStyle(fontSize: 18)),
                         const SizedBox(width: 8),
@@ -2084,11 +2083,11 @@ class BattleResultScreen extends StatelessWidget {
                             Flexible(child: Text(p.username, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
                             if (isMe) ...[
                               const SizedBox(width: 6),
-                              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(8)), child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white))),
+                              Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1), decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(8)), child: const Text('You', style: TextStyle(fontSize: 10, color: Colors.white))),
                             ],
                           ]),
                         ),
-                        Text('${p.score}/$total', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent)),
+                        Text('${p.score}/$total', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
                       ]),
                     );
                   },
@@ -2400,7 +2399,7 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                decoration: BoxDecoration(gradient: isLowTime ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : kHeroGradient),
+                decoration: BoxDecoration(gradient: isLowTime ? const LinearGradient(colors: [kCoralAccent, Color(0xFFE04848)]) : AppTheme.heroGradient(context)),
                 child: Column(
                   children: [
                     Row(children: [
@@ -2450,10 +2449,10 @@ class _BotBattlePlayScreenState extends State<BotBattlePlayScreen> {
                                   duration: const Duration(milliseconds: 150),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    gradient: isSelected ? kHeroGradient : null,
+                                    gradient: isSelected ? AppTheme.heroGradient(context) : null,
                                     color: isSelected ? null : scheme.surfaceContainerHighest,
                                     borderRadius: BorderRadius.circular(16),
-                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? kVioletAccent.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                                    boxShadow: isDark ? null : [BoxShadow(color: isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
                                   ),
                                   child: Row(children: [
                                     CircleAvatar(radius: 14, backgroundColor: isSelected ? Colors.white.withOpacity(0.25) : scheme.surface, child: Text(String.fromCharCode(65 + i), style: TextStyle(color: isSelected ? Colors.white : scheme.onSurfaceVariant))),
@@ -2525,13 +2524,13 @@ class BotBattleResultScreen extends StatelessWidget {
               ShinyCard(
                 child: Column(children: [
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Row(children: [const CircleAvatar(backgroundColor: kVioletAccent, child: Icon(Icons.person_rounded, color: Colors.white)), const SizedBox(width: 10), const Text('You', style: TextStyle(fontWeight: FontWeight.w600))]),
-                    Text('$humanScore/$total', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent, fontSize: 16)),
+                    Row(children: [CircleAvatar(backgroundColor: Theme.of(context).colorScheme.primary, child: Icon(Icons.person_rounded, color: Colors.white)), const SizedBox(width: 10), const Text('You', style: TextStyle(fontWeight: FontWeight.w600))]),
+                    Text('$humanScore/$total', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary, fontSize: 16)),
                   ]),
                   const Divider(height: 24),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     Row(children: [const CircleAvatar(backgroundColor: Colors.grey, child: Text('🤖')), const SizedBox(width: 10), Text(botName, style: const TextStyle(fontWeight: FontWeight.w600))]),
-                    Text('$botScore/$total', style: const TextStyle(fontWeight: FontWeight.bold, color: kVioletAccent, fontSize: 16)),
+                    Text('$botScore/$total', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary, fontSize: 16)),
                   ]),
                 ]),
               ),
@@ -2905,12 +2904,12 @@ Practice. Prepare. Pass. — NaijaLearn
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(gradient: kHeroGradient, borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: kVioletAccent.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))]),
+                      decoration: BoxDecoration(gradient: AppTheme.heroGradient(context), borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Theme.of(context).colorScheme.primary.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))]),
                       child: Text(text, style: const TextStyle(height: 1.6, fontSize: 14, color: Colors.white)),
                     ),
                     const SizedBox(height: 16),
                     ShinyCard(
-                      tint: kVioletAccent,
+                      tint: Theme.of(context).colorScheme.primary,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
