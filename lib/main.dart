@@ -85,6 +85,11 @@
 // card, and a solid white elevated primary button — matching the same
 // treatment as SignUpScreen (see signup_screen.dart) for a consistent,
 // vibrant look across both auth screens.
+//
+// DEEP LINKS (Challenge a Friend): naijalearn://challenge/<id> links are
+// caught by ChallengeDeepLinkListener (challenge_feature.dart) and pushed
+// onto the top-level `navigatorKey` below, which is also handed to
+// MaterialApp so pushes work from outside the widget tree.
 
 import 'dart:async';
 import 'dart:convert';
@@ -115,6 +120,7 @@ import 'guest_mode.dart';
 import 'signup_screen.dart';
 import 'app_update.dart';
 import 'referral_code_screen.dart';
+import 'challenge_feature.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -129,6 +135,10 @@ import 'questions_literature.dart';
 import 'questions_mathematics.dart';
 import 'questions_physics.dart';
 import 'questions_chemistry.dart';
+
+/// Top-level navigator key — lets code outside the widget tree (namely
+/// ChallengeDeepLinkListener) push routes onto the app's Navigator.
+final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -158,6 +168,7 @@ Future<void> main() async {
       child: const NaijaLearnApp(),
     ),
   );
+  ChallengeDeepLinkListener.init(navigatorKey);
 }
 
 /// =========================================================================
@@ -1177,6 +1188,7 @@ class NaijaLearnApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'NaijaLearn',
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       themeMode: provider.darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: AppTheme.light(seedColor),
@@ -1871,6 +1883,14 @@ class _CommunityTab extends StatelessWidget {
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'World Challenge', subtitle: 'Weekly competition, 500 Cent entry', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen()))),
           _MenuTile(icon: Icons.groups_2_rounded, label: 'Study Squads', subtitle: 'Study together, chat, battle other squads', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen()))),
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
+          _MenuTile(
+            icon: Icons.bolt_rounded,
+            label: 'Challenge a Friend',
+            subtitle: 'Share questions, compare scores',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CreateChallengeScreen()),
+            ),
+          ),
         ],
       ),
     );
