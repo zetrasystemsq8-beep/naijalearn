@@ -69,19 +69,19 @@ class ShinyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tintColor = tint;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: tint != null ? tint.withOpacity(isDark ? 0.16 : 0.08) : scheme.surfaceContainerHighest,
+        color: tintColor != null ? tintColor.withOpacity(isDark ? 0.16 : 0.08) : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(22),
         boxShadow: isDark ? null : [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 20, offset: const Offset(0, 8))],
-        border: tint != null ? Border.all(color: tint.withOpacity(isDark ? 0.35 : 0.22)) : null,
+        border: tintColor != null ? Border.all(color: tintColor.withOpacity(isDark ? 0.35 : 0.22)) : null,
       ),
       child: DefaultTextStyle.merge(style: TextStyle(color: scheme.onSurface), child: child),
     );
   }
 }
-
 /// Gradient pill button with a colored drop shadow. Defaults to the
 /// theme's own hero gradient (derived from colorScheme.primary) — pass a
 /// different `gradient` only for a deliberately different accent (e.g.
