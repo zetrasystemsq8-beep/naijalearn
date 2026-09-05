@@ -1,0 +1,153 @@
+STRICT INSTRUCTIONS — READ FULLY BEFORE MAKING ANY CHANGE.
+
+Task: wire up Zetra fingerprint (passkey) sign-in in this app, following
+the steps below EXACTLY. This is a small, mechanical task touching
+exactly 4 files. Do not deviate from this list.
+
+============================================================
+RULES YOU MUST FOLLOW — NO EXCEPTIONS
+============================================================
+1. Touch ONLY these 4 files:
+   - android/app/src/main/AndroidManifest.xml
+   - android/app/src/main/res/values/strings.xml
+   - pubspec.yaml
+   - lib/main.dart
+   Do NOT modify, refactor, rename, reformat, or "clean up" any other
+   file for any reason, even if it looks related or improvable.
+
+2. Every edit below is an ADDITION. Do not remove, rewrite, restructure,
+   or reorganize any existing code in these files. Add only what is
+   specified, in the exact location specified.
+
+3. NEVER output diff syntax (lines starting with -, +, @@, "*** Begin
+   Patch", "*** End Patch") into any file. If you are showing a change,
+   apply it directly as real, final code — never paste diff markers
+   into the file itself.
+
+4. NEVER write a comment like "// rest of file unchanged" or
+   "// ... existing code ..." as a SUBSTITUTE for actually keeping the
+   existing code. If you are editing main.dart, the full existing file
+   content must remain — you are adding to it, not summarizing it.
+
+5. Do NOT invent, guess, or fabricate the SHA256 certificate fingerprint
+   anywhere. Leave it as the literal placeholder text
+   YOUR_APP_FINGERPRINT_HERE wherever it's needed. A human will supply
+   the real value separately. This is non-negotiable — a wrong or
+   invented value here fails completely silently at runtime.
+
+6. Do NOT touch the file at
+   https://zetrasystemsq8-beep.github.io/.well-known/assetlinks.json
+   — that lives in a separate repository you do not have access to and
+   is out of scope entirely.
+
+7. After each file edit, re-read the file you just edited to confirm
+   the original content is all still present and nothing was
+   accidentally deleted or replaced, before moving to the next file.
+
+============================================================
+STEP 1 — pubspec.yaml
+============================================================
+Under the existing `dependencies:` section (same indentation level as
+`supabase_flutter:` and other existing dependencies — do NOT nest under
+`flutter:`), add these three lines. If any of these packages already
+exist in the file, update ONLY the version number to match, and do not
+duplicate the line:
+
+  passkeys: ^2.21.0
+  package_info_plus: ^9.0.1
+
+Also check the existing `supabase_flutter:` line. If its version is
+lower than 2.15.0, bump it to:
+
+  supabase_flutter: ^2.15.0
+
+If it's already 2.15.0 or higher, leave it untouched.
+
+============================================================
+STEP 2 — android/app/src/main/AndroidManifest.xml
+============================================================
+Find the existing `<application ...>` tag. Add this exact block as a
+new child element inside it (alongside other existing meta-data or
+activity tags — do not remove anything else inside <application>):
+
+    <meta-data
+        android:name="asset_statements"
+        android:resource="@string/asset_statements"/>
+
+============================================================
+STEP 3 — android/app/src/main/res/values/strings.xml
+============================================================
+If this file does not exist yet, create it with exactly this content:
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="asset_statements" translatable="false">
+        [{
+          \"include\": \"https://zetrasystemsq8-beep.github.io/.well-known/assetlinks.json\"
+        }]
+    </string>
+</resources>
+
+If the file already exists, add ONLY the <string name="asset_statements">
+element shown above inside the existing <resources> tag, keeping every
+other existing <string> entry untouched.
+
+============================================================
+STEP 4 — lib/main.dart
+============================================================
+Add these two imports at the top of the file, alongside the other
+existing imports (do not reorder or remove any existing import):
+
+import 'package:passkeys/authenticator.dart';
+
+(supabase_flutter is very likely already imported in this file — only
+add it if it is genuinely missing.)
+
+Add this new function anywhere in the file at the top level (not inside
+another class or function) — this is a pure addition, nothing existing
+should move or change to make room for it:
+
+Future<void> signInWithZetraFingerprint(BuildContext context) async {
+  final authenticator = PasskeyAuthenticator();
+  try {
+    final response = await Supabase.instance.client.auth.signInWithPasskey(authenticator);
+    if (response.session != null) {
+      // Signed in — same account as ZetraMail. Caller should navigate
+      // to HomeScreen the same way the existing password login does
+      // after AuthService.instance.login(...) succeeds.
+    }
+  } catch (e) {
+    // No passkey set up on this device yet, or it was cancelled.
+    // Fall back to the existing password login screen — do nothing
+    // here except let the calling button show an error/snackbar.
+    rethrow;
+  }
+}
+
+Then, in the existing LoginScreen widget, add ONE new button near the
+existing "Log In" button (do not remove or restructure the existing
+button or form) that calls signInWithZetraFingerprint(context) when
+tapped, wrapped in a try/catch that shows a SnackBar on failure using
+the same ScaffoldMessenger pattern already used elsewhere in this file.
+Label it "Sign in with Fingerprint".
+
+============================================================
+STEP 5 — package name (informational only, do not act on this)
+============================================================
+Find the applicationId value in android/app/build.gradle (or
+build.gradle.kts) and report it back in your summary at the end. Do not
+change it. Do not put it into assetlinks.json — that file is out of
+scope per rule 6 above.
+
+============================================================
+WHEN YOU ARE DONE
+============================================================
+Report back:
+1. The exact applicationId you found in step 5.
+2. Confirmation that YOUR_APP_FINGERPRINT_HERE was left as a literal
+   placeholder and was not replaced with any guessed value.
+3. A list of the 4 files you touched and nothing else.
+
+Do not attempt to build or run the app. Do not touch any file outside
+this list. If anything in these instructions is ambiguous, stop and
+ask rather than guessing.
