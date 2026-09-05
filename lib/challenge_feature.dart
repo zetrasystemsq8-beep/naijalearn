@@ -191,7 +191,7 @@ class ChallengeDeepLinkListener {
     final appLinks = AppLinks();
 
     try {
-      final initial = await appLinks.getInitialAppLink();
+      final initial = await appLinks.getInitialLink();
       if (initial != null) _handle(initial, navigatorKey);
     } catch (e) {
       debugPrint('[ChallengeDeepLink] getInitialAppLink failed: $e');
