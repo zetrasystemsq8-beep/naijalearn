@@ -1,0 +1,117 @@
+name: Build NaijaLearn APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Automatic Storage Quota Purge
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const response = await github.rest.actions.listArtifactsForRepo({
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            for (const artifact of response.data.artifacts) {
+              if (artifact.name === "NaijaLearn-APK") {
+                await github.rest.actions.deleteArtifact({
+                  owner,
+                  repo,
+                  artifact_id: artifact.id,
+                });
+              }
+            }
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.4'
+          channel: stable
+
+      - name: Inject google-services.json
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Create .env
+        run: |
+          cat > .env <<EOF
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          EOF
+
+      - name: Fix ALL package names in ALL dart files
+        run: |
+          find lib -name "*.dart" -exec sed -i 's/package:flutter_video_feed/package:naijalearn/g' {} +
+
+      - name: Fix app icon
+        run: |
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+
+          cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png || true
+          cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          cp android/app/src/main/res/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Print release SHA256 fingerprint (for passkey trust setup)
+        run: |
+          echo "=== COPY THE SHA256 LINE BELOW INTO assetlinks.json ==="
+          keytool -list -v \
+            -keystore android/app/release.keystore \
+            -alias "${{ secrets.KEY_ALIAS }}" \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            | grep "SHA256:"
+          echo "=== END ==="
+
+      - name: Build APK
+        env:
+          KEYSTORE_PATH: release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NaijaLearn-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
