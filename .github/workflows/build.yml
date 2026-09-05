@@ -100,6 +100,18 @@ jobs:
             | grep "SHA256:"
           echo "=== END ==="
 
+      - name: Print apk-key-hash (for Supabase Relying Party Origins)
+        run: |
+          echo "=== COPY THE HASH BELOW INTO SUPABASE ==="
+          keytool -exportcert \
+            -alias "${{ secrets.KEY_ALIAS }}" \
+            -keystore android/app/release.keystore \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+          | openssl sha256 -binary \
+          | openssl base64 \
+          | tr '+/' '-_' | tr -d '='
+          echo "=== END ==="
+
       - name: Build APK
         env:
           KEYSTORE_PATH: release.keystore
