@@ -44,6 +44,10 @@
         </activity>
         
         <meta-data
+            android:name="asset_statements"
+            android:resource="@string/asset_statements"/>
+
+        <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
