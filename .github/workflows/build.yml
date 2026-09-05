@@ -90,6 +90,16 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
+      - name: Print release SHA256 fingerprint (for passkey trust setup)
+        run: |
+          echo "=== COPY THE SHA256 LINE BELOW INTO assetlinks.json ==="
+          keytool -list -v \
+            -keystore android/app/release.keystore \
+            -alias "${{ secrets.KEY_ALIAS }}" \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            | grep "SHA256:"
+          echo "=== END ==="
+
       - name: Build APK
         env:
           KEYSTORE_PATH: release.keystore
