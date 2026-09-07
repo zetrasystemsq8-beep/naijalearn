@@ -3,103 +3,34 @@
 // NaijaLearn — CBT Practice App
 // Material 3.
 //
-// Question content lives in per-subject files (questions_*.dart).
-// Gamification (XP, streak, badges, leaderboard, daily challenge, mock
-// exams, analytics) lives in app_enhancements.dart and plugs in via
-// AppProvider, without replacing any of the CBT screens below.
-// Certification eligibility tracking lives in certification.dart.
-// AI Study Coach, Score Predictor, Career Mode, Hall of Fame, Live Quiz
-// Battles, Mistakes Vault, Bookmarks, Report Card, and small shared
-// widgets (StreakSaverBanner, PaceMeter, dailyGoalStatusText) live in
-// career_features.dart.
-// Textbooks (multi-subject lesson shelf) live in textbooks.dart.
-// Flashcards, Coin Shop, Spin Wheel, Multi-Exam Countdown, Topic
-// Mastery, and Focus Mode live in features5.dart.
-// Force-update / version gate lives in app_update.dart.
+// AUTHENTICATION — ZetraMail ONLY: NaijaLearn is strictly a client of
+// the existing Zetra ecosystem. There is NO NaijaLearn-only self-signup
+// (username + password with no ZetraMail) — that entire path (SignUpScreen,
+// AuthService.signUpWithUsername, AuthService.loginWithUsername) has been
+// removed for good. Every account is a real ZetraMail account.
 //
-// THEME: the app's seed color is Nigerian green by default, but switches
-// to an ocean-blue seed whenever CoinService.oceanThemeActive is true —
-// making the Coin Shop's Ocean Theme Pack purchase actually visible
-// across the whole app, not just a cosmetic flag sitting unused.
-//
-// Authentication: NaijaLearn is a client of the existing Zetra ecosystem
-// for ZetraMail accounts, AND supports NaijaLearn-only self-signup
-// accounts (username + password, no email, no OTP) — see signup_screen.dart
-// and AuthService.signUpWithUsername/loginWithUsername below. LoginScreen
-// routes based on whether the typed identifier contains '@': with '@' it's
-// treated as a ZetraMail login (full flow, mandatory OTP); without '@' it's
-// treated as a NaijaLearn username login (no OTP, straight to HomeScreen).
-//
-// Login is email+password (signInWithPassword), matching how the rest of
-// the Zetra ecosystem (NAI) authenticates. The user types their ZetraMail
-// address; it's resolved to the internal auth_email via the
+// Login is email+password (signInWithPassword). The user types their
+// ZetraMail address; it's resolved to the internal auth_email via the
 // resolve_login_email(...) Supabase RPC, and Supabase Auth's password
-// sign-in is called using ONLY that internal auth_email — the user never
-// sees or types it. If the RPC returns null/empty, or the password is
-// wrong, we show "Invalid ZetraMail or password."
+// sign-in is called using ONLY that internal auth_email.
 //
-// Verification code step: a code is ALWAYS required after ZetraMail
-// password login, on every single login attempt — not just for unverified
-// profiles. This is a deliberate second factor: knowing the ZetraMail +
-// password alone is not enough to get in, since the code only shows up in
-// the account owner's ZetraMail inbox (via the Zetra ID app). request_otp
-// is called exactly once, right after signInWithPassword succeeds.
-// Self-signup username accounts skip this step entirely (see above).
+// A verification code is ALWAYS required after login — password OR
+// fingerprint — every single time. Both AuthService.login() and
+// signInWithZetraFingerprint() reset the otp-verified flag to false and
+// request a fresh code, so neither path can ever skip straight to
+// HomeScreen — both always land on VerifyOtpScreen next.
 //
-// Session-vs-verified tracking: Supabase creates a valid session the
-// instant signInWithPassword succeeds — BEFORE the OTP step runs. So a
-// bare "is there a session?" check is not enough to know someone has
-// fully logged in; if the app process is killed while the user is
-// fetching their code from the ZetraMail app, a naive check would send
-// them straight into HomeScreen on relaunch, skipping the code entirely.
-// To prevent that, AuthService stores a `nl_otp_verified` flag in
-// Supabase Auth's own per-user metadata: reset to false at the start of
-// every login(), set to true only once verifyCode() succeeds (or
-// immediately for self-signup username accounts, which have no OTP step).
-// SplashScreen checks this flag (not just session presence) to decide
-// whether to route to HomeScreen or back to VerifyOtpScreen — and does
-// NOT re-request a code in that second case, since the one already sent
-// is still valid.
-//
-// This does NOT use Supabase's built-in signInWithOtp/verifyOTP (which
-// rejects the .internal auth email domain with "Email address is
-// invalid") — it uses the backend's own request_otp/verify_otp RPCs,
-// the same ones NAI uses.
-//
-// FORCE UPDATE: before deciding where to route (Login vs Home vs
-// VerifyOtp), SplashScreen asks AppUpdateService whether this build is
-// too old to keep running. If so, it's replaced entirely by
-// ForceUpdateScreen — a non-dismissible wall — instead of continuing on
-// to auth/session routing. See app_update.dart for the Supabase-backed
-// version check itself.
-//
-// REFERRAL ATTRIBUTION: immediately after the mandatory OTP step
-// succeeds (and before the user ever reaches NaiOnboardingGate/HomeScreen),
-// VerifyOtpScreen checks ReferralService.instance.getMyAttribution(). If
-// the account has no referral code on file yet, the user is routed
-// through ReferralCodeEntryScreen exactly once; if a code is already on
-// file, the flow is unchanged. See referral_code_screen.dart.
-//
-// LOGIN SCREEN VISUAL STYLE: bright gradient backdrop (primary → tertiary
-// → surface) with soft decorative glow circles, a glassy white input
-// card, and a solid white elevated primary button — matching the same
-// treatment as SignUpScreen (see signup_screen.dart) for a consistent,
-// vibrant look across both auth screens.
-//
-// PASSKEY / FINGERPRINT SIGN-IN: an additional "Sign in with Fingerprint"
-// option sits on LoginScreen alongside the existing ZetraMail/username
-// password flow. It calls Supabase's passkey sign-in via the `passkeys`
-// package (PasskeyAuthenticator) and, on success, routes the same way the
-// existing password login does — into HomeScreen. If no passkey is set
-// up on this device yet (or the user cancels), the error is surfaced via
-// a SnackBar and the user simply falls back to typing ZetraMail/password
-// as before. This does not replace or alter the existing OTP-gated
-// ZetraMail flow.
+// PASSKEY / FINGERPRINT SIGN-IN — BUG FIX: previously, a successful
+// fingerprint sign-in never navigated anywhere; the button called
+// signInWithZetraFingerprint() and nothing happened after. Fixed: the
+// button's own handler (_continueWithFingerprint) now navigates to
+// VerifyOtpScreen on success, exactly like password login. Visual design
+// preserved/advanced: same bright gradient, glass card, and now an
+// icon-labeled fingerprint button matching the same white-elevated style.
 //
 // DEEP LINKS (Challenge a Friend): naijalearn://challenge/<id> links are
 // caught by ChallengeDeepLinkListener (challenge_feature.dart) and pushed
-// onto the top-level `navigatorKey` below, which is also handed to
-// MaterialApp so pushes work from outside the widget tree.
+// onto the top-level `navigatorKey` below.
 
 import 'dart:async';
 import 'dart:convert';
@@ -128,7 +59,6 @@ import 'world_challenge.dart';
 import 'study_squads.dart';
 import 'nai_mentor.dart';
 import 'guest_mode.dart';
-import 'signup_screen.dart';
 import 'app_update.dart';
 import 'referral_code_screen.dart';
 import 'challenge_feature.dart';
@@ -147,8 +77,6 @@ import 'questions_mathematics.dart';
 import 'questions_physics.dart';
 import 'questions_chemistry.dart';
 
-/// Top-level navigator key — lets code outside the widget tree (namely
-/// ChallengeDeepLinkListener) push routes onto the app's Navigator.
 final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
@@ -160,9 +88,9 @@ Future<void> main() async {
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
-  
+
  await NotificationService.instance.init();
-  
+
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -183,30 +111,36 @@ Future<void> main() async {
 }
 
 /// =========================================================================
-/// AUTHENTICATION (Zetra ecosystem client — email+password + mandatory OTP)
+/// AUTHENTICATION
 /// =========================================================================
 
-/// Attempts a passkey/fingerprint sign-in against the same Supabase
-/// project used for ZetraMail auth. On success, a Supabase session exists
-/// just like after signInWithPassword — the caller is expected to
-/// navigate to HomeScreen the same way the existing password login does.
-/// On failure (no passkey registered on this device, or the user
-/// cancelled the system prompt), the exception is rethrown so the calling
-/// button can show a SnackBar and let the user fall back to typing their
-/// ZetraMail/password as usual.
-Future<void> signInWithZetraFingerprint(BuildContext context) async {
+Future<void> signInWithZetraFingerprint() async {
   final authenticator = PasskeyAuthenticator();
+  final client = Supabase.instance.client;
+
+  AuthResponse response;
   try {
-    final response = await Supabase.instance.client.auth.signInWithPasskey(authenticator);
-    if (response.session != null) {
-      // Signed in — same account as ZetraMail. Caller navigates to
-      // HomeScreen the same way the existing password login does.
-    }
+    response = await client.auth.signInWithPasskey(authenticator);
   } catch (e) {
-    // No passkey set up on this device yet, or it was cancelled.
-    // Fall back to the existing password login screen — do nothing
-    // here except let the calling button show an error/snackbar.
-    rethrow;
+    debugPrint('[ZetraAuth] Fingerprint sign-in failed or cancelled: $e');
+    throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
+  }
+
+  if (response.session == null) {
+    throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
+  }
+
+  try {
+    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': false}));
+  } catch (e) {
+    debugPrint('[ZetraAuth] Could not reset otp-verified flag after fingerprint sign-in (non-fatal): $e');
+  }
+
+  try {
+    await client.rpc('request_otp');
+  } on PostgrestException catch (e) {
+    debugPrint('[ZetraAuth] request_otp after fingerprint sign-in FAILED: code=${e.code}, message=${e.message}');
+    throw ZetraAuthException('Could not send your verification code. Please try again.');
   }
 }
 
@@ -266,27 +200,16 @@ class AuthService {
 
   bool get isSignedIn => _client.auth.currentSession != null;
 
-  /// True only once the CURRENT session has completed the mandatory
-  /// verification-code step. Backed by Supabase Auth's own per-user
-  /// metadata so it survives the app process being killed and relaunched.
   bool get isOtpVerifiedForCurrentSession =>
       _client.auth.currentUser?.userMetadata?[_otpVerifiedMetaKey] == true;
 
-  /// Resolves the typed ZetraMail to the internal auth_email via RPC, then
-  /// signs in with email+password against Supabase Auth. Immediately
-  /// invalidates any stale "verified" flag from a previous login, then
-  /// requests a fresh code exactly once. The caller (LoginScreen) is
-  /// expected to always route to VerifyOtpScreen next.
   Future<ZetraProfile> login({
     required String zetramail,
     required String password,
   }) async {
     final normalized = zetramail.trim().toLowerCase();
 
-    debugPrint('[ZetraAuth] Entered ZetraMail: "$normalized"');
-
     if (normalized.isEmpty) {
-      debugPrint('[ZetraAuth] Empty ZetraMail after trim — aborting before any RPC/Auth call.');
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
@@ -297,21 +220,13 @@ class AuthService {
         params: {'p_identifier': normalized},
       );
       resolvedEmail = result is String ? result : null;
-      debugPrint('[ZetraAuth] resolve_login_email RPC result: $result (type: ${result.runtimeType})');
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] resolve_login_email RPC FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
+    } on PostgrestException {
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     if (resolvedEmail == null || resolvedEmail.isEmpty) {
-      debugPrint('[ZetraAuth] resolve_login_email returned null/empty for '
-          'identifier="$normalized" — no matching Zetra account.');
       throw ZetraAuthException(invalidCredentialsMessage);
     }
-
-    debugPrint('[ZetraAuth] auth_email resolved via RPC: "$resolvedEmail"');
-    debugPrint('[ZetraAuth] About to call signInWithPassword() for resolved auth_email.');
 
     AuthResponse response;
     try {
@@ -319,21 +234,15 @@ class AuthService {
         email: resolvedEmail,
         password: password,
       );
-      debugPrint('[ZetraAuth] signInWithPassword() SUCCEEDED.');
-    } on AuthException catch (e) {
-      debugPrint('[ZetraAuth] signInWithPassword() FAILED (AuthException): '
-          'message="${e.message}", statusCode=${e.statusCode}');
+    } on AuthException {
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     final user = response.user;
     if (user == null) {
-      debugPrint('[ZetraAuth] signInWithPassword() returned null user with no thrown exception.');
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
-    // Every login must redo the OTP step — clear any leftover "verified"
-    // flag from a previous session before requesting the new code.
     try {
       await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
     } catch (e) {
@@ -342,85 +251,13 @@ class AuthService {
 
     final profile = await loadCurrentProfile();
 
-    debugPrint('[ZetraAuth] Requesting mandatory login OTP via request_otp RPC.');
     try {
       await _client.rpc('request_otp');
-      debugPrint('[ZetraAuth] request_otp SUCCEEDED.');
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] request_otp FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}');
+    } on PostgrestException {
       throw ZetraAuthException('Could not send your verification code. Please try again.');
     }
 
     return profile;
-  }
-
-  /// Self-serve NaijaLearn-only signup. Creates a real Supabase Auth user
-  /// under a generated internal alias email (username@nlstudent.internal),
-  /// then a matching profiles row via the complete_naijalearn_signup RPC.
-  /// No OTP step — the caller is logged in immediately after this returns.
-  Future<ZetraProfile> signUpWithUsername({
-    required String username,
-    required String password,
-  }) async {
-    final aliasEmail = '$username@nlstudent.internal';
-
-    AuthResponse response;
-    try {
-      response = await _client.auth.signUp(
-        email: aliasEmail,
-        password: password,
-        data: {'username': username},
-      );
-    } on AuthException catch (e) {
-      throw ZetraAuthException(e.message);
-    }
-
-    if (response.user == null || response.session == null) {
-      throw ZetraAuthException('Could not create account. Please try again.');
-    }
-
-    try {
-      await _client.rpc('complete_naijalearn_signup', params: {
-        'p_username': username,
-        'p_alias_email': aliasEmail,
-      });
-    } on PostgrestException catch (e) {
-      throw ZetraAuthException(e.message);
-    }
-
-    // No OTP for self-signup accounts — mark verified immediately.
-    try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
-    } catch (e) {
-      debugPrint('[ZetraAuth] Could not set otp-verified flag after signup (non-fatal): $e');
-    }
-
-    return loadCurrentProfile();
-  }
-
-  /// Login for NaijaLearn-only username accounts (identifier typed with no
-  /// @ symbol). Skips resolve_login_email and the OTP step entirely.
-  Future<ZetraProfile> loginWithUsername({
-    required String username,
-    required String password,
-  }) async {
-    final aliasEmail = '$username@nlstudent.internal';
-
-    try {
-      final response = await _client.auth.signInWithPassword(email: aliasEmail, password: password);
-      if (response.user == null) throw ZetraAuthException(invalidCredentialsMessage);
-    } on AuthException {
-      throw ZetraAuthException(invalidCredentialsMessage);
-    }
-
-    try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
-    } catch (e) {
-      debugPrint('[ZetraAuth] Could not set otp-verified flag on username login (non-fatal): $e');
-    }
-
-    return loadCurrentProfile();
   }
 
   Future<ZetraProfile> loadCurrentProfile() async {
@@ -432,53 +269,36 @@ class AuthService {
     Map<String, dynamic>? row;
     try {
       row = await _client.from('profiles').select().eq('id', user.id).maybeSingle();
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] loadCurrentProfile() lookup FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}');
+    } on PostgrestException {
       throw ZetraAuthException(profileLoadErrorMessage);
     }
 
     if (row == null) {
-      debugPrint('[ZetraAuth] loadCurrentProfile(): no profile row for user.id="${user.id}".');
       throw ZetraAuthException(profileLoadErrorMessage);
     }
 
     return ZetraProfile.fromMap(row);
   }
 
-  /// Verifies the code the user copied from their ZetraMail inbox against
-  /// the backend's own verify_otp RPC (NOT Supabase's verifyOTP — that
-  /// requires the .internal auth email, which Supabase Auth itself rejects
-  /// as an invalid email format). On success, marks this session verified
-  /// via Supabase Auth user metadata so a killed-and-relaunched app knows
-  /// this step is already done.
   Future<ZetraProfile> verifyCode({required String code}) async {
     final session = _client.auth.currentSession;
     if (session == null) {
-      debugPrint('[ZetraAuth] verifyCode() aborted — no active session.');
       throw ZetraAuthException("You're not signed in. Please log in again.");
     }
-
-    debugPrint('[ZetraAuth] verify_otp() called with code="${code.trim()}"');
 
     dynamic result;
     try {
       result = await _client.rpc('verify_otp', params: {'p_code': code.trim()});
-      debugPrint('[ZetraAuth] verify_otp RPC result: $result');
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] verify_otp FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}');
+    } on PostgrestException {
       throw ZetraAuthException(invalidOtpMessage);
     }
 
     if (result != true) {
-      debugPrint('[ZetraAuth] verify_otp returned falsy result — treating as invalid code.');
       throw ZetraAuthException(invalidOtpMessage);
     }
 
     try {
       await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
-      debugPrint('[ZetraAuth] otp-verified flag persisted for this session.');
     } catch (e) {
       debugPrint('[ZetraAuth] Could not persist otp-verified flag (non-fatal): $e');
     }
@@ -491,13 +311,9 @@ class AuthService {
     if (session == null) {
       throw ZetraAuthException("You're not signed in. Please log in again.");
     }
-    debugPrint('[ZetraAuth] resendCode() called via request_otp RPC.');
     try {
       await _client.rpc('request_otp');
-      debugPrint('[ZetraAuth] resendCode() SUCCEEDED.');
-    } on PostgrestException catch (e) {
-      debugPrint('[ZetraAuth] resendCode() FAILED (PostgrestException): '
-          'code=${e.code}, message=${e.message}');
+    } on PostgrestException {
       throw ZetraAuthException('Could not resend code. Please try again.');
     }
   }
@@ -505,9 +321,7 @@ class AuthService {
   Future<void> signOut() async {
     try {
       await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
-    } catch (_) {
-      // non-fatal — signing out below still clears the session either way
-    }
+    } catch (_) {}
     await _client.auth.signOut();
   }
 }
@@ -536,14 +350,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _validateZetraMail(String? value) {
     final identifier = value?.trim() ?? '';
-    if (identifier.isEmpty) return 'Please enter your ZetraMail or username';
-    // If it contains '@', validate as an email. Otherwise it's treated
-    // as a NaijaLearn username login — no format restriction beyond
-    // "not empty" here (signup already enforces the real format).
-    if (identifier.contains('@')) {
-      final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
-      if (!emailRegex.hasMatch(identifier)) return 'Please enter a valid email';
-    }
+    if (identifier.isEmpty) return 'Please enter your ZetraMail';
+    final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
+    if (!emailRegex.hasMatch(identifier)) return 'Please enter a valid ZetraMail address';
     return null;
   }
 
@@ -556,7 +365,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _continue() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() {
       _loading = true;
       _errorMessage = null;
@@ -566,33 +374,38 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     try {
-      if (zetramail.contains('@')) {
-        // Full ZetraMail login — always requests a fresh OTP, so every
-        // successful login lands on VerifyOtpScreen, never straight into
-        // HomeScreen. Password alone is never enough.
-        await AuthService.instance.login(zetramail: zetramail, password: password);
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
-          (route) => false,
-        );
-      } else {
-        // No @ symbol typed — treat as a NaijaLearn-only username login.
-        // No OTP step; straight into HomeScreen on success.
-        final profile = await AuthService.instance.loginWithUsername(
-          username: zetramail,
-          password: password,
-        );
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => HomeScreen(profile: profile)),
-          (route) => false,
-        );
-      }
+      await AuthService.instance.login(zetramail: zetramail, password: password);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+        (route) => false,
+      );
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
       setState(() => _errorMessage = 'Could not sign in. Please check your connection and try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _continueWithFingerprint() async {
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await signInWithZetraFingerprint();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
+        (route) => false,
+      );
+    } on ZetraAuthException catch (e) {
+      setState(() => _errorMessage = e.message);
+    } catch (e) {
+      setState(() => _errorMessage = 'Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -605,8 +418,6 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Vibrant multi-color gradient backdrop — "shiny lovable" look,
-          // matching SignUpScreen for a consistent bright auth experience.
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -621,17 +432,13 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          // Soft decorative glow blobs for depth.
           Positioned(
             top: -60,
             right: -40,
             child: Container(
               width: 200,
               height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.12),
-              ),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.12)),
             ),
           ),
           Positioned(
@@ -640,10 +447,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Container(
               width: 140,
               height: 140,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: scheme.tertiary.withOpacity(0.18),
-              ),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: scheme.tertiary.withOpacity(0.18)),
             ),
           ),
           SafeArea(
@@ -651,8 +455,6 @@ class _LoginScreenState extends State<LoginScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Scrollable content up top — grows/shrinks with keyboard,
-                  // but the primary action stays docked at the bottom below.
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(24, 32, 24, 12),
@@ -672,11 +474,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 borderRadius: BorderRadius.circular(30),
                                 boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.25),
-                                    blurRadius: 24,
-                                    offset: const Offset(0, 12),
-                                  ),
+                                  BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 24, offset: const Offset(0, 12)),
                                 ],
                               ),
                               child: Icon(Icons.school_rounded, size: 52, color: scheme.primary),
@@ -686,18 +484,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           Text(
                             'Welcome to NaijaLearn',
                             textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Sign in with your ZetraMail — or your NaijaLearn username',
+                            'Sign in with your ZetraMail',
                             textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Colors.white.withOpacity(0.9),
-                                ),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white.withOpacity(0.9)),
                           ),
                           const SizedBox(height: 32),
                           Container(
@@ -706,11 +499,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               color: Colors.white.withOpacity(0.96),
                               borderRadius: BorderRadius.circular(28),
                               boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.12),
-                                  blurRadius: 30,
-                                  offset: const Offset(0, 14),
-                                ),
+                                BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 30, offset: const Offset(0, 14)),
                               ],
                             ),
                             child: Column(
@@ -723,15 +512,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                   textInputAction: TextInputAction.next,
                                   validator: _validateZetraMail,
                                   decoration: InputDecoration(
-                                    labelText: 'ZetraMail or username',
-                                    hintText: 'you@zetramail.ng or username',
+                                    labelText: 'ZetraMail',
+                                    hintText: 'you@zetramail.ng',
                                     filled: true,
                                     fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
                                     prefixIcon: Icon(Icons.email_outlined, color: scheme.primary),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      borderSide: BorderSide.none,
-                                    ),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -748,16 +534,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                     fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
                                     prefixIcon: Icon(Icons.lock_outline_rounded, color: scheme.primary),
                                     suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                                        color: scheme.onSurfaceVariant,
-                                      ),
+                                      icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: scheme.onSurfaceVariant),
                                       onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                                     ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      borderSide: BorderSide.none,
-                                    ),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
                                   ),
                                 ),
                               ],
@@ -767,17 +547,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 14),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.95),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                              decoration: BoxDecoration(color: Colors.white.withOpacity(0.95), borderRadius: BorderRadius.circular(12)),
                               child: Row(
                                 children: [
                                   Icon(Icons.error_outline_rounded, size: 18, color: scheme.error),
                                   const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13)),
-                                  ),
+                                  Expanded(child: Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13))),
                                 ],
                               ),
                             ),
@@ -786,7 +561,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
-                  // Primary action pinned to the bottom of the screen.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                     child: Column(
@@ -804,18 +578,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             onPressed: _loading ? null : _continue,
                             child: _loading
-                                ? SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(strokeWidth: 2.4, color: scheme.primary),
-                                  )
+                                ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: scheme.primary))
                                 : const Text('Log In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
                         ),
                         const SizedBox(height: 8),
                         SizedBox(
                           height: 56,
-                          child: FilledButton(
+                          child: FilledButton.icon(
                             style: FilledButton.styleFrom(
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                               backgroundColor: Colors.white,
@@ -823,43 +593,17 @@ class _LoginScreenState extends State<LoginScreen> {
                               elevation: 4,
                               shadowColor: Colors.black.withOpacity(0.18),
                             ),
-                            onPressed: _loading
-                                ? null
-                                : () async {
-                                    try {
-                                      await signInWithZetraFingerprint(context);
-                                    } catch (e) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(e.toString())),
-                                      );
-                                    }
-                                  },
-                            child: const Text('Sign in with Fingerprint', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                            onPressed: _loading ? null : _continueWithFingerprint,
+                            icon: _loading
+                                ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: scheme.primary))
+                                : Icon(Icons.fingerprint_rounded, color: scheme.primary),
+                            label: const Text('Sign in with Fingerprint', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
                         ),
                         const SizedBox(height: 10),
                         TextButton(
-                          onPressed: _loading
-                              ? null
-                              : () => Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const SignUpScreen()),
-                                  ),
-                          child: Text(
-                            "Don't have an account? Sign up",
-                            style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _loading
-                              ? null
-                              : () => Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const GuestHomeScreen()),
-                                  ),
-                          child: Text(
-                            'Continue as Guest',
-                            style: TextStyle(color: scheme.onSurfaceVariant),
-                          ),
+                          onPressed: _loading ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GuestHomeScreen())),
+                          child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
                         ),
                       ],
                     ),
@@ -936,7 +680,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
 
   Future<void> _verifyCode() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() {
       _loading = true;
       _errorMessage = null;
@@ -946,16 +689,10 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
       if (!mounted) return;
 
-      // Check referral attribution once, right after OTP success, before
-      // ever landing in the app. Existing users with a code already on
-      // file skip this entirely and go straight to NaiOnboardingGate.
       final attribution = await ReferralService.instance.getMyAttribution();
       if (!mounted) return;
 
       if (attribution == null) {
-        // First login, no code on file yet — collect it once. Using
-        // push() (not pushAndRemoveUntil) here keeps this screen mounted
-        // so `context` below stays valid when onDone eventually fires.
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ReferralCodeEntryScreen(
@@ -967,7 +704,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
           ),
         );
       } else {
-        // Already has a code on file — unchanged flow.
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
           (route) => false,
@@ -984,7 +720,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
 
   Future<void> _resendCode() async {
     if (_resendSecondsLeft > 0) return;
-
     setState(() {
       _resending = true;
       _errorMessage = null;
@@ -1061,7 +796,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                   ),
                 ),
               ),
-              // Verify button + secondary links pinned to the bottom.
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
                 child: Column(
@@ -1072,11 +806,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                       child: FilledButton(
                         onPressed: _loading ? null : _verifyCode,
                         child: _loading
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                              )
+                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
                             : const Text('Verify', style: TextStyle(fontSize: 16)),
                       ),
                     ),
@@ -1084,16 +814,8 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                     TextButton(
                       onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
                       child: _resending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(
-                              _resendSecondsLeft > 0
-                                  ? 'Resend code in ${_resendSecondsLeft}s'
-                                  : "Didn't get a code? Resend",
-                            ),
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text(_resendSecondsLeft > 0 ? 'Resend code in ${_resendSecondsLeft}s' : "Didn't get a code? Resend"),
                     ),
                     TextButton(
                       onPressed: _useDifferentAccount,
@@ -1180,10 +902,6 @@ const List<SubjectInfo> kSubjects = [
   SubjectInfo('Arabic', Icons.translate_rounded, Colors.lime),
 ];
 
-/// =========================================================================
-/// QUESTION REPOSITORY (swap-friendly data source)
-/// =========================================================================
-
 class QuestionRepository {
   QuestionRepository._();
 
@@ -1227,13 +945,8 @@ class QuestionRepository {
 
   static List<Question> getAll() => List.unmodifiable(_questions);
 
-  static List<Question> getForSubject(String subject) =>
-      _questions.where((q) => q.subject == subject).toList();
+  static List<Question> getForSubject(String subject) => _questions.where((q) => q.subject == subject).toList();
 }
-
-/// =========================================================================
-/// APP ROOT — theming
-/// =========================================================================
 
 class NaijaLearnApp extends StatelessWidget {
   const NaijaLearnApp({super.key});
@@ -1259,10 +972,6 @@ class NaijaLearnApp extends StatelessWidget {
   }
 }
 
-/// =========================================================================
-/// SPLASH SCREEN
-/// =========================================================================
-
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -1282,25 +991,18 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     super.initState();
     _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
     _fade = CurvedAnimation(parent: _controller, curve: const Interval(0.0, 0.7, curve: Curves.easeIn));
-    _scale = Tween<double>(begin: 0.7, end: 1.0)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    _scale = Tween<double>(begin: 0.7, end: 1.0).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
     Timer(_splashDuration, () async {
       if (!mounted) return;
 
-      // FORCE UPDATE CHECK — runs before any session/auth routing. If this
-      // build is older than the Supabase-configured minimum, the user is
-      // shown a non-dismissible update wall and nothing else executes.
-      // Fails open (see AppUpdateService) so a network hiccup never locks
-      // everyone out.
       final updateResult = await AppUpdateService.instance.checkForUpdate();
       if (!mounted) return;
       if (updateResult.mustUpdate) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             transitionDuration: const Duration(milliseconds: 500),
-            pageBuilder: (_, animation, __) =>
-                FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult)),
+            pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult)),
           ),
         );
         return;
@@ -1318,12 +1020,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             destination = const LoginScreen();
           }
         } else {
-          // A Supabase session already exists (the password step already
-          // succeeded) but the mandatory OTP step was never completed —
-          // most likely the OS killed the app while the user was in the
-          // ZetraMail app copying their code. Send them straight back to
-          // the code screen WITHOUT requesting a new code; the one
-          // already sitting in their inbox is still valid.
           destination = const VerifyOtpScreen();
         }
       } else {
@@ -1354,11 +1050,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [scheme.primary, scheme.primaryContainer],
-          ),
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.primary, scheme.primaryContainer]),
         ),
         child: Center(
           child: FadeTransition(
@@ -1379,8 +1071,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     child: Icon(Icons.school_rounded, size: 60, color: scheme.primary),
                   ),
                   const SizedBox(height: 24),
-                  const Text('NaijaLearn',
-                      style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
+                  const Text('NaijaLearn', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
                   const SizedBox(height: 8),
                   Text('Practice. Prepare. Pass.', style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.9))),
                 ],
@@ -1392,10 +1083,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     );
   }
 }
-
-/// =========================================================================
-/// HOME SCREEN (root shell — bottom navigation, 5 tabs)
-/// =========================================================================
 
 class HomeScreen extends StatefulWidget {
   final ZetraProfile? profile;
@@ -1438,11 +1125,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final questions = (count == -1 || count >= shuffled.length) ? shuffled : shuffled.take(count).toList();
     if (!context.mounted) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions),
-      ),
-    );
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)));
   }
 
   Future<void> _pickCertificationSubject(BuildContext context) async {
@@ -1459,9 +1142,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (subject != null && context.mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => CertificationHomeScreen(subject: subject)),
-      );
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CertificationHomeScreen(subject: subject)));
     }
   }
 
@@ -1491,10 +1172,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-
-/// =========================================================================
-/// HOME TAB
-/// =========================================================================
 
 class _HomeTab extends StatelessWidget {
   final ZetraProfile? profile;
@@ -1723,10 +1400,7 @@ class _HomeTab extends StatelessWidget {
                               Icon(subject.icon, color: subject.color, size: 26),
                               const SizedBox(height: 6),
                               Text(subject.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                                  textAlign: TextAlign.center),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
                             ],
                           ),
                         ),
@@ -1800,10 +1474,6 @@ class _HomeQuickCard extends StatelessWidget {
   }
 }
 
-/// =========================================================================
-/// LESSONS SCREEN
-/// =========================================================================
-
 class LessonsScreen extends StatelessWidget {
   final String subject;
   final List<Map<String, dynamic>> lessons;
@@ -1827,12 +1497,7 @@ class LessonsScreen extends StatelessWidget {
               title: Text(lesson['chapterTitle'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => LessonDetailScreen(
-                    title: lesson['chapterTitle'] as String,
-                    body: lesson['body'] as String,
-                  ),
-                ),
+                MaterialPageRoute(builder: (_) => LessonDetailScreen(title: lesson['chapterTitle'] as String, body: lesson['body'] as String)),
               ),
             ),
           );
@@ -1858,10 +1523,6 @@ class LessonDetailScreen extends StatelessWidget {
     );
   }
 }
-
-/// =========================================================================
-/// STUDY TAB
-/// =========================================================================
 
 class _StudyTab extends StatelessWidget {
   final void Function(SubjectInfo) onPracticeSubject;
@@ -1901,19 +1562,11 @@ class _StudyTab extends StatelessWidget {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
             sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 14,
-                crossAxisSpacing: 14,
-                childAspectRatio: 1.15,
-              ),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.15),
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final subject = kSubjects[index];
-                  return SubjectCard(
-                    subject: subject,
-                    onTap: () => onPracticeSubject(subject),
-                  );
+                  return SubjectCard(subject: subject, onTap: () => onPracticeSubject(subject));
                 },
                 childCount: kSubjects.length,
               ),
@@ -1924,10 +1577,6 @@ class _StudyTab extends StatelessWidget {
     );
   }
 }
-
-/// =========================================================================
-/// COMMUNITY TAB
-/// =========================================================================
 
 class _CommunityTab extends StatelessWidget {
   const _CommunityTab();
@@ -1948,19 +1597,13 @@ class _CommunityTab extends StatelessWidget {
             icon: Icons.bolt_rounded,
             label: 'Challenge a Friend',
             subtitle: 'Share questions, compare scores',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CreateChallengeScreen()),
-            ),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChallengesHubScreen())),
           ),
         ],
       ),
     );
   }
 }
-
-/// =========================================================================
-/// PROGRESS TAB (includes Achievements sub-section)
-/// =========================================================================
 
 class _ProgressTab extends StatelessWidget {
   final VoidCallback onPickCertificationSubject;
@@ -1980,17 +1623,11 @@ class _ProgressTab extends StatelessWidget {
           _MenuTile(icon: Icons.track_changes_rounded, label: 'Topic Mastery', subtitle: 'Your mastery level by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TopicMasteryScreen()))),
           _MenuTile(icon: Icons.hourglass_bottom_rounded, label: 'Exam Countdown', subtitle: 'Days left to your WAEC/JAMB/NECO', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExamCountdownScreen()))),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('Rewards', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Rewards', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
           _MenuTile(icon: Icons.casino_rounded, label: 'Daily Spin', subtitle: 'Spin once a day for coins and XP', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SpinWheelScreen()))),
           _MenuTile(icon: Icons.storefront_rounded, label: 'Coin Shop', subtitle: 'Spend coins on frames and titles', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CoinShopScreen()))),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('Achievements', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Achievements', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
           _MenuTile(icon: Icons.workspace_premium_rounded, label: 'Certification', subtitle: 'Earn a verified certificate', onTap: onPickCertificationSubject),
           _MenuTile(icon: Icons.military_tech_rounded, label: 'Career Mode', subtitle: 'Ranks, tiers & avatars', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
         ],
@@ -1998,10 +1635,6 @@ class _ProgressTab extends StatelessWidget {
     );
   }
 }
-
-/// =========================================================================
-/// PROFILE TAB
-/// =========================================================================
 
 class _ProfileTab extends StatelessWidget {
   const _ProfileTab();
@@ -2027,11 +1660,7 @@ class _ProfileTab extends StatelessWidget {
                 padding: const EdgeInsets.all(18),
                 child: Row(
                   children: [
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundColor: scheme.primaryContainer,
-                      child: Text(provider.avatarEmoji, style: const TextStyle(fontSize: 26)),
-                    ),
+                    CircleAvatar(radius: 28, backgroundColor: scheme.primaryContainer, child: Text(provider.avatarEmoji, style: const TextStyle(fontSize: 26))),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -2051,14 +1680,7 @@ class _ProfileTab extends StatelessWidget {
           const SizedBox(height: 20),
           _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
           _MenuTile(icon: Icons.sticky_note_2_rounded, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
-          _MenuTile(
-            icon: Icons.account_balance_wallet_rounded,
-            label: 'My Wallet',
-            subtitle: 'View your NaijaLearn balance',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const WalletDisplayScreen()),
-            ),
-          ),
+          _MenuTile(icon: Icons.account_balance_wallet_rounded, label: 'My Wallet', subtitle: 'View your NaijaLearn balance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()))),
           _MenuTile(
             icon: Icons.cloud_upload_rounded,
             label: 'Migrate Questions (run once)',
@@ -2081,24 +1703,17 @@ class _ProfileTab extends StatelessWidget {
                 }
 
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Migration complete!')),
-                  );
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Migration failed: $e')),
-                  );
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
                 }
               }
             },
           ),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
           Container(
             decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
             child: SwitchListTile(
@@ -2109,16 +1724,8 @@ class _ProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('Support', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ),
-          _MenuTile(
-            icon: Icons.support_agent_rounded,
-            label: 'Contact Support',
-            subtitle: 'Reach the team — WhatsApp, phone, or email',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen())),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Support', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          _MenuTile(icon: Icons.support_agent_rounded, label: 'Contact Support', subtitle: 'Reach the team — WhatsApp, phone, or email', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen()))),
           const SizedBox(height: 10),
           Material(
             color: scheme.errorContainer.withOpacity(0.5),
@@ -2139,10 +1746,7 @@ class _ProfileTab extends StatelessWidget {
                 if (confirmed == true) {
                   await AuthService.instance.signOut();
                   if (context.mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (_) => const LoginScreen()),
-                      (route) => false,
-                    );
+                    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
                   }
                 }
               },
@@ -2163,12 +1767,6 @@ class _ProfileTab extends StatelessWidget {
     );
   }
 }
-
-
-/// =========================================================================
-/// REVISION NOTES (self-contained — replacement for the removed
-/// Study Timer feature; in-memory for the app session)
-/// =========================================================================
 
 class RevisionNote {
   String title;
@@ -2195,46 +1793,18 @@ class _NotesScreenState extends State<NotesScreen> {
       isScrollControlled: true,
       builder: (sheetContext) {
         return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
-          ),
+          padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                existing == null ? 'New Note' : 'Edit Note',
-                style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
+              Text(existing == null ? 'New Note' : 'Edit Note', style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
-              TextField(
-                controller: titleController,
-                textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
+              TextField(controller: titleController, textInputAction: TextInputAction.next, decoration: InputDecoration(labelText: 'Title', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
               const SizedBox(height: 12),
-              TextField(
-                controller: bodyController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  labelText: 'Note',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
+              TextField(controller: bodyController, maxLines: 5, decoration: InputDecoration(labelText: 'Note', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
               const SizedBox(height: 16),
-              SizedBox(
-                height: 48,
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(sheetContext, true),
-                  child: const Text('Save'),
-                ),
-              ),
+              SizedBox(height: 48, child: FilledButton(onPressed: () => Navigator.pop(sheetContext, true), child: const Text('Save'))),
             ],
           ),
         );
@@ -2275,11 +1845,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   children: [
                     Icon(Icons.sticky_note_2_outlined, size: 56, color: scheme.onSurfaceVariant),
                     const SizedBox(height: 12),
-                    Text(
-                      'No notes yet. Tap + to add a quick revision note.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
+                    Text('No notes yet. Tap + to add a quick revision note.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
                   ],
                 ),
               ),
@@ -2306,9 +1872,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       title: Text(note.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: note.body.isEmpty
-                          ? null
-                          : Text(note.body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      subtitle: note.body.isEmpty ? null : Text(note.body, maxLines: 2, overflow: TextOverflow.ellipsis),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => _addOrEditNote(existing: note, index: index),
                     ),
@@ -2316,20 +1880,10 @@ class _NotesScreenState extends State<NotesScreen> {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _addOrEditNote(),
-        child: const Icon(Icons.add_rounded),
-      ),
+      floatingActionButton: FloatingActionButton(onPressed: () => _addOrEditNote(), child: const Icon(Icons.add_rounded)),
     );
   }
 }
-
-/// =========================================================================
-/// CONTACT SUPPORT
-/// =========================================================================
-/// Signed-in-only (reached from the Profile tab) — deliberately not
-/// offered from GuestHomeScreen, since guest sessions are anonymous and
-/// support requests need an account for the team to act on.
 
 class _SupportContact {
   final IconData icon;
@@ -2338,79 +1892,32 @@ class _SupportContact {
   final String value;
   final String subtitle;
   final Uri uri;
-  const _SupportContact({
-    required this.icon,
-    required this.color,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-    required this.uri,
-  });
+  const _SupportContact({required this.icon, required this.color, required this.label, required this.value, required this.subtitle, required this.uri});
 }
 
 class ContactSupportScreen extends StatelessWidget {
   const ContactSupportScreen({super.key});
 
   static final List<_SupportContact> _general = [
-    _SupportContact(
-      icon: Icons.chat_rounded,
-      color: const Color(0xFF25D366),
-      label: 'WhatsApp (Private Line)',
-      value: '+234 805 660 4409',
-      subtitle: 'Fastest way to reach the team directly',
-      uri: Uri.parse('https://wa.me/2348056604409'),
-    ),
-    _SupportContact(
-      icon: Icons.phone_rounded,
-      color: Colors.blue,
-      label: 'Official Support Line',
-      value: '0806 542 5732',
-      subtitle: 'Call for general enquiries',
-      uri: Uri.parse('tel:08065425732'),
-    ),
-    _SupportContact(
-      icon: Icons.email_rounded,
-      color: Colors.orange,
-      label: 'App Support Email',
-      value: 'naijalearn01@gmail.com',
-      subtitle: 'Bugs, account issues, feedback',
-      uri: Uri.parse('mailto:naijalearn01@gmail.com?subject=NaijaLearn%20Support'),
-    ),
+    _SupportContact(icon: Icons.chat_rounded, color: const Color(0xFF25D366), label: 'WhatsApp (Private Line)', value: '+234 805 660 4409', subtitle: 'Fastest way to reach the team directly', uri: Uri.parse('https://wa.me/2348056604409')),
+    _SupportContact(icon: Icons.phone_rounded, color: Colors.blue, label: 'Official Support Line', value: '0806 542 5732', subtitle: 'Call for general enquiries', uri: Uri.parse('tel:08065425732')),
+    _SupportContact(icon: Icons.email_rounded, color: Colors.orange, label: 'App Support Email', value: 'naijalearn01@gmail.com', subtitle: 'Bugs, account issues, feedback', uri: Uri.parse('mailto:naijalearn01@gmail.com?subject=NaijaLearn%20Support')),
   ];
 
   static final List<_SupportContact> _company = [
-    _SupportContact(
-      icon: Icons.business_rounded,
-      color: Colors.indigo,
-      label: 'Zetra Company Email',
-      value: 'zetraworld0@gmail.com',
-      subtitle: 'General company enquiries',
-      uri: Uri.parse('mailto:zetraworld0@gmail.com?subject=NaijaLearn%20Enquiry'),
-    ),
-    _SupportContact(
-      icon: Icons.person_rounded,
-      color: Colors.deepPurple,
-      label: 'Founder / CEO',
-      value: 'coderinnovator@gmail.com',
-      subtitle: 'Direct line to the founder',
-      uri: Uri.parse('mailto:coderinnovator@gmail.com?subject=NaijaLearn%20-%20Message%20for%20the%20CEO'),
-    ),
+    _SupportContact(icon: Icons.business_rounded, color: Colors.indigo, label: 'Zetra Company Email', value: 'zetraworld0@gmail.com', subtitle: 'General company enquiries', uri: Uri.parse('mailto:zetraworld0@gmail.com?subject=NaijaLearn%20Enquiry')),
+    _SupportContact(icon: Icons.person_rounded, color: Colors.deepPurple, label: 'Founder / CEO', value: 'coderinnovator@gmail.com', subtitle: 'Direct line to the founder', uri: Uri.parse('mailto:coderinnovator@gmail.com?subject=NaijaLearn%20-%20Message%20for%20the%20CEO')),
   ];
 
   Future<void> _open(BuildContext context, Uri uri) async {
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open that automatically. Please reach out manually.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open that automatically. Please reach out manually.')));
     }
   }
 
   Widget _sectionLabel(BuildContext context, String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
-      child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-    );
+    return Padding(padding: const EdgeInsets.fromLTRB(4, 20, 4, 8), child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)));
   }
 
   Widget _contactTile(BuildContext context, _SupportContact c) {
@@ -2427,11 +1934,7 @@ class ContactSupportScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: c.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
-                  child: Icon(c.icon, color: c.color),
-                ),
+                Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: c.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)), child: Icon(c.icon, color: c.color)),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -2468,12 +1971,7 @@ class ContactSupportScreen extends StatelessWidget {
               children: [
                 Icon(Icons.support_agent_rounded, color: scheme.primary, size: 28),
                 const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Having a problem or challenge with the app? Reach out through any of the channels below — we read everything.',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
+                const Expanded(child: Text('Having a problem or challenge with the app? Reach out through any of the channels below — we read everything.', style: TextStyle(fontSize: 13))),
               ],
             ),
           ),
@@ -2481,7 +1979,6 @@ class ContactSupportScreen extends StatelessWidget {
           ..._general.map((c) => _contactTile(context, c)),
           _sectionLabel(context, 'Company & Leadership'),
           ..._company.map((c) => _contactTile(context, c)),
-          // Admin menu (only visible to admins)
           FutureBuilder<Map<String, dynamic>?>(
             future: () async {
               try {
@@ -2500,18 +1997,8 @@ class ContactSupportScreen extends StatelessWidget {
               if (!loaded || !isAdmin) return const SizedBox.shrink();
               return Column(
                 children: [
-                  _MenuTile(
-                    icon: Icons.admin_panel_settings_rounded,
-                    label: 'Admin',
-                    subtitle: 'Manage cent purchase requests',
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen())),
-                  ),
-                  _MenuTile(
-                    icon: Icons.link_rounded,
-                    label: 'Referral Stats',
-                    subtitle: 'See signups by referral code',
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen())),
-                  ),
+                  _MenuTile(icon: Icons.admin_panel_settings_rounded, label: 'Admin', subtitle: 'Manage cent purchase requests', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen()))),
+                  _MenuTile(icon: Icons.link_rounded, label: 'Referral Stats', subtitle: 'See signups by referral code', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen()))),
                 ],
               );
             },
@@ -2521,10 +2008,6 @@ class ContactSupportScreen extends StatelessWidget {
     );
   }
 }
-
-/// =========================================================================
-/// SHARED WIDGETS
-/// =========================================================================
 
 class _StatPill extends StatelessWidget {
   final IconData icon;
@@ -2570,11 +2053,7 @@ class _MenuTile extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: scheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
-                  child: Icon(icon, color: scheme.primary),
-                ),
+                Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: scheme.primary.withOpacity(0.12), borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: scheme.primary)),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -2615,11 +2094,7 @@ class SubjectCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
-                child: Icon(subject.icon, color: subject.color, size: 26),
-              ),
+              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)), child: Icon(subject.icon, color: subject.color, size: 26)),
               const Spacer(),
               Text(subject.name, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             ],
@@ -2629,10 +2104,6 @@ class SubjectCard extends StatelessWidget {
     );
   }
 }
-
-/// =========================================================================
-/// QUESTION COUNT PICKER
-/// =========================================================================
 
 class QuestionCountPickerSheet extends StatelessWidget {
   final SubjectInfo subject;
@@ -2644,9 +2115,6 @@ class QuestionCountPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final total = QuestionRepository.getForSubject(subject.name).length;
-    // Only show a preset count if the subject actually has at least that
-    // many questions — no point offering "60 questions" on a 40-question
-    // subject. The user always ends up with a real, boundable exam size.
     final availableCounts = _counts.where((c) => c <= total).toList();
 
     return DraggableScrollableSheet(
@@ -2659,21 +2127,14 @@ class QuestionCountPickerSheet extends StatelessWidget {
           child: Column(
             children: [
               const SizedBox(height: 12),
-              Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(color: scheme.onSurfaceVariant.withOpacity(0.4), borderRadius: BorderRadius.circular(4)),
-              ),
+              Container(width: 44, height: 4, decoration: BoxDecoration(color: scheme.onSurfaceVariant.withOpacity(0.4), borderRadius: BorderRadius.circular(4))),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Row(
                   children: [
                     Icon(subject.icon, color: subject.color),
                     const SizedBox(width: 10),
-                    Expanded(
-                      child: Text('${subject.name} — Select Number of Questions',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                    ),
+                    Expanded(child: Text('${subject.name} — Select Number of Questions', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
                   ],
                 ),
               ),
@@ -2716,10 +2177,6 @@ class QuestionCountPickerSheet extends StatelessWidget {
   }
 }
 
-/// =========================================================================
-/// EXAM INSTRUCTIONS
-/// =========================================================================
-
 class ExamInstructionsScreen extends StatelessWidget {
   final SubjectInfo subject;
   final List<Question> questions;
@@ -2739,11 +2196,7 @@ class ExamInstructionsScreen extends StatelessWidget {
           children: [
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(16)),
-                  child: Icon(subject.icon, color: subject.color, size: 32),
-                ),
+                Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(16)), child: Icon(subject.icon, color: subject.color, size: 32)),
                 const SizedBox(width: 14),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2786,13 +2239,7 @@ class ExamInstructionsScreen extends StatelessWidget {
                     ? null
                     : () {
                         Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => ExamScreen(
-                              subject: subject,
-                              questions: questions,
-                              durationMinutes: durationMinutes,
-                            ),
-                          ),
+                          MaterialPageRoute(builder: (_) => ExamScreen(subject: subject, questions: questions, durationMinutes: durationMinutes)),
                         );
                       },
               ),
@@ -2828,10 +2275,6 @@ class _InfoTile extends StatelessWidget {
   }
 }
 
-/// =========================================================================
-/// EXAM SCREEN (CBT interface)
-/// =========================================================================
-
 enum QuestionStatus { unanswered, answered, skipped }
 
 class ExamScreen extends StatefulWidget {
@@ -2839,12 +2282,7 @@ class ExamScreen extends StatefulWidget {
   final List<Question> questions;
   final int durationMinutes;
 
-  const ExamScreen({
-    super.key,
-    required this.subject,
-    required this.questions,
-    required this.durationMinutes,
-  });
+  const ExamScreen({super.key, required this.subject, required this.questions, required this.durationMinutes});
 
   @override
   State<ExamScreen> createState() => _ExamScreenState();
@@ -2857,9 +2295,6 @@ class _ExamScreenState extends State<ExamScreen> {
   late int _remainingSeconds;
   Timer? _timer;
 
-  // Tracks which questions the user has starred during THIS exam session,
-  // purely for the star icon's fill state — the actual persistence is
-  // handled by BookmarkService.
   final Set<String> _bookmarkedIds = {};
 
   @override
@@ -2873,9 +2308,6 @@ class _ExamScreenState extends State<ExamScreen> {
 
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      // Guard against calling setState after this screen has been
-      // disposed (e.g. the user backgrounds/kills the app right as the
-      // timer ticks) — without this check the tick can throw.
       if (!mounted) {
         timer.cancel();
         return;
@@ -2936,10 +2368,7 @@ class _ExamScreenState extends State<ExamScreen> {
       }
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_bookmarkedIds.contains(question.id) ? 'Bookmarked for later' : 'Bookmark removed'),
-        duration: const Duration(seconds: 1),
-      ),
+      SnackBar(content: Text(_bookmarkedIds.contains(question.id) ? 'Bookmarked for later' : 'Bookmark removed'), duration: const Duration(seconds: 1)),
     );
   }
 
@@ -2948,10 +2377,7 @@ class _ExamScreenState extends State<ExamScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Submit Exam?'),
-        content: Text(
-          'You have answered ${_selectedAnswers.where((a) => a != null).length} of '
-          '${widget.questions.length} questions. Submit now?',
-        ),
+        content: Text('You have answered ${_selectedAnswers.where((a) => a != null).length} of ${widget.questions.length} questions. Submit now?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Submit')),
@@ -2993,24 +2419,13 @@ class _ExamScreenState extends State<ExamScreen> {
       questionIdsCovered: widget.questions.map((q) => q.id).toSet(),
     );
 
-    MasteryService.instance.recordSession(
-      subject: widget.subject.name,
-      correct: correct,
-      total: widget.questions.length,
-    );
+    MasteryService.instance.recordSession(subject: widget.subject.name, correct: correct, total: widget.questions.length);
     ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
     SquadService.instance.recordActivity(activityType: 'question', amount: correct, subject: widget.subject.name);
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ResultsScreen(
-          subject: widget.subject,
-          questions: widget.questions,
-          selectedAnswers: _selectedAnswers,
-          correctCount: correct,
-          skippedCount: skipped,
-          unansweredCount: unanswered,
-        ),
+        builder: (_) => ResultsScreen(subject: widget.subject, questions: widget.questions, selectedAnswers: _selectedAnswers, correctCount: correct, skippedCount: skipped, unansweredCount: unanswered),
       ),
     );
   }
@@ -3048,16 +2463,12 @@ class _ExamScreenState extends State<ExamScreen> {
           Container(
             margin: const EdgeInsets.only(right: 12),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: isLowTime ? scheme.errorContainer : scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(20),
-            ),
+            decoration: BoxDecoration(color: isLowTime ? scheme.errorContainer : scheme.primaryContainer, borderRadius: BorderRadius.circular(20)),
             child: Row(
               children: [
                 Icon(Icons.timer_rounded, size: 18, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer),
                 const SizedBox(width: 6),
-                Text(_formattedTime,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer)),
+                Text(_formattedTime, style: TextStyle(fontWeight: FontWeight.bold, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer)),
               ],
             ),
           ),
@@ -3069,28 +2480,16 @@ class _ExamScreenState extends State<ExamScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Column(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: scheme.surfaceContainerHighest),
-                ),
+                ClipRRect(borderRadius: BorderRadius.circular(8), child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: scheme.surfaceContainerHighest)),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Question ${_currentIndex + 1} of ${widget.questions.length}', style: Theme.of(context).textTheme.bodySmall),
-                    TextButton.icon(
-                      onPressed: _openNavigator,
-                      icon: const Icon(Icons.grid_view_rounded, size: 18),
-                      label: const Text('Navigator'),
-                    ),
+                    TextButton.icon(onPressed: _openNavigator, icon: const Icon(Icons.grid_view_rounded, size: 18), label: const Text('Navigator')),
                   ],
                 ),
-                PaceMeter(
-                  answeredCount: answeredCount,
-                  totalQuestions: widget.questions.length,
-                  remainingSeconds: _remainingSeconds,
-                  totalSeconds: widget.durationMinutes * 60,
-                ),
+                PaceMeter(answeredCount: answeredCount, totalQuestions: widget.questions.length, remainingSeconds: _remainingSeconds, totalSeconds: widget.durationMinutes * 60),
               ],
             ),
           ),
@@ -3099,10 +2498,7 @@ class _ExamScreenState extends State<ExamScreen> {
               duration: const Duration(milliseconds: 250),
               transitionBuilder: (child, animation) => FadeTransition(
                 opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
-                  child: child,
-                ),
+                child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation), child: child),
               ),
               child: SingleChildScrollView(
                 key: ValueKey(_currentIndex),
@@ -3117,15 +2513,10 @@ class _ExamScreenState extends State<ExamScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(question.questionText, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4)),
-                          ),
+                          Expanded(child: Text(question.questionText, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4))),
                           const SizedBox(width: 8),
                           IconButton(
-                            icon: Icon(
-                              isBookmarked ? Icons.star_rounded : Icons.star_border_rounded,
-                              color: isBookmarked ? Colors.amber : scheme.onSurfaceVariant,
-                            ),
+                            icon: Icon(isBookmarked ? Icons.star_rounded : Icons.star_border_rounded, color: isBookmarked ? Colors.amber : scheme.onSurfaceVariant),
                             tooltip: 'Bookmark this question',
                             onPressed: () => _toggleBookmark(question),
                           ),
@@ -3146,17 +2537,13 @@ class _ExamScreenState extends State<ExamScreen> {
                             onTap: () => _selectOption(i),
                             child: Container(
                               padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: isSelected ? scheme.primary : scheme.outlineVariant, width: isSelected ? 2 : 1),
-                              ),
+                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? scheme.primary : scheme.outlineVariant, width: isSelected ? 2 : 1)),
                               child: Row(
                                 children: [
                                   CircleAvatar(
                                     radius: 14,
                                     backgroundColor: isSelected ? scheme.primary : scheme.surfaceContainerHighest,
-                                    child: Text(letter,
-                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant)),
+                                    child: Text(letter, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant)),
                                   ),
                                   const SizedBox(width: 14),
                                   Expanded(child: Text(question.options[i], style: const TextStyle(fontSize: 15))),
@@ -3178,21 +2565,9 @@ class _ExamScreenState extends State<ExamScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _currentIndex > 0 ? () => _goTo(_currentIndex - 1) : null,
-                      icon: const Icon(Icons.chevron_left_rounded),
-                      label: const Text('Previous'),
-                    ),
-                  ),
+                  Expanded(child: OutlinedButton.icon(onPressed: _currentIndex > 0 ? () => _goTo(_currentIndex - 1) : null, icon: const Icon(Icons.chevron_left_rounded), label: const Text('Previous'))),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _skipQuestion,
-                      icon: const Icon(Icons.skip_next_rounded),
-                      label: const Text('Skip'),
-                    ),
-                  ),
+                  Expanded(child: OutlinedButton.icon(onPressed: _skipQuestion, icon: const Icon(Icons.skip_next_rounded), label: const Text('Skip'))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _currentIndex == widget.questions.length - 1
@@ -3209,23 +2584,13 @@ class _ExamScreenState extends State<ExamScreen> {
   }
 }
 
-/// =========================================================================
-/// QUESTION NAVIGATOR
-/// =========================================================================
-
 class QuestionNavigatorSheet extends StatelessWidget {
   final int totalQuestions;
   final List<QuestionStatus> statuses;
   final int currentIndex;
   final ValueChanged<int> onSelect;
 
-  const QuestionNavigatorSheet({
-    super.key,
-    required this.totalQuestions,
-    required this.statuses,
-    required this.currentIndex,
-    required this.onSelect,
-  });
+  const QuestionNavigatorSheet({super.key, required this.totalQuestions, required this.statuses, required this.currentIndex, required this.onSelect});
 
   Color _colorFor(BuildContext context, QuestionStatus status, bool isCurrent) {
     final scheme = Theme.of(context).colorScheme;
@@ -3280,9 +2645,7 @@ class QuestionNavigatorSheet extends StatelessWidget {
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
                       onTap: () => onSelect(index),
-                      child: Center(
-                        child: Text('${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: isFilled ? Colors.white : scheme.onSurface)),
-                      ),
+                      child: Center(child: Text('${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: isFilled ? Colors.white : scheme.onSurface))),
                     ),
                   );
                 },
@@ -3306,21 +2669,13 @@ class _LegendDot extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: border ? Border.all(color: Theme.of(context).colorScheme.outline) : null),
-        ),
+        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: border ? Border.all(color: Theme.of(context).colorScheme.outline) : null)),
         const SizedBox(width: 6),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
   }
 }
-
-/// =========================================================================
-/// RESULTS SCREEN
-/// =========================================================================
 
 class ResultsScreen extends StatelessWidget {
   final SubjectInfo subject;
@@ -3330,15 +2685,7 @@ class ResultsScreen extends StatelessWidget {
   final int skippedCount;
   final int unansweredCount;
 
-  const ResultsScreen({
-    super.key,
-    required this.subject,
-    required this.questions,
-    required this.selectedAnswers,
-    required this.correctCount,
-    required this.skippedCount,
-    required this.unansweredCount,
-  });
+  const ResultsScreen({super.key, required this.subject, required this.questions, required this.selectedAnswers, required this.correctCount, required this.skippedCount, required this.unansweredCount});
 
   double get _percentage => (correctCount / questions.length) * 100;
 
@@ -3417,12 +2764,7 @@ class ResultsScreen extends StatelessWidget {
                       SizedBox(
                         width: 180,
                         height: 180,
-                        child: CircularProgressIndicator(
-                          value: value,
-                          strokeWidth: 12,
-                          backgroundColor: scheme.surfaceContainerHighest,
-                          valueColor: AlwaysStoppedAnimation(_gradeColor(context)),
-                        ),
+                        child: CircularProgressIndicator(value: value, strokeWidth: 12, backgroundColor: scheme.surfaceContainerHighest, valueColor: AlwaysStoppedAnimation(_gradeColor(context))),
                       ),
                       Column(
                         mainAxisSize: MainAxisSize.min,
@@ -3464,13 +2806,7 @@ class ResultsScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.insights_rounded, color: scheme.primary),
-                      const SizedBox(width: 8),
-                      const Text('Performance Analysis', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ],
-                  ),
+                  Row(children: [Icon(Icons.insights_rounded, color: scheme.primary), const SizedBox(width: 8), const Text('Performance Analysis', style: TextStyle(fontWeight: FontWeight.bold))]),
                   const SizedBox(height: 10),
                   Text(_analysis, style: const TextStyle(height: 1.5)),
                 ],
@@ -3480,36 +2816,16 @@ class ResultsScreen extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               height: 52,
-              child: FilledButton.icon(
-                icon: const Icon(Icons.rate_review_rounded),
-                label: const Text('Review Answers'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => ReviewScreen(questions: questions, selectedAnswers: selectedAnswers)),
-                ),
-              ),
+              child: FilledButton.icon(icon: const Icon(Icons.rate_review_rounded), label: const Text('Review Answers'), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReviewScreen(questions: questions, selectedAnswers: selectedAnswers)))),
             ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               height: 52,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.replay_rounded),
-                label: const Text('Retake Exam'),
-                onPressed: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)),
-                ),
-              ),
+              child: OutlinedButton.icon(icon: const Icon(Icons.replay_rounded), label: const Text('Retake Exam'), onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)))),
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: TextButton.icon(
-                icon: const Icon(Icons.home_rounded),
-                label: const Text('Back to Home'),
-                onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
-              ),
-            ),
+            SizedBox(width: double.infinity, height: 52, child: TextButton.icon(icon: const Icon(Icons.home_rounded), label: const Text('Back to Home'), onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst))),
           ],
         ),
       ),
@@ -3541,10 +2857,6 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/// =========================================================================
-/// REVIEW SCREEN
-/// =========================================================================
-
 class ReviewScreen extends StatelessWidget {
   final List<Question> questions;
   final List<int?> selectedAnswers;
@@ -3567,31 +2879,17 @@ class ReviewScreen extends StatelessWidget {
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: !wasAnswered ? scheme.outlineVariant : (isCorrect ? Colors.green : Colors.red), width: 1.4),
-            ),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18), border: Border.all(color: !wasAnswered ? scheme.outlineVariant : (isCorrect ? Colors.green : Colors.red), width: 1.4)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(10)),
-                      child: Text('Q${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.onPrimaryContainer)),
-                    ),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(10)), child: Text('Q${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: scheme.onPrimaryContainer))),
                     const Spacer(),
-                    Icon(
-                      !wasAnswered ? Icons.remove_circle_outline_rounded : (isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded),
-                      color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red),
-                    ),
+                    Icon(!wasAnswered ? Icons.remove_circle_outline_rounded : (isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded), color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red)),
                     const SizedBox(width: 4),
-                    Text(
-                      !wasAnswered ? 'Skipped' : (isCorrect ? 'Correct' : 'Wrong'),
-                      style: TextStyle(fontWeight: FontWeight.w600, color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red)),
-                    ),
+                    Text(!wasAnswered ? 'Skipped' : (isCorrect ? 'Correct' : 'Wrong'), style: TextStyle(fontWeight: FontWeight.w600, color: !wasAnswered ? Colors.orange : (isCorrect ? Colors.green : Colors.red))),
                     IconButton(
                       icon: const Icon(Icons.star_border_rounded),
                       tooltip: 'Bookmark for later',
@@ -3619,11 +2917,7 @@ class ReviewScreen extends StatelessWidget {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isCorrectOption ? Colors.green : (isSelectedOption ? Colors.red : scheme.outlineVariant)),
-                    ),
+                    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: isCorrectOption ? Colors.green : (isSelectedOption ? Colors.red : scheme.outlineVariant))),
                     child: Row(
                       children: [
                         CircleAvatar(radius: 12, backgroundColor: scheme.surface, child: Text(String.fromCharCode(65 + i), style: const TextStyle(fontSize: 12))),
