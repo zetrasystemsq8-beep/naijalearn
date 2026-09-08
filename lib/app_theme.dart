@@ -89,7 +89,13 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData light(Color seedColor) => _build(seedColor, Brightness.light);
-  static ThemeData dark(Color seedColor) => _build(seedColor, Brightness.dark);
+  // Dark mode removed at the source — every screen in the app reads
+  // Theme.of(context) for its colors, so this one line is what actually
+  // turns dark mode off everywhere, permanently, regardless of the
+  // device's system setting or any in-app toggle. "Dark" now just
+  // renders the same light theme, so nothing can ever go brown/patchy
+  // again — there's only one theme left to get right.
+  static ThemeData dark(Color seedColor) => _build(seedColor, Brightness.light);
 
   /// The app's "hero" gradient (headers, primary buttons) — ALWAYS derive
   /// from this instead of a hardcoded color constant. It uses the live
