@@ -3,34 +3,23 @@
 // NaijaLearn — CBT Practice App
 // Material 3.
 //
-// AUTHENTICATION — ZetraMail ONLY: NaijaLearn is strictly a client of
-// the existing Zetra ecosystem. There is NO NaijaLearn-only self-signup
-// (username + password with no ZetraMail) — that entire path (SignUpScreen,
-// AuthService.signUpWithUsername, AuthService.loginWithUsername) has been
-// removed for good. Every account is a real ZetraMail account.
+// AUTHENTICATION — ZetraMail account required, TWO ways in:
 //
-// Login is email+password (signInWithPassword). The user types their
-// ZetraMail address; it's resolved to the internal auth_email via the
-// resolve_login_email(...) Supabase RPC, and Supabase Auth's password
-// sign-in is called using ONLY that internal auth_email.
+// 1) PASSWORD LOGIN: always followed by mandatory OTP (VerifyOtpScreen).
+// 2) FINGERPRINT SIGN-IN: per shared platform guidance, this is a
+//    STRONGER identity proof than password+OTP, so it SKIPS OTP
+//    entirely — straight to the same one-time referral check everyone
+//    goes through, then into the app.
 //
-// A verification code is ALWAYS required after login — password OR
-// fingerprint — every single time. Both AuthService.login() and
-// signInWithZetraFingerprint() reset the otp-verified flag to false and
-// request a fresh code, so neither path can ever skip straight to
-// HomeScreen — both always land on VerifyOtpScreen next.
+// No NaijaLearn-only self-signup exists anymore — that path (username
+// + password with no ZetraMail) has been fully removed. People without
+// ZetraMail can create one via the shared Zetra ID website instead
+// (see kZetraIdRegisterUrl below), linked from LoginScreen.
 //
-// PASSKEY / FINGERPRINT SIGN-IN — BUG FIX: previously, a successful
-// fingerprint sign-in never navigated anywhere; the button called
-// signInWithZetraFingerprint() and nothing happened after. Fixed: the
-// button's own handler (_continueWithFingerprint) now navigates to
-// VerifyOtpScreen on success, exactly like password login. Visual design
-// preserved/advanced: same bright gradient, glass card, and now an
-// icon-labeled fingerprint button matching the same white-elevated style.
-//
-// DEEP LINKS (Challenge a Friend): naijalearn://challenge/<id> links are
-// caught by ChallengeDeepLinkListener (challenge_feature.dart) and pushed
-// onto the top-level `navigatorKey` below.
+// SECURITY LOGGING: AuthService.login() makes a best-effort call to
+// the shared `log_login_attempt` RPC. The exact parameter signature
+// hasn't been confirmed with the platform maintainer yet — wrapped so
+// it can never break login if wrong; confirm and adjust once known.
 
 import 'dart:async';
 import 'dart:convert';
@@ -79,18 +68,16 @@ import 'questions_chemistry.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
+const String kZetraIdRegisterUrl = 'https://zetrasystemsq8-beep.github.io/?view=register';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await dotenv.load(fileName: '.env');
-
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
-
- await NotificationService.instance.init();
-
+  await NotificationService.instance.init();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -110,38 +97,24 @@ Future<void> main() async {
   ChallengeDeepLinkListener.init(navigatorKey);
 }
 
-/// =========================================================================
-/// AUTHENTICATION
-/// =========================================================================
-
-Future<void> signInWithZetraFingerprint() async {
+Future<ZetraProfile> signInWithZetraFingerprint() async {
   final authenticator = PasskeyAuthenticator();
   final client = Supabase.instance.client;
-
   AuthResponse response;
   try {
     response = await client.auth.signInWithPasskey(authenticator);
   } catch (e) {
-    debugPrint('[ZetraAuth] Fingerprint sign-in failed or cancelled: $e');
     throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
   }
-
   if (response.session == null) {
     throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
   }
-
   try {
-    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': false}));
+    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true}));
   } catch (e) {
-    debugPrint('[ZetraAuth] Could not reset otp-verified flag after fingerprint sign-in (non-fatal): $e');
+    debugPrint('[ZetraAuth] Could not set otp-verified flag after fingerprint sign-in (non-fatal): $e');
   }
-
-  try {
-    await client.rpc('request_otp');
-  } on PostgrestException catch (e) {
-    debugPrint('[ZetraAuth] request_otp after fingerprint sign-in FAILED: code=${e.code}, message=${e.message}');
-    throw ZetraAuthException('Could not send your verification code. Please try again.');
-  }
+  return AuthService.instance.loadCurrentProfile();
 }
 
 class ZetraProfile {
@@ -150,15 +123,7 @@ class ZetraProfile {
   final String username;
   final bool verified;
   final String? avatarUrl;
-
-  ZetraProfile({
-    required this.id,
-    required this.zetramail,
-    required this.username,
-    required this.verified,
-    this.avatarUrl,
-  });
-
+  ZetraProfile({required this.id, required this.zetramail, required this.username, required this.verified, this.avatarUrl});
   factory ZetraProfile.fromMap(Map<String, dynamic> map) {
     return ZetraProfile(
       id: map['id'] as String,
@@ -168,20 +133,12 @@ class ZetraProfile {
       avatarUrl: map['avatar_url'] as String?,
     );
   }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'zetramail': zetramail,
-        'username': username,
-        'verified': verified,
-        'avatar_url': avatarUrl,
-      };
+  Map<String, dynamic> toJson() => {'id': id, 'zetramail': zetramail, 'username': username, 'verified': verified, 'avatar_url': avatarUrl};
 }
 
 class ZetraAuthException implements Exception {
   final String message;
   ZetraAuthException(this.message);
-
   @override
   String toString() => message;
 }
@@ -189,59 +146,54 @@ class ZetraAuthException implements Exception {
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
-
   static const String invalidCredentialsMessage = 'Invalid ZetraMail or password.';
   static const String invalidOtpMessage = 'Invalid or expired code. Please try again.';
   static const String profileLoadErrorMessage = 'Could not load your profile. Please try again.';
-
   static const String _otpVerifiedMetaKey = 'nl_otp_verified';
-
   SupabaseClient get _client => Supabase.instance.client;
-
   bool get isSignedIn => _client.auth.currentSession != null;
+  bool get isOtpVerifiedForCurrentSession => _client.auth.currentUser?.userMetadata?[_otpVerifiedMetaKey] == true;
 
-  bool get isOtpVerifiedForCurrentSession =>
-      _client.auth.currentUser?.userMetadata?[_otpVerifiedMetaKey] == true;
-
-  Future<ZetraProfile> login({
-    required String zetramail,
-    required String password,
-  }) async {
-    final normalized = zetramail.trim().toLowerCase();
-
-    if (normalized.isEmpty) {
-      throw ZetraAuthException(invalidCredentialsMessage);
+  Future<void> _logLoginAttempt({required String identifier, required bool success}) async {
+    try {
+      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success, 'p_app': 'naijalearn'});
+    } catch (e) {
+      debugPrint('[ZetraAuth] log_login_attempt failed (non-fatal, signature may need confirming): $e');
     }
+  }
+
+  Future<ZetraProfile> login({required String zetramail, required String password}) async {
+    final normalized = zetramail.trim().toLowerCase();
+    if (normalized.isEmpty) throw ZetraAuthException(invalidCredentialsMessage);
 
     String? resolvedEmail;
     try {
-      final result = await _client.rpc(
-        'resolve_login_email',
-        params: {'p_identifier': normalized},
-      );
+      final result = await _client.rpc('resolve_login_email', params: {'p_identifier': normalized});
       resolvedEmail = result is String ? result : null;
     } on PostgrestException {
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     if (resolvedEmail == null || resolvedEmail.isEmpty) {
+      await _logLoginAttempt(identifier: normalized, success: false);
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     AuthResponse response;
     try {
-      response = await _client.auth.signInWithPassword(
-        email: resolvedEmail,
-        password: password,
-      );
+      response = await _client.auth.signInWithPassword(email: resolvedEmail, password: password);
     } on AuthException {
+      await _logLoginAttempt(identifier: normalized, success: false);
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
     final user = response.user;
     if (user == null) {
+      await _logLoginAttempt(identifier: normalized, success: false);
       throw ZetraAuthException(invalidCredentialsMessage);
     }
+
+    await _logLoginAttempt(identifier: normalized, success: true);
 
     try {
       await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
@@ -262,55 +214,38 @@ class AuthService {
 
   Future<ZetraProfile> loadCurrentProfile() async {
     final user = _client.auth.currentUser;
-    if (user == null) {
-      throw ZetraAuthException('Not signed in.');
-    }
-
+    if (user == null) throw ZetraAuthException('Not signed in.');
     Map<String, dynamic>? row;
     try {
       row = await _client.from('profiles').select().eq('id', user.id).maybeSingle();
     } on PostgrestException {
       throw ZetraAuthException(profileLoadErrorMessage);
     }
-
-    if (row == null) {
-      throw ZetraAuthException(profileLoadErrorMessage);
-    }
-
+    if (row == null) throw ZetraAuthException(profileLoadErrorMessage);
     return ZetraProfile.fromMap(row);
   }
 
   Future<ZetraProfile> verifyCode({required String code}) async {
     final session = _client.auth.currentSession;
-    if (session == null) {
-      throw ZetraAuthException("You're not signed in. Please log in again.");
-    }
-
+    if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
     dynamic result;
     try {
       result = await _client.rpc('verify_otp', params: {'p_code': code.trim()});
     } on PostgrestException {
       throw ZetraAuthException(invalidOtpMessage);
     }
-
-    if (result != true) {
-      throw ZetraAuthException(invalidOtpMessage);
-    }
-
+    if (result != true) throw ZetraAuthException(invalidOtpMessage);
     try {
       await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
     } catch (e) {
       debugPrint('[ZetraAuth] Could not persist otp-verified flag (non-fatal): $e');
     }
-
     return loadCurrentProfile();
   }
 
   Future<void> resendCode() async {
     final session = _client.auth.currentSession;
-    if (session == null) {
-      throw ZetraAuthException("You're not signed in. Please log in again.");
-    }
+    if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
     try {
       await _client.rpc('request_otp');
     } on PostgrestException {
@@ -326,9 +261,30 @@ class AuthService {
   }
 }
 
+Future<void> routeAfterFullyVerifiedLogin(BuildContext context, ZetraProfile profile) async {
+  final attribution = await ReferralService.instance.getMyAttribution();
+  if (!context.mounted) return;
+  if (attribution == null) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReferralCodeEntryScreen(
+          onDone: () => Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+            (route) => false,
+          ),
+        ),
+      ),
+    );
+  } else {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
+      (route) => false,
+    );
+  }
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
@@ -369,17 +325,12 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _errorMessage = null;
     });
-
     final zetramail = _zetramailController.text.trim();
     final password = _passwordController.text.trim();
-
     try {
       await AuthService.instance.login(zetramail: zetramail, password: password);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
-        (route) => false,
-      );
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const VerifyOtpScreen()), (route) => false);
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -394,14 +345,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _errorMessage = null;
     });
-
     try {
-      await signInWithZetraFingerprint();
+      final profile = await signInWithZetraFingerprint();
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
-        (route) => false,
-      );
+      await routeAfterFullyVerifiedLogin(context, profile);
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -411,10 +358,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _openZetraIdWebsite() async {
+    final uri = Uri.parse(kZetraIdRegisterUrl);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       body: Stack(
         children: [
@@ -423,33 +377,13 @@ class _LoginScreenState extends State<LoginScreen> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  scheme.primary.withOpacity(0.85),
-                  scheme.tertiary.withOpacity(0.65),
-                  scheme.surface,
-                ],
+                colors: [scheme.primary.withOpacity(0.85), scheme.tertiary.withOpacity(0.65), scheme.surface],
                 stops: const [0.0, 0.28, 0.55],
               ),
             ),
           ),
-          Positioned(
-            top: -60,
-            right: -40,
-            child: Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.12)),
-            ),
-          ),
-          Positioned(
-            top: 140,
-            left: -50,
-            child: Container(
-              width: 140,
-              height: 140,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: scheme.tertiary.withOpacity(0.18)),
-            ),
-          ),
+          Positioned(top: -60, right: -40, child: Container(width: 200, height: 200, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.12)))),
+          Positioned(top: 140, left: -50, child: Container(width: 140, height: 140, decoration: BoxDecoration(shape: BoxShape.circle, color: scheme.tertiary.withOpacity(0.18)))),
           SafeArea(
             child: Form(
               key: _formKey,
@@ -467,40 +401,24 @@ class _LoginScreenState extends State<LoginScreen> {
                               height: 100,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [Colors.white, Color(0xFFEFEFFF)],
-                                ),
+                                gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.white, Color(0xFFEFEFFF)]),
                                 borderRadius: BorderRadius.circular(30),
-                                boxShadow: [
-                                  BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 24, offset: const Offset(0, 12)),
-                                ],
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 24, offset: const Offset(0, 12))],
                               ),
                               child: Icon(Icons.school_rounded, size: 52, color: scheme.primary),
                             ),
                           ),
                           const SizedBox(height: 28),
-                          Text(
-                            'Welcome to NaijaLearn',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
+                          Text('Welcome to NaijaLearn', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                           const SizedBox(height: 8),
-                          Text(
-                            'Sign in with your ZetraMail',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white.withOpacity(0.9)),
-                          ),
+                          Text('Sign in with your ZetraMail', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white.withOpacity(0.9))),
                           const SizedBox(height: 32),
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.96),
                               borderRadius: BorderRadius.circular(28),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 30, offset: const Offset(0, 14)),
-                              ],
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 30, offset: const Offset(0, 14))],
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -569,13 +487,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         SizedBox(
                           height: 56,
                           child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                              backgroundColor: Colors.white,
-                              foregroundColor: scheme.primary,
-                              elevation: 6,
-                              shadowColor: Colors.black.withOpacity(0.3),
-                            ),
+                            style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)), backgroundColor: Colors.white, foregroundColor: scheme.primary, elevation: 6, shadowColor: Colors.black.withOpacity(0.3)),
                             onPressed: _loading ? null : _continue,
                             child: _loading
                                 ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: scheme.primary))
@@ -586,13 +498,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         SizedBox(
                           height: 56,
                           child: FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                              backgroundColor: Colors.white,
-                              foregroundColor: scheme.primary,
-                              elevation: 4,
-                              shadowColor: Colors.black.withOpacity(0.18),
-                            ),
+                            style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)), backgroundColor: Colors.white, foregroundColor: scheme.primary, elevation: 4, shadowColor: Colors.black.withOpacity(0.18)),
                             onPressed: _loading ? null : _continueWithFingerprint,
                             icon: _loading
                                 ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: scheme.primary))
@@ -604,6 +510,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextButton(
                           onPressed: _loading ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GuestHomeScreen())),
                           child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
+                        ),
+                        TextButton(
+                          onPressed: _loading ? null : _openZetraIdWebsite,
+                          child: Text("Don't want to download an app? Create your Zetra ID on the web", textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12.5)),
                         ),
                       ],
                     ),
@@ -620,7 +530,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
 class VerifyOtpScreen extends StatefulWidget {
   const VerifyOtpScreen({super.key});
-
   @override
   State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
 }
@@ -631,7 +540,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   bool _loading = false;
   bool _resending = false;
   String? _errorMessage;
-
   static const int _resendCooldownSeconds = 30;
   int _resendSecondsLeft = _resendCooldownSeconds;
   Timer? _resendTimer;
@@ -684,31 +592,10 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       _loading = true;
       _errorMessage = null;
     });
-
     try {
       final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
       if (!mounted) return;
-
-      final attribution = await ReferralService.instance.getMyAttribution();
-      if (!mounted) return;
-
-      if (attribution == null) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReferralCodeEntryScreen(
-              onDone: () => Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
-                (route) => false,
-              ),
-            ),
-          ),
-        );
-      } else {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => NaiOnboardingGate(profile: profile)),
-          (route) => false,
-        );
-      }
+      await routeAfterFullyVerifiedLogin(context, profile);
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
@@ -727,9 +614,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
     try {
       await AuthService.instance.resendCode();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')));
       _startResendCooldown();
     } on ZetraAuthException catch (e) {
       setState(() => _errorMessage = e.message);
@@ -743,16 +628,12 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   Future<void> _useDifferentAccount() async {
     await AuthService.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Verify Your Zetra ID')),
       body: SafeArea(
@@ -768,11 +649,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                     children: [
                       Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
                       const SizedBox(height: 20),
-                      Text(
-                        'Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                      Text('Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
                       const SizedBox(height: 28),
                       TextFormField(
                         controller: _codeController,
@@ -782,11 +659,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                         style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
                         validator: _validateCode,
                         onFieldSubmitted: (_) => _verifyCode(),
-                        decoration: InputDecoration(
-                          counterText: '',
-                          hintText: '------',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
+                        decoration: InputDecoration(counterText: '', hintText: '------', border: OutlineInputBorder(borderRadius: BorderRadius.circular(14))),
                       ),
                       if (_errorMessage != null) ...[
                         const SizedBox(height: 8),
@@ -805,22 +678,15 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
                       height: 52,
                       child: FilledButton(
                         onPressed: _loading ? null : _verifyCode,
-                        child: _loading
-                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
-                            : const Text('Verify', style: TextStyle(fontSize: 16)),
+                        child: _loading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : const Text('Verify', style: TextStyle(fontSize: 16)),
                       ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
                       onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
-                      child: _resending
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(_resendSecondsLeft > 0 ? 'Resend code in ${_resendSecondsLeft}s' : "Didn't get a code? Resend"),
+                      child: _resending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(_resendSecondsLeft > 0 ? 'Resend code in ${_resendSecondsLeft}s' : "Didn't get a code? Resend"),
                     ),
-                    TextButton(
-                      onPressed: _useDifferentAccount,
-                      child: const Text('Use a different account'),
-                    ),
+                    TextButton(onPressed: _useDifferentAccount, child: const Text('Use a different account')),
                   ],
                 ),
               ),
@@ -832,10 +698,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
   }
 }
 
-/// =========================================================================
-/// MODELS
-/// =========================================================================
-
 class Question {
   final String id;
   final String subject;
@@ -844,17 +706,7 @@ class Question {
   final List<String> options;
   final int correctIndex;
   final String explanation;
-
-  const Question({
-    required this.id,
-    required this.subject,
-    required this.year,
-    required this.questionText,
-    required this.options,
-    required this.correctIndex,
-    this.explanation = '',
-  });
-
+  const Question({required this.id, required this.subject, required this.year, required this.questionText, required this.options, required this.correctIndex, this.explanation = ''});
   factory Question.fromJson(Map<String, dynamic> json, {String? fallbackId}) {
     return Question(
       id: (json['id'] as String?) ?? fallbackId ?? '${json['subject']}_${json['year']}_${json.hashCode}',
@@ -866,16 +718,7 @@ class Question {
       explanation: (json['explanation'] as String?) ?? '',
     );
   }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'subject': subject,
-        'year': year,
-        'question': questionText,
-        'options': options,
-        'correctIndex': correctIndex,
-        'explanation': explanation,
-      };
+  Map<String, dynamic> toJson() => {'id': id, 'subject': subject, 'year': year, 'question': questionText, 'options': options, 'correctIndex': correctIndex, 'explanation': explanation};
 }
 
 class SubjectInfo {
@@ -904,24 +747,22 @@ const List<SubjectInfo> kSubjects = [
 
 class QuestionRepository {
   QuestionRepository._();
-
   static List<Question> _questions = _buildFromRawData([
-  ...englishQuestions,
-  ...mathematicsQuestions,
-  ...physicsQuestions,
-  ...chemistryQuestions,
-  ...biologyQuestions,
-  ...economicsQuestions,
-  ...governmentQuestions,
-  ...geographyQuestions,
-  ...literatureQuestions,
-  ...commerceQuestions,
-  ...accountingQuestions,
-  ...crsQuestions,
-  ...irsQuestions,
-  ...arabicQuestions,
-]);
-
+    ...englishQuestions,
+    ...mathematicsQuestions,
+    ...physicsQuestions,
+    ...chemistryQuestions,
+    ...biologyQuestions,
+    ...economicsQuestions,
+    ...governmentQuestions,
+    ...geographyQuestions,
+    ...literatureQuestions,
+    ...commerceQuestions,
+    ...accountingQuestions,
+    ...crsQuestions,
+    ...irsQuestions,
+    ...arabicQuestions,
+  ]);
   static List<Question> _buildFromRawData(List<Map<String, dynamic>> raw) {
     final List<Question> list = [];
     for (final map in raw) {
@@ -929,11 +770,9 @@ class QuestionRepository {
     }
     return list;
   }
-
   static void loadFromJsonList(List<Map<String, dynamic>> jsonList) {
     _questions = _buildFromRawData(jsonList);
   }
-
   static void loadFromJsonString(String jsonStr) {
     try {
       final decoded = jsonDecode(jsonStr) as List<dynamic>;
@@ -942,24 +781,19 @@ class QuestionRepository {
       debugPrint('[QuestionRepository] loadFromJsonString failed — invalid JSON: $e');
     }
   }
-
   static List<Question> getAll() => List.unmodifiable(_questions);
-
   static List<Question> getForSubject(String subject) => _questions.where((q) => q.subject == subject).toList();
 }
 
 class NaijaLearnApp extends StatelessWidget {
   const NaijaLearnApp({super.key});
-
   static const Color _seed = AppColors.seedPrimary;
   static const Color _oceanSeed = AppColors.seedOcean;
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
     final coinService = context.watch<CoinService>();
     final seedColor = coinService.oceanThemeActive ? _oceanSeed : _seed;
-
     return MaterialApp(
       title: 'NaijaLearn',
       navigatorKey: navigatorKey,
@@ -974,7 +808,6 @@ class NaijaLearnApp extends StatelessWidget {
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
@@ -983,7 +816,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late final AnimationController _controller;
   late final Animation<double> _fade;
   late final Animation<double> _scale;
-
   static const Duration _splashDuration = Duration(seconds: 5);
 
   @override
@@ -995,22 +827,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _controller.forward();
     Timer(_splashDuration, () async {
       if (!mounted) return;
-
       final updateResult = await AppUpdateService.instance.checkForUpdate();
       if (!mounted) return;
       if (updateResult.mustUpdate) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            transitionDuration: const Duration(milliseconds: 500),
-            pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult)),
-          ),
-        );
+        Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult))));
         return;
       }
-
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       Widget destination;
-
       if (hasSession) {
         if (AuthService.instance.isOtpVerifiedForCurrentSession) {
           try {
@@ -1025,14 +849,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       } else {
         destination = const LoginScreen();
       }
-
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 500),
-          pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: destination),
-        ),
-      );
+      Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: destination)));
     });
   }
 
@@ -1049,9 +867,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.primary, scheme.primaryContainer]),
-        ),
+        decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.primary, scheme.primaryContainer])),
         child: Center(
           child: FadeTransition(
             opacity: _fade,
@@ -1063,11 +879,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   Container(
                     width: 110,
                     height: 110,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 8))],
-                    ),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 8))]),
                     child: Icon(Icons.school_rounded, size: 60, color: scheme.primary),
                   ),
                   const SizedBox(height: 24),
@@ -1086,9 +898,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
 class HomeScreen extends StatefulWidget {
   final ZetraProfile? profile;
-
   const HomeScreen({super.key, this.profile});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -1112,35 +922,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pickCountAndStart(BuildContext context, SubjectInfo subject) async {
-    final count = await showModalBottomSheet<int>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => QuestionCountPickerSheet(subject: subject),
-    );
+    final count = await showModalBottomSheet<int>(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => QuestionCountPickerSheet(subject: subject));
     if (count == null || !context.mounted) return;
-
     final allQuestions = QuestionRepository.getForSubject(subject.name);
     final shuffled = List<Question>.from(allQuestions)..shuffle();
     final questions = (count == -1 || count >= shuffled.length) ? shuffled : shuffled.take(count).toList();
     if (!context.mounted) return;
-
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)));
   }
 
   Future<void> _pickCertificationSubject(BuildContext context) async {
-    final subject = await showModalBottomSheet<SubjectInfo>(
-      context: context,
-      builder: (_) => ListView(
-        children: kSubjects
-            .map((s) => ListTile(
-                  leading: Icon(s.icon, color: s.color),
-                  title: Text(s.name),
-                  onTap: () => Navigator.pop(context, s),
-                ))
-            .toList(),
-      ),
-    );
+    final subject = await showModalBottomSheet<SubjectInfo>(context: context, builder: (_) => ListView(children: kSubjects.map((s) => ListTile(leading: Icon(s.icon, color: s.color), title: Text(s.name), onTap: () => Navigator.pop(context, s))).toList()));
     if (subject != null && context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => CertificationHomeScreen(subject: subject)));
     }
@@ -1155,7 +947,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _ProgressTab(onPickCertificationSubject: () => _pickCertificationSubject(context)),
       const _ProfileTab(),
     ];
-
     return Scaffold(
       body: IndexedStack(index: _tabIndex, children: tabs),
       bottomNavigationBar: NavigationBar(
@@ -1177,7 +968,6 @@ class _HomeTab extends StatelessWidget {
   final ZetraProfile? profile;
   final void Function(SubjectInfo) onPracticeSubject;
   const _HomeTab({required this.profile, required this.onPracticeSubject});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1185,13 +975,11 @@ class _HomeTab extends StatelessWidget {
     final stats = provider.stats;
     final daily = provider.dailyChallenge;
     provider.refreshDailyChallengeIfNeeded();
-
     SubjectInfo? lastSubject;
     if (provider.lastPracticedSubject.isNotEmpty) {
       final matches = kSubjects.where((s) => s.name == provider.lastPracticedSubject);
       lastSubject = matches.isEmpty ? null : matches.first;
     }
-
     return Scaffold(
       body: SafeArea(
         child: CustomScrollView(
@@ -1201,21 +989,14 @@ class _HomeTab extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(14)),
-                      child: Icon(Icons.school_rounded, color: scheme.onPrimaryContainer),
-                    ),
+                    Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(14)), child: Icon(Icons.school_rounded, color: scheme.onPrimaryContainer)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('NaijaLearn', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                          Text(
-                            profile != null ? 'Welcome back, ${profile!.username}' : 'Practice. Prepare. Pass.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                          Text(profile != null ? 'Welcome back, ${profile!.username}' : 'Practice. Prepare. Pass.', style: Theme.of(context).textTheme.bodySmall),
                         ],
                       ),
                     ),
@@ -1248,50 +1029,33 @@ class _HomeTab extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Container(
                   padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1.4),
-                  ),
+                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1.4)),
                   child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
-                        child: const Icon(Icons.calendar_today_rounded, color: Colors.amber),
-                      ),
+                      Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.calendar_today_rounded, color: Colors.amber)),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text('Daily Challenge', style: TextStyle(fontWeight: FontWeight.bold)),
-                            Text(
-                              daily == null
-                                  ? 'Loading...'
-                                  : (daily.completed
-                                      ? 'Completed today — ${daily.score}/${daily.questions.length} ✅'
-                                      : '${daily.questions.length} mixed questions waiting'),
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                            Text(daily == null ? 'Loading...' : (daily.completed ? 'Completed today — ${daily.score}/${daily.questions.length} ✅' : '${daily.questions.length} mixed questions waiting'), style: Theme.of(context).textTheme.bodySmall),
                           ],
                         ),
                       ),
                       FilledButton(
                         onPressed: daily == null || daily.completed
                             ? null
-                            : () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => QuizScreen(
-                                      questions: daily.questions,
-                                      title: 'Daily Challenge',
-                                      onComplete: (score) {
-                                        context.read<AppProvider>().submitDailyChallenge(score);
-                                        Navigator.pop(context);
-                                      },
-                                    ),
+                            : () => Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => QuizScreen(
+                                    questions: daily.questions,
+                                    title: 'Daily Challenge',
+                                    onComplete: (score) {
+                                      context.read<AppProvider>().submitDailyChallenge(score);
+                                      Navigator.pop(context);
+                                    },
                                   ),
-                                ),
+                                )),
                         child: const Text('Start'),
                       ),
                     ],
@@ -1313,11 +1077,7 @@ class _HomeTab extends StatelessWidget {
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: lastSubject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)),
-                              child: Icon(lastSubject.icon, color: lastSubject.color),
-                            ),
+                            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: lastSubject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)), child: Icon(lastSubject.icon, color: lastSubject.color)),
                             const SizedBox(width: 14),
                             Expanded(
                               child: Column(
@@ -1345,22 +1105,11 @@ class _HomeTab extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.flag_rounded, size: 20, color: scheme.primary),
-                          const SizedBox(width: 8),
-                          const Text('Daily Goal', style: TextStyle(fontWeight: FontWeight.bold)),
-                        ],
-                      ),
+                      Row(children: [Icon(Icons.flag_rounded, size: 20, color: scheme.primary), const SizedBox(width: 8), const Text('Daily Goal', style: TextStyle(fontWeight: FontWeight.bold))]),
                       const SizedBox(height: 10),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          value: provider.dailyGoalProgress,
-                          minHeight: 10,
-                          backgroundColor: scheme.surface,
-                          valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? Colors.green : scheme.primary),
-                        ),
+                        child: LinearProgressIndicator(value: provider.dailyGoalProgress, minHeight: 10, backgroundColor: scheme.surface, valueColor: AlwaysStoppedAnimation(provider.dailyGoalMet ? Colors.green : scheme.primary)),
                       ),
                       const SizedBox(height: 6),
                       Text(dailyGoalStatusText(provider), style: Theme.of(context).textTheme.bodySmall),
@@ -1369,12 +1118,7 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Text('Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-              ),
-            ),
+            SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 4), child: Text('Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)))),
             SliverToBoxAdapter(
               child: SizedBox(
                 height: 96,
@@ -1399,8 +1143,7 @@ class _HomeTab extends StatelessWidget {
                             children: [
                               Icon(subject.icon, color: subject.color, size: 26),
                               const SizedBox(height: 6),
-                              Text(subject.name,
-                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                              Text(subject.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
                             ],
                           ),
                         ),
@@ -1415,23 +1158,9 @@ class _HomeTab extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: _HomeQuickCard(
-                        icon: Icons.school_rounded,
-                        label: 'Mock Exam',
-                        color: scheme.primary,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen())),
-                      ),
-                    ),
+                    Expanded(child: _HomeQuickCard(icon: Icons.school_rounded, label: 'Mock Exam', color: scheme.primary, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen())))),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: _HomeQuickCard(
-                        icon: Icons.psychology_alt_rounded,
-                        label: 'AI Study Coach',
-                        color: Colors.deepPurple,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen())),
-                      ),
-                    ),
+                    Expanded(child: _HomeQuickCard(icon: Icons.psychology_alt_rounded, label: 'AI Study Coach', color: Colors.deepPurple, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen())))),
                   ],
                 ),
               ),
@@ -1449,7 +1178,6 @@ class _HomeQuickCard extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   const _HomeQuickCard({required this.icon, required this.label, required this.color, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1478,7 +1206,6 @@ class LessonsScreen extends StatelessWidget {
   final String subject;
   final List<Map<String, dynamic>> lessons;
   const LessonsScreen({super.key, required this.subject, required this.lessons});
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1496,9 +1223,7 @@ class LessonsScreen extends StatelessWidget {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               title: Text(lesson['chapterTitle'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
               trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => LessonDetailScreen(title: lesson['chapterTitle'] as String, body: lesson['body'] as String)),
-              ),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LessonDetailScreen(title: lesson['chapterTitle'] as String, body: lesson['body'] as String))),
             ),
           );
         },
@@ -1511,23 +1236,15 @@ class LessonDetailScreen extends StatelessWidget {
   final String title;
   final String body;
   const LessonDetailScreen({super.key, required this.title, required this.body});
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Text(body, style: const TextStyle(fontSize: 15, height: 1.6)),
-      ),
-    );
+    return Scaffold(appBar: AppBar(title: Text(title)), body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Text(body, style: const TextStyle(fontSize: 15, height: 1.6))));
   }
 }
 
 class _StudyTab extends StatelessWidget {
   final void Function(SubjectInfo) onPracticeSubject;
   const _StudyTab({required this.onPracticeSubject});
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1553,23 +1270,15 @@ class _StudyTab extends StatelessWidget {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-              child: Text('All Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            ),
-          ),
+          SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 8), child: Text('All Subjects', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)))),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
             sliver: SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.15),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final subject = kSubjects[index];
-                  return SubjectCard(subject: subject, onTap: () => onPracticeSubject(subject));
-                },
-                childCount: kSubjects.length,
-              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final subject = kSubjects[index];
+                return SubjectCard(subject: subject, onTap: () => onPracticeSubject(subject));
+              }, childCount: kSubjects.length),
             ),
           ),
         ],
@@ -1580,7 +1289,6 @@ class _StudyTab extends StatelessWidget {
 
 class _CommunityTab extends StatelessWidget {
   const _CommunityTab();
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1593,12 +1301,7 @@ class _CommunityTab extends StatelessWidget {
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'World Challenge', subtitle: 'Weekly competition, 500 Cent entry', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen()))),
           _MenuTile(icon: Icons.groups_2_rounded, label: 'Study Squads', subtitle: 'Study together, chat, battle other squads', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen()))),
           _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
-          _MenuTile(
-            icon: Icons.bolt_rounded,
-            label: 'Challenge a Friend',
-            subtitle: 'Share questions, compare scores',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChallengesHubScreen())),
-          ),
+          _MenuTile(icon: Icons.bolt_rounded, label: 'Challenge a Friend', subtitle: 'Share questions, compare scores', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChallengesHubScreen()))),
         ],
       ),
     );
@@ -1608,7 +1311,6 @@ class _CommunityTab extends StatelessWidget {
 class _ProgressTab extends StatelessWidget {
   final VoidCallback onPickCertificationSubject;
   const _ProgressTab({required this.onPickCertificationSubject});
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1638,13 +1340,11 @@ class _ProgressTab extends StatelessWidget {
 
 class _ProfileTab extends StatelessWidget {
   const _ProfileTab();
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
     final stats = provider.stats;
     final scheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('👤 Profile'), automaticallyImplyLeading: false),
       body: ListView(
@@ -1690,25 +1390,13 @@ class _ProfileTab extends StatelessWidget {
                 final client = Supabase.instance.client;
                 final all = QuestionRepository.getAll();
                 const batchSize = 200;
-
                 for (var i = 0; i < all.length; i += batchSize) {
-                  final batch = all.skip(i).take(batchSize).map((q) => {
-                    'id': q.id,
-                    'subject': q.subject,
-                    'question_text': q.questionText,
-                    'options': q.options,
-                    'correct_index': q.correctIndex,
-                  }).toList();
+                  final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
                   await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
                 }
-
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
-                }
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
               } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
-                }
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
               }
             },
           ),
@@ -1716,12 +1404,7 @@ class _ProfileTab extends StatelessWidget {
           Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
           Container(
             decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
-            child: SwitchListTile(
-              secondary: Icon(provider.darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded),
-              title: const Text('Dark Mode'),
-              value: provider.darkMode,
-              onChanged: (_) => provider.toggleDarkMode(),
-            ),
+            child: SwitchListTile(secondary: Icon(provider.darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded), title: const Text('Dark Mode'), value: provider.darkMode, onChanged: (_) => provider.toggleDarkMode()),
           ),
           const SizedBox(height: 8),
           Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Support', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
@@ -1745,20 +1428,12 @@ class _ProfileTab extends StatelessWidget {
                 );
                 if (confirmed == true) {
                   await AuthService.instance.signOut();
-                  if (context.mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
-                  }
+                  if (context.mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
                 }
               },
               child: const Padding(
                 padding: EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.logout_rounded, color: Colors.red),
-                    SizedBox(width: 12),
-                    Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
-                  ],
-                ),
+                child: Row(children: [Icon(Icons.logout_rounded, color: Colors.red), SizedBox(width: 12), Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600))]),
               ),
             ),
           ),
@@ -1776,7 +1451,6 @@ class RevisionNote {
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
-
   @override
   State<NotesScreen> createState() => _NotesScreenState();
 }
@@ -1787,7 +1461,6 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<void> _addOrEditNote({RevisionNote? existing, int? index}) async {
     final titleController = TextEditingController(text: existing?.title ?? '');
     final bodyController = TextEditingController(text: existing?.body ?? '');
-
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -1810,13 +1483,10 @@ class _NotesScreenState extends State<NotesScreen> {
         );
       },
     );
-
     if (saved != true) return;
     if (!mounted) return;
-
     final newTitle = titleController.text.trim().isEmpty ? 'Untitled' : titleController.text.trim();
     final newBody = bodyController.text.trim();
-
     setState(() {
       if (existing != null) {
         existing.title = newTitle;
@@ -1897,13 +1567,11 @@ class _SupportContact {
 
 class ContactSupportScreen extends StatelessWidget {
   const ContactSupportScreen({super.key});
-
   static final List<_SupportContact> _general = [
     _SupportContact(icon: Icons.chat_rounded, color: const Color(0xFF25D366), label: 'WhatsApp (Private Line)', value: '+234 805 660 4409', subtitle: 'Fastest way to reach the team directly', uri: Uri.parse('https://wa.me/2348056604409')),
     _SupportContact(icon: Icons.phone_rounded, color: Colors.blue, label: 'Official Support Line', value: '0806 542 5732', subtitle: 'Call for general enquiries', uri: Uri.parse('tel:08065425732')),
     _SupportContact(icon: Icons.email_rounded, color: Colors.orange, label: 'App Support Email', value: 'naijalearn01@gmail.com', subtitle: 'Bugs, account issues, feedback', uri: Uri.parse('mailto:naijalearn01@gmail.com?subject=NaijaLearn%20Support')),
   ];
-
   static final List<_SupportContact> _company = [
     _SupportContact(icon: Icons.business_rounded, color: Colors.indigo, label: 'Zetra Company Email', value: 'zetraworld0@gmail.com', subtitle: 'General company enquiries', uri: Uri.parse('mailto:zetraworld0@gmail.com?subject=NaijaLearn%20Enquiry')),
     _SupportContact(icon: Icons.person_rounded, color: Colors.deepPurple, label: 'Founder / CEO', value: 'coderinnovator@gmail.com', subtitle: 'Direct line to the founder', uri: Uri.parse('mailto:coderinnovator@gmail.com?subject=NaijaLearn%20-%20Message%20for%20the%20CEO')),
@@ -1911,14 +1579,10 @@ class ContactSupportScreen extends StatelessWidget {
 
   Future<void> _open(BuildContext context, Uri uri) async {
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!opened && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open that automatically. Please reach out manually.')));
-    }
+    if (!opened && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open that automatically. Please reach out manually.')));
   }
 
-  Widget _sectionLabel(BuildContext context, String text) {
-    return Padding(padding: const EdgeInsets.fromLTRB(4, 20, 4, 8), child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)));
-  }
+  Widget _sectionLabel(BuildContext context, String text) => Padding(padding: const EdgeInsets.fromLTRB(4, 20, 4, 8), child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)));
 
   Widget _contactTile(BuildContext context, _SupportContact c) {
     final scheme = Theme.of(context).colorScheme;
@@ -1967,13 +1631,7 @@ class ContactSupportScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.4), borderRadius: BorderRadius.circular(18)),
-            child: Row(
-              children: [
-                Icon(Icons.support_agent_rounded, color: scheme.primary, size: 28),
-                const SizedBox(width: 12),
-                const Expanded(child: Text('Having a problem or challenge with the app? Reach out through any of the channels below — we read everything.', style: TextStyle(fontSize: 13))),
-              ],
-            ),
+            child: Row(children: [Icon(Icons.support_agent_rounded, color: scheme.primary, size: 28), const SizedBox(width: 12), const Expanded(child: Text('Having a problem or challenge with the app? Reach out through any of the channels below — we read everything.', style: TextStyle(fontSize: 13)))]),
           ),
           _sectionLabel(context, 'Talk to the Team'),
           ..._general.map((c) => _contactTile(context, c)),
@@ -2015,7 +1673,6 @@ class _StatPill extends StatelessWidget {
   final String value;
   final String label;
   const _StatPill({required this.icon, required this.color, required this.value, required this.label});
-
   @override
   Widget build(BuildContext context) {
     return Expanded(
@@ -2037,7 +1694,6 @@ class _MenuTile extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   const _MenuTile({required this.icon, required this.label, required this.subtitle, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2078,7 +1734,6 @@ class SubjectCard extends StatelessWidget {
   final SubjectInfo subject;
   final VoidCallback onTap;
   const SubjectCard({super.key, required this.subject, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2108,15 +1763,12 @@ class SubjectCard extends StatelessWidget {
 class QuestionCountPickerSheet extends StatelessWidget {
   final SubjectInfo subject;
   const QuestionCountPickerSheet({super.key, required this.subject});
-
   static const List<int> _counts = [10, 20, 40, 60];
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final total = QuestionRepository.getForSubject(subject.name).length;
     final availableCounts = _counts.where((c) => c <= total).toList();
-
     return DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.35,
@@ -2154,13 +1806,7 @@ class QuestionCountPickerSheet extends StatelessWidget {
                             onTap: () => Navigator.of(context).pop(count),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                              child: Row(
-                                children: [
-                                  Text('$count questions', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  const Spacer(),
-                                  const Icon(Icons.chevron_right_rounded),
-                                ],
-                              ),
+                              child: Row(children: [Text('$count questions', style: const TextStyle(fontWeight: FontWeight.w600)), const Spacer(), const Icon(Icons.chevron_right_rounded)]),
                             ),
                           ),
                         ),
@@ -2181,9 +1827,7 @@ class ExamInstructionsScreen extends StatelessWidget {
   final SubjectInfo subject;
   final List<Question> questions;
   const ExamInstructionsScreen({super.key, required this.subject, required this.questions});
-
   static const int durationMinutes = 20;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2198,13 +1842,7 @@ class ExamInstructionsScreen extends StatelessWidget {
               children: [
                 Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: subject.color.withOpacity(0.15), borderRadius: BorderRadius.circular(16)), child: Icon(subject.icon, color: subject.color, size: 32)),
                 const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(subject.name, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                    Text('Practice Set', style: Theme.of(context).textTheme.bodyMedium),
-                  ],
-                ),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(subject.name, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), Text('Practice Set', style: Theme.of(context).textTheme.bodyMedium)]),
               ],
             ),
             const SizedBox(height: 28),
@@ -2220,11 +1858,7 @@ class ExamInstructionsScreen extends StatelessWidget {
                 children: const [
                   Text('Instructions', style: TextStyle(fontWeight: FontWeight.bold)),
                   SizedBox(height: 8),
-                  Text('• Answer all questions before time runs out.\n'
-                      '• You may skip a question and return to it later.\n'
-                      '• Use the question navigator to jump to any question.\n'
-                      '• The exam auto-submits when the timer reaches zero.\n'
-                      '• Completing this exam also earns XP toward your level.'),
+                  Text('• Answer all questions before time runs out.\n• You may skip a question and return to it later.\n• Use the question navigator to jump to any question.\n• The exam auto-submits when the timer reaches zero.\n• Completing this exam also earns XP toward your level.'),
                 ],
               ),
             ),
@@ -2235,13 +1869,7 @@ class ExamInstructionsScreen extends StatelessWidget {
               child: FilledButton.icon(
                 icon: const Icon(Icons.play_arrow_rounded),
                 label: const Text('Start Exam', style: TextStyle(fontSize: 16)),
-                onPressed: questions.isEmpty
-                    ? null
-                    : () {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (_) => ExamScreen(subject: subject, questions: questions, durationMinutes: durationMinutes)),
-                        );
-                      },
+                onPressed: questions.isEmpty ? null : () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ExamScreen(subject: subject, questions: questions, durationMinutes: durationMinutes))),
               ),
             ),
           ],
@@ -2256,21 +1884,12 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
   const _InfoTile({required this.icon, required this.label, required this.value});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: scheme.primary),
-          const SizedBox(width: 12),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          const Spacer(),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ],
-      ),
+      child: Row(children: [Icon(icon, size: 20, color: scheme.primary), const SizedBox(width: 12), Text(label, style: Theme.of(context).textTheme.bodyMedium), const Spacer(), Text(value, style: const TextStyle(fontWeight: FontWeight.w600))]),
     );
   }
 }
@@ -2281,9 +1900,7 @@ class ExamScreen extends StatefulWidget {
   final SubjectInfo subject;
   final List<Question> questions;
   final int durationMinutes;
-
   const ExamScreen({super.key, required this.subject, required this.questions, required this.durationMinutes});
-
   @override
   State<ExamScreen> createState() => _ExamScreenState();
 }
@@ -2294,7 +1911,6 @@ class _ExamScreenState extends State<ExamScreen> {
   int _currentIndex = 0;
   late int _remainingSeconds;
   Timer? _timer;
-
   final Set<String> _bookmarkedIds = {};
 
   @override
@@ -2348,13 +1964,9 @@ class _ExamScreenState extends State<ExamScreen> {
 
   void _skipQuestion() {
     setState(() {
-      if (_statuses[_currentIndex] == QuestionStatus.unanswered) {
-        _statuses[_currentIndex] = QuestionStatus.skipped;
-      }
+      if (_statuses[_currentIndex] == QuestionStatus.unanswered) _statuses[_currentIndex] = QuestionStatus.skipped;
     });
-    if (_currentIndex < widget.questions.length - 1) {
-      _goTo(_currentIndex + 1);
-    }
+    if (_currentIndex < widget.questions.length - 1) _goTo(_currentIndex + 1);
   }
 
   Future<void> _toggleBookmark(Question question) async {
@@ -2367,9 +1979,7 @@ class _ExamScreenState extends State<ExamScreen> {
         _bookmarkedIds.add(question.id);
       }
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_bookmarkedIds.contains(question.id) ? 'Bookmarked for later' : 'Bookmark removed'), duration: const Duration(seconds: 1)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_bookmarkedIds.contains(question.id) ? 'Bookmarked for later' : 'Bookmark removed'), duration: const Duration(seconds: 1)));
   }
 
   Future<void> _confirmSubmit() async {
@@ -2391,43 +2001,23 @@ class _ExamScreenState extends State<ExamScreen> {
     _timer?.cancel();
     int correct = 0;
     for (int i = 0; i < widget.questions.length; i++) {
-      if (_selectedAnswers[i] != null && _selectedAnswers[i] == widget.questions[i].correctIndex) {
-        correct++;
-      }
+      if (_selectedAnswers[i] != null && _selectedAnswers[i] == widget.questions[i].correctIndex) correct++;
     }
     final skipped = _statuses.where((s) => s == QuestionStatus.skipped).length;
     final unanswered = _selectedAnswers.where((a) => a == null).length;
-
     final provider = context.read<AppProvider>();
     provider.recordAnswer(widget.subject.name, correct, widget.questions.length);
     provider.addXP(correct * 10);
-
     final wrongIds = <String>[];
     for (int i = 0; i < widget.questions.length; i++) {
-      if (_selectedAnswers[i] == null || _selectedAnswers[i] != widget.questions[i].correctIndex) {
-        wrongIds.add(widget.questions[i].id);
-      }
+      if (_selectedAnswers[i] == null || _selectedAnswers[i] != widget.questions[i].correctIndex) wrongIds.add(widget.questions[i].id);
     }
-    if (wrongIds.isNotEmpty) {
-      MistakeVaultService.instance.recordWrongAnswers(subject: widget.subject.name, questionIds: wrongIds);
-    }
-
-    CertificationService.instance.recordPracticeSession(
-      subject: widget.subject.name,
-      questionsAnswered: widget.questions.length,
-      correctAnswers: correct,
-      questionIdsCovered: widget.questions.map((q) => q.id).toSet(),
-    );
-
+    if (wrongIds.isNotEmpty) MistakeVaultService.instance.recordWrongAnswers(subject: widget.subject.name, questionIds: wrongIds);
+    CertificationService.instance.recordPracticeSession(subject: widget.subject.name, questionsAnswered: widget.questions.length, correctAnswers: correct, questionIdsCovered: widget.questions.map((q) => q.id).toSet());
     MasteryService.instance.recordSession(subject: widget.subject.name, correct: correct, total: widget.questions.length);
     ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
     SquadService.instance.recordActivity(activityType: 'question', amount: correct, subject: widget.subject.name);
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => ResultsScreen(subject: widget.subject, questions: widget.questions, selectedAnswers: _selectedAnswers, correctCount: correct, skippedCount: skipped, unansweredCount: unanswered),
-      ),
-    );
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ResultsScreen(subject: widget.subject, questions: widget.questions, selectedAnswers: _selectedAnswers, correctCount: correct, skippedCount: skipped, unansweredCount: unanswered)));
   }
 
   void _openNavigator() {
@@ -2455,7 +2045,6 @@ class _ExamScreenState extends State<ExamScreen> {
     final answeredCount = _selectedAnswers.where((a) => a != null).length;
     final progress = (answeredCount) / widget.questions.length;
     final isLowTime = _remainingSeconds <= 60;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.subject.name),
@@ -2464,13 +2053,7 @@ class _ExamScreenState extends State<ExamScreen> {
             margin: const EdgeInsets.only(right: 12),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(color: isLowTime ? scheme.errorContainer : scheme.primaryContainer, borderRadius: BorderRadius.circular(20)),
-            child: Row(
-              children: [
-                Icon(Icons.timer_rounded, size: 18, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer),
-                const SizedBox(width: 6),
-                Text(_formattedTime, style: TextStyle(fontWeight: FontWeight.bold, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer)),
-              ],
-            ),
+            child: Row(children: [Icon(Icons.timer_rounded, size: 18, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer), const SizedBox(width: 6), Text(_formattedTime, style: TextStyle(fontWeight: FontWeight.bold, color: isLowTime ? scheme.onErrorContainer : scheme.onPrimaryContainer))]),
           ),
         ],
       ),
@@ -2482,13 +2065,7 @@ class _ExamScreenState extends State<ExamScreen> {
               children: [
                 ClipRRect(borderRadius: BorderRadius.circular(8), child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: scheme.surfaceContainerHighest)),
                 const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Question ${_currentIndex + 1} of ${widget.questions.length}', style: Theme.of(context).textTheme.bodySmall),
-                    TextButton.icon(onPressed: _openNavigator, icon: const Icon(Icons.grid_view_rounded, size: 18), label: const Text('Navigator')),
-                  ],
-                ),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Question ${_currentIndex + 1} of ${widget.questions.length}', style: Theme.of(context).textTheme.bodySmall), TextButton.icon(onPressed: _openNavigator, icon: const Icon(Icons.grid_view_rounded, size: 18), label: const Text('Navigator'))]),
                 PaceMeter(answeredCount: answeredCount, totalQuestions: widget.questions.length, remainingSeconds: _remainingSeconds, totalSeconds: widget.durationMinutes * 60),
               ],
             ),
@@ -2496,10 +2073,7 @@ class _ExamScreenState extends State<ExamScreen> {
           Expanded(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation), child: child),
-              ),
+              transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation), child: child)),
               child: SingleChildScrollView(
                 key: ValueKey(_currentIndex),
                 padding: const EdgeInsets.all(20),
@@ -2515,11 +2089,7 @@ class _ExamScreenState extends State<ExamScreen> {
                         children: [
                           Expanded(child: Text(question.questionText, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.4))),
                           const SizedBox(width: 8),
-                          IconButton(
-                            icon: Icon(isBookmarked ? Icons.star_rounded : Icons.star_border_rounded, color: isBookmarked ? Colors.amber : scheme.onSurfaceVariant),
-                            tooltip: 'Bookmark this question',
-                            onPressed: () => _toggleBookmark(question),
-                          ),
+                          IconButton(icon: Icon(isBookmarked ? Icons.star_rounded : Icons.star_border_rounded, color: isBookmarked ? Colors.amber : scheme.onSurfaceVariant), tooltip: 'Bookmark this question', onPressed: () => _toggleBookmark(question)),
                         ],
                       ),
                     ),
@@ -2540,11 +2110,7 @@ class _ExamScreenState extends State<ExamScreen> {
                               decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? scheme.primary : scheme.outlineVariant, width: isSelected ? 2 : 1)),
                               child: Row(
                                 children: [
-                                  CircleAvatar(
-                                    radius: 14,
-                                    backgroundColor: isSelected ? scheme.primary : scheme.surfaceContainerHighest,
-                                    child: Text(letter, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant)),
-                                  ),
+                                  CircleAvatar(radius: 14, backgroundColor: isSelected ? scheme.primary : scheme.surfaceContainerHighest, child: Text(letter, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? scheme.onPrimary : scheme.onSurfaceVariant))),
                                   const SizedBox(width: 14),
                                   Expanded(child: Text(question.options[i], style: const TextStyle(fontSize: 15))),
                                 ],
@@ -2569,11 +2135,7 @@ class _ExamScreenState extends State<ExamScreen> {
                   const SizedBox(width: 10),
                   Expanded(child: OutlinedButton.icon(onPressed: _skipQuestion, icon: const Icon(Icons.skip_next_rounded), label: const Text('Skip'))),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: _currentIndex == widget.questions.length - 1
-                        ? FilledButton.icon(onPressed: _confirmSubmit, icon: const Icon(Icons.check_rounded), label: const Text('Submit'))
-                        : FilledButton.icon(onPressed: () => _goTo(_currentIndex + 1), icon: const Icon(Icons.chevron_right_rounded), label: const Text('Next')),
-                  ),
+                  Expanded(child: _currentIndex == widget.questions.length - 1 ? FilledButton.icon(onPressed: _confirmSubmit, icon: const Icon(Icons.check_rounded), label: const Text('Submit')) : FilledButton.icon(onPressed: () => _goTo(_currentIndex + 1), icon: const Icon(Icons.chevron_right_rounded), label: const Text('Next'))),
                 ],
               ),
             ),
@@ -2589,7 +2151,6 @@ class QuestionNavigatorSheet extends StatelessWidget {
   final List<QuestionStatus> statuses;
   final int currentIndex;
   final ValueChanged<int> onSelect;
-
   const QuestionNavigatorSheet({super.key, required this.totalQuestions, required this.statuses, required this.currentIndex, required this.onSelect});
 
   Color _colorFor(BuildContext context, QuestionStatus status, bool isCurrent) {
@@ -2619,16 +2180,7 @@ class QuestionNavigatorSheet extends StatelessWidget {
           children: [
             Text('Question Navigator', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children: [
-                _LegendDot(color: Colors.green, label: 'Answered'),
-                _LegendDot(color: Colors.orange, label: 'Skipped'),
-                _LegendDot(color: scheme.surfaceContainerHighest, label: 'Unanswered', border: true),
-                _LegendDot(color: scheme.primary, label: 'Current'),
-              ],
-            ),
+            Wrap(spacing: 16, runSpacing: 8, children: [_LegendDot(color: Colors.green, label: 'Answered'), _LegendDot(color: Colors.orange, label: 'Skipped'), _LegendDot(color: scheme.surfaceContainerHighest, label: 'Unanswered', border: true), _LegendDot(color: scheme.primary, label: 'Current')]),
             const SizedBox(height: 16),
             Flexible(
               child: GridView.builder(
@@ -2642,11 +2194,7 @@ class QuestionNavigatorSheet extends StatelessWidget {
                   return Material(
                     color: isFilled ? color : Colors.transparent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: color, width: isFilled ? 0 : 1.4)),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => onSelect(index),
-                      child: Center(child: Text('${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: isFilled ? Colors.white : scheme.onSurface))),
-                    ),
+                    child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => onSelect(index), child: Center(child: Text('${index + 1}', style: TextStyle(fontWeight: FontWeight.bold, color: isFilled ? Colors.white : scheme.onSurface)))),
                   );
                 },
               ),
@@ -2663,16 +2211,11 @@ class _LegendDot extends StatelessWidget {
   final String label;
   final bool border;
   const _LegendDot({required this.color, required this.label, this.border = false});
-
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: border ? Border.all(color: Theme.of(context).colorScheme.outline) : null)),
-        const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ],
+      children: [Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: border ? Border.all(color: Theme.of(context).colorScheme.outline) : null)), const SizedBox(width: 6), Text(label, style: Theme.of(context).textTheme.bodySmall)],
     );
   }
 }
@@ -2684,11 +2227,9 @@ class ResultsScreen extends StatelessWidget {
   final int correctCount;
   final int skippedCount;
   final int unansweredCount;
-
   const ResultsScreen({super.key, required this.subject, required this.questions, required this.selectedAnswers, required this.correctCount, required this.skippedCount, required this.unansweredCount});
 
   double get _percentage => (correctCount / questions.length) * 100;
-
   String get _grade {
     final p = _percentage;
     if (p >= 75) return 'A';
@@ -2730,20 +2271,15 @@ class ResultsScreen extends StatelessWidget {
 
   String get _analysis {
     final p = _percentage;
-    if (p >= 75) {
-      return "Outstanding performance! You've demonstrated a strong grasp of ${subject.name}. Keep practising to maintain this level.";
-    } else if (p >= 50) {
-      return "Solid effort. You understand most of the ${subject.name} concepts, but reviewing the questions you missed will help you improve further.";
-    } else {
-      return "There's room for improvement. Focus on reviewing your wrong answers and revisit the core topics in ${subject.name} before your next attempt.";
-    }
+    if (p >= 75) return "Outstanding performance! You've demonstrated a strong grasp of ${subject.name}. Keep practising to maintain this level.";
+    if (p >= 50) return "Solid effort. You understand most of the ${subject.name} concepts, but reviewing the questions you missed will help you improve further.";
+    return "There's room for improvement. Focus on reviewing your wrong answers and revisit the core topics in ${subject.name} before your next attempt.";
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final actualWrong = questions.length - correctCount - unansweredCount;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Results'), automaticallyImplyLeading: false),
       body: SingleChildScrollView(
@@ -2761,18 +2297,8 @@ class ResultsScreen extends StatelessWidget {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      SizedBox(
-                        width: 180,
-                        height: 180,
-                        child: CircularProgressIndicator(value: value, strokeWidth: 12, backgroundColor: scheme.surfaceContainerHighest, valueColor: AlwaysStoppedAnimation(_gradeColor(context))),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('${(value * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
-                          Text('Grade $_grade', style: TextStyle(color: _gradeColor(context), fontWeight: FontWeight.w600)),
-                        ],
-                      ),
+                      SizedBox(width: 180, height: 180, child: CircularProgressIndicator(value: value, strokeWidth: 12, backgroundColor: scheme.surfaceContainerHighest, valueColor: AlwaysStoppedAnimation(_gradeColor(context)))),
+                      Column(mainAxisSize: MainAxisSize.min, children: [Text('${(value * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)), Text('Grade $_grade', style: TextStyle(color: _gradeColor(context), fontWeight: FontWeight.w600))]),
                     ],
                   ),
                 );
@@ -2783,21 +2309,9 @@ class ResultsScreen extends StatelessWidget {
             const SizedBox(height: 4),
             Text('${subject.name} • Practice Set', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
-              child: Text('+${correctCount * 10} XP earned', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
-            ),
+            Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), decoration: BoxDecoration(color: Colors.amber.withOpacity(0.15), borderRadius: BorderRadius.circular(20)), child: Text('+${correctCount * 10} XP earned', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                _StatCard(label: 'Correct', value: '$correctCount', color: Colors.green),
-                const SizedBox(width: 10),
-                _StatCard(label: 'Wrong', value: '$actualWrong', color: Colors.red),
-                const SizedBox(width: 10),
-                _StatCard(label: 'Skipped', value: '$unansweredCount', color: Colors.orange),
-              ],
-            ),
+            Row(children: [_StatCard(label: 'Correct', value: '$correctCount', color: Colors.green), const SizedBox(width: 10), _StatCard(label: 'Wrong', value: '$actualWrong', color: Colors.red), const SizedBox(width: 10), _StatCard(label: 'Skipped', value: '$unansweredCount', color: Colors.orange)]),
             const SizedBox(height: 20),
             Container(
               width: double.infinity,
@@ -2813,17 +2327,9 @@ class ResultsScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: FilledButton.icon(icon: const Icon(Icons.rate_review_rounded), label: const Text('Review Answers'), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReviewScreen(questions: questions, selectedAnswers: selectedAnswers)))),
-            ),
+            SizedBox(width: double.infinity, height: 52, child: FilledButton.icon(icon: const Icon(Icons.rate_review_rounded), label: const Text('Review Answers'), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReviewScreen(questions: questions, selectedAnswers: selectedAnswers))))),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton.icon(icon: const Icon(Icons.replay_rounded), label: const Text('Retake Exam'), onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions)))),
-            ),
+            SizedBox(width: double.infinity, height: 52, child: OutlinedButton.icon(icon: const Icon(Icons.replay_rounded), label: const Text('Retake Exam'), onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ExamInstructionsScreen(subject: subject, questions: questions))))),
             const SizedBox(height: 12),
             SizedBox(width: double.infinity, height: 52, child: TextButton.icon(icon: const Icon(Icons.home_rounded), label: const Text('Back to Home'), onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst))),
           ],
@@ -2838,20 +2344,13 @@ class _StatCard extends StatelessWidget {
   final String value;
   final Color color;
   const _StatCard({required this.label, required this.value, required this.color});
-
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
-        child: Column(
-          children: [
-            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
-            const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 12, color: color)),
-          ],
-        ),
+        child: Column(children: [Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)), const SizedBox(height: 2), Text(label, style: TextStyle(fontSize: 12, color: color))]),
       ),
     );
   }
@@ -2861,7 +2360,6 @@ class ReviewScreen extends StatelessWidget {
   final List<Question> questions;
   final List<int?> selectedAnswers;
   const ReviewScreen({super.key, required this.questions, required this.selectedAnswers});
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -2875,7 +2373,6 @@ class ReviewScreen extends StatelessWidget {
           final selected = selectedAnswers[index];
           final isCorrect = selected == question.correctIndex;
           final wasAnswered = selected != null;
-
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(16),
@@ -2895,9 +2392,7 @@ class ReviewScreen extends StatelessWidget {
                       tooltip: 'Bookmark for later',
                       onPressed: () async {
                         await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
-                        }
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
                       },
                     ),
                   ],
@@ -2934,14 +2429,7 @@ class ReviewScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.4), borderRadius: BorderRadius.circular(12)),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.lightbulb_outline_rounded, size: 18, color: scheme.primary),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(question.explanation, style: const TextStyle(fontSize: 12.5, fontStyle: FontStyle.italic))),
-                      ],
-                    ),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(Icons.lightbulb_outline_rounded, size: 18, color: scheme.primary), const SizedBox(width: 8), Expanded(child: Text(question.explanation, style: const TextStyle(fontSize: 12.5, fontStyle: FontStyle.italic)))]),
                   ),
                 ],
               ],
