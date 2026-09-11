@@ -41,8 +41,8 @@ import 'app_enhancements.dart' show AppProvider;
 import 'zetra_pay.dart';
 import 'wallet_display.dart' show WalletDisplayScreen;
 
-const int kConnectBabaEntryFeeCent = 45;
-const int kConnectBabaWinBonusCent = 30;
+const int kConnectBabaEntryFeeCent = 25;
+const int kConnectBabaWinBonusCent = 15;
 
 /// =========================================================================
 /// MODELS

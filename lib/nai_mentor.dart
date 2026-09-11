@@ -221,21 +221,22 @@ class NaiWallet {
   NaiWallet._();
   static SupabaseClient get _client => Supabase.instance.client;
 
-  // Pricing raised: 1¢ (1 naira) per message was too low to sustain
-  // Groq API costs at any real scale. New pricing:
-  //   - Single message: 5¢ (5 naira)
-  //   - 15-pack: 40¢ (40 naira) — ~2.67 naira/message, real bulk discount
-  //   - Day pass: unchanged (1 CP — its naira-equivalent is set in ZTC)
-  static const int singleMessagePriceCent = 15;
-  static const int packOf15PriceCent = 120;
+  // Pricing (final): 10¢ per message, 15-pack at 75¢ (5¢/message bulk
+  // discount), day pass at 1500¢. Note: 1500¢ is 1 CP + 500¢, NOT a
+  // clean CP amount (CoinService rolls over at 1000¢ = 1 CP) — every
+  // display string below reflects the real 1500¢ figure instead of a
+  // stale "1 CP" label, so the price shown always matches what's
+  // actually charged.
+  static const int singleMessagePriceCent = 10;
+  static const int packOf15PriceCent = 75;
   static const int packOf15Credits = 15;
-  static const int dayPassPriceCent = 3000;
+  static const int dayPassPriceCent = 1500;
 
   /// Human-readable pricing line shown under the chat input, in both
   /// NaiChatScreen and the legacy NaiMentorScreen. Derived from the
   /// constants above so the two never drift out of sync again.
   static String get pricingLabel =>
-      '${singleMessagePriceCent}¢ per message · $packOf15Credits for ${packOf15PriceCent}¢ · 1 CP for unlimited today';
+      '${singleMessagePriceCent}¢ per message · $packOf15Credits for ${packOf15PriceCent}¢ · ${dayPassPriceCent}¢ for unlimited today';
 
   static Future<bool> tryConsumeCredit() async {
     final result = await _client.rpc('nai_consume_message_credit');
@@ -318,7 +319,7 @@ Future<void> _showNaiPaywall(BuildContext context) async {
             const SizedBox(height: 10),
             _PaywallOption(
               title: 'Unlimited Today',
-              price: '1 CP',
+              price: '${NaiWallet.dayPassPriceCent}¢',
               subtitle: '24 hours, no limits',
               onTap: () async {
                 Navigator.pop(sheetContext);

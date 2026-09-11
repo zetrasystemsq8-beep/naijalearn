@@ -483,12 +483,12 @@ class CoinService extends ChangeNotifier {
   bool get isLoaded => _loaded;
 
   static const List<ShopItem> shopItems = [
-    ShopItem(id: 'frame_gold', name: 'Gold Avatar Frame', emoji: '🖼️', cost: 300, category: 'frame', usefulness: 'Adds a gold ring around your avatar on your Profile once equipped.'),
-    ShopItem(id: 'frame_fire', name: 'Fire Avatar Frame', emoji: '🔥', cost: 450, category: 'frame', usefulness: 'Adds a fire-orange ring around your avatar on your Profile once equipped.'),
-    ShopItem(id: 'title_scholar', name: 'Scholar Title', emoji: '🎓', cost: 240, category: 'title', usefulness: 'Shows a "📖 Scholar" badge next to your name on your Profile once equipped.'),
-    ShopItem(id: 'title_genius', name: 'Genius Title', emoji: '🧠', cost: 600, category: 'title', usefulness: 'Shows a "🧠 Genius" badge next to your name on your Profile once equipped.'),
-    ShopItem(id: 'theme_ocean', name: 'Ocean Theme Pack', emoji: '🌊', cost: 750, category: 'theme', usefulness: 'Re-skins the whole app in ocean-blue colors once activated.'),
-    ShopItem(id: 'streak_freeze', name: 'Streak Freeze', emoji: '🧊', cost: 150, category: 'consumable', usefulness: 'Automatically protects your streak the next time you miss a day.'),
+    ShopItem(id: 'frame_gold', name: 'Gold Avatar Frame', emoji: '🖼️', cost: 150, category: 'frame', usefulness: 'Adds a gold ring around your avatar on your Profile once equipped.'),
+    ShopItem(id: 'frame_fire', name: 'Fire Avatar Frame', emoji: '🔥', cost: 250, category: 'frame', usefulness: 'Adds a fire-orange ring around your avatar on your Profile once equipped.'),
+    ShopItem(id: 'title_scholar', name: 'Scholar Title', emoji: '🎓', cost: 120, category: 'title', usefulness: 'Shows a "📖 Scholar" badge next to your name on your Profile once equipped.'),
+    ShopItem(id: 'title_genius', name: 'Genius Title', emoji: '🧠', cost: 300, category: 'title', usefulness: 'Shows a "🧠 Genius" badge next to your name on your Profile once equipped.'),
+    ShopItem(id: 'theme_ocean', name: 'Ocean Theme Pack', emoji: '🌊', cost: 350, category: 'theme', usefulness: 'Re-skins the whole app in ocean-blue colors once activated.'),
+    ShopItem(id: 'streak_freeze', name: 'Streak Freeze', emoji: '🧊', cost: 75, category: 'consumable', usefulness: 'Automatically protects your streak the next time you miss a day.'),
   ];
 
   static const List<SpinExclusiveItem> spinExclusiveItems = [
