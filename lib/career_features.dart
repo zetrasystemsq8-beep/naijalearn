@@ -55,12 +55,12 @@ String dailyGoalStatusText(AppProvider provider) {
 /// =========================================================================
 
 const Map<BotDifficulty, int> kBotEntryFeeCent = {
-  BotDifficulty.rookie: 50,
-  BotDifficulty.scholar: 100,
-  BotDifficulty.ace: 200,
-  BotDifficulty.master: 500,
+  BotDifficulty.rookie: 150,
+  BotDifficulty.scholar: 300,
+  BotDifficulty.ace: 600,
+  BotDifficulty.master: 1500,
 };
-const int kBattleWinBonusCent = 10;
+const int kBattleWinBonusCent = 30;
 
 int? parseInsufficientFundsFee(Object e) {
   const marker = 'insufficient_funds:';
@@ -1289,7 +1289,7 @@ class _BattleLobbyScreenState extends State<BattleLobbyScreen> {
                         const SizedBox(height: 14),
                         DropdownButtonFormField<int>(
                           initialValue: _entryFeeCent,
-                          items: const [0, 50, 100, 200, 500].map((c) => DropdownMenuItem(value: c, child: Text(c == 0 ? 'Free entry' : '$c¢ entry — winner gets +$kBattleWinBonusCent¢'))).toList(),
+                          items: const [0, 150, 300, 600, 1500].map((c) => DropdownMenuItem(value: c, child: Text(c == 0 ? 'Free entry' : '$c¢ entry — winner gets +$kBattleWinBonusCent¢'))).toList(),
                           onChanged: (v) => setState(() => _entryFeeCent = v!),
                           decoration: const InputDecoration(labelText: 'Entry fee per player'),
                         ),

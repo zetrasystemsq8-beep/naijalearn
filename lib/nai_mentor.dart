@@ -226,10 +226,10 @@ class NaiWallet {
   //   - Single message: 5¢ (5 naira)
   //   - 15-pack: 40¢ (40 naira) — ~2.67 naira/message, real bulk discount
   //   - Day pass: unchanged (1 CP — its naira-equivalent is set in ZTC)
-  static const int singleMessagePriceCent = 5;
-  static const int packOf15PriceCent = 40;
+  static const int singleMessagePriceCent = 15;
+  static const int packOf15PriceCent = 120;
   static const int packOf15Credits = 15;
-  static const int dayPassPriceCent = 1000;
+  static const int dayPassPriceCent = 3000;
 
   /// Human-readable pricing line shown under the chat input, in both
   /// NaiChatScreen and the legacy NaiMentorScreen. Derived from the
