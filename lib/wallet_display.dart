@@ -1,14 +1,19 @@
 // lib/wallet_display.dart
 //
-// ⚡ REDESIGNED VERSION — visuals only. Balance-fetching logic, Zetra ID
-// lookup, and every Supabase/ZetraPay call below are 100% unchanged —
-// copy this in as a straight replacement, nothing breaks.
+// Balance-fetching logic, Zetra ID lookup, and every Supabase/ZetraPay
+// call are unchanged from before.
 //
-// Uses the shared design system from app_enhancements.dart (ShinyCard,
-// GradientButton, GradientHeader — which includes its own back button)
-// and AppTheme.heroGradient(context) from app_theme.dart, so the
-// balance card always matches your real brand color in both light and
-// dark mode instead of a generic scheme.primary flat fill.
+// What's new here isn't visual — it's that this screen now knows about
+// the rest of the Cent-purchase economy instead of living in isolation:
+//   1. Returning from BuyCentScreen always triggers a fresh balance pull,
+//      so an approved purchase shows up without the user having to
+//      remember to pull-to-refresh.
+//   2. If the user has an order sitting in awaiting_payment,
+//      awaiting_receipt, or pending_verification, that's surfaced right
+//      on the wallet — so "where did my money go" never has to be a
+//      WhatsApp message. Tapping it drops them back into BuyCentScreen
+//      at the right step (BuyCentScreen already resumes from the saved
+//      order_reference on its own).
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,6 +36,11 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
   bool _loading = true;
   String? _error;
 
+  // Most recent non-final order for this user, if any (awaiting_payment,
+  // awaiting_receipt, or pending_verification). Null once verified/rejected
+  // or if the user has never started a purchase.
+  Map<String, dynamic>? _openOrder;
+
   @override
   void initState() {
     super.initState();
@@ -47,14 +57,29 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
 
       final userId = Supabase.instance.client.auth.currentUser?.id;
       String? zetraId;
+      Map<String, dynamic>? openOrder;
+
       if (userId != null) {
-        final row = await Supabase.instance.client.from('profiles').select('zetra_id').eq('id', userId).maybeSingle();
-        zetraId = row?['zetra_id'] as String?;
+        final profileRow =
+            await Supabase.instance.client.from('profiles').select('zetra_id').eq('id', userId).maybeSingle();
+        zetraId = profileRow?['zetra_id'] as String?;
+
+        final orderRows = await Supabase.instance.client
+            .from('payment_orders')
+            .select()
+            .inFilter('status', ['awaiting_payment', 'awaiting_receipt', 'pending_verification'])
+            .order('created_at', ascending: false)
+            .limit(1);
+
+        if (orderRows is List && orderRows.isNotEmpty) {
+          openOrder = Map<String, dynamic>.from(orderRows.first as Map);
+        }
       }
 
       setState(() {
         _rawBalance = balance.round();
         _zetraId = zetraId;
+        _openOrder = openOrder;
       });
     } catch (e) {
       setState(() => _error = 'Could not load your wallet. Please try again.');
@@ -74,6 +99,25 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
     if (_zetraId == null) return;
     Clipboard.setData(ClipboardData(text: _zetraId!));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Zetra ID copied'), duration: Duration(seconds: 2)));
+  }
+
+  Future<void> _openBuyCent() async {
+    // Awaiting the push means we reload the instant the user comes back —
+    // whether they finished a purchase, cancelled it, or just backed out.
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BuyCentScreen()));
+    if (mounted) _load();
+  }
+
+  ({String label, String detail, IconData icon}) _openOrderCopy(String status) {
+    switch (status) {
+      case 'awaiting_payment':
+        return (label: 'Payment pending', detail: 'You started a purchase — tap to finish transferring and upload your receipt.', icon: Icons.hourglass_empty_rounded);
+      case 'awaiting_receipt':
+        return (label: 'Receipt needed', detail: 'An admin asked for a clearer receipt on your last upload — tap to resubmit.', icon: Icons.replay_rounded);
+      case 'pending_verification':
+      default:
+        return (label: 'Verification pending', detail: 'Your receipt is with an admin — Cent will appear here once it\'s confirmed.', icon: Icons.hourglass_top_rounded);
+    }
   }
 
   @override
@@ -100,8 +144,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                         sliver: SliverList(
                           delegate: SliverChildListDelegate([
                             // ================================================
-                            // BALANCE CARD — hero treatment, brand gradient,
-                            // layered depth to match the rest of the app.
+                            // BALANCE CARD
                             // ================================================
                             Container(
                               width: double.infinity,
@@ -175,17 +218,26 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                               ),
                             ),
 
+                            // ================================================
+                            // OPEN ORDER BANNER — new. Only shown if there's
+                            // an in-flight purchase somewhere in the pipeline.
+                            // ================================================
+                            if (_openOrder != null) ...[
+                              const SizedBox(height: 16),
+                              _buildOpenOrderBanner(context, _openOrder!),
+                            ],
+
                             const SizedBox(height: 20),
 
                             // ================================================
-                            // BUY CENT/CP — primary CTA, gradient button
+                            // BUY CENT/CP
                             // ================================================
                             Material(
                               color: Colors.transparent,
                               borderRadius: BorderRadius.circular(20),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(20),
-                                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BuyCentScreen())),
+                                onTap: _openBuyCent,
                                 child: Container(
                                   padding: const EdgeInsets.all(18),
                                   decoration: BoxDecoration(
@@ -221,7 +273,7 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                             const SizedBox(height: 16),
 
                             // ================================================
-                            // FUND VIA ZTC — secondary option, ShinyCard
+                            // FUND VIA ZTC
                             // ================================================
                             ShinyCard(
                               tint: AppColors.info,
@@ -258,6 +310,48 @@ class _WalletDisplayScreenState extends State<WalletDisplayScreen> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  Widget _buildOpenOrderBanner(BuildContext context, Map<String, dynamic> order) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = order['status'] as String;
+    final cent = order['cent_amount'] as int;
+    final copy = _openOrderCopy(status);
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _openBuyCent,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.10),
+            border: Border.all(color: Colors.amber.withOpacity(0.45), width: 1.4),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(copy.icon, color: Colors.amber.shade900, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${copy.label} · $cent Cent', style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13.5)),
+                    const SizedBox(height: 4),
+                    Text(copy.detail, style: TextStyle(color: Colors.amber.shade900.withOpacity(0.9), fontSize: 12.5, height: 1.4)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.amber.shade900),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
