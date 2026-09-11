@@ -32,6 +32,9 @@ dependencies:
   # Deep linking (Challenge a Friend)
   app_links: ^6.3.2
 
+  # Receipt upload (Buy Cent)
+  image_picker: ^1.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
