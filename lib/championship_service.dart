@@ -97,6 +97,11 @@ class ChampionshipService {
     return ChampionshipTeam.fromMap(row);
   }
 
+  /// Atomic paid registration — checks approved-tutor + classroom
+  /// ownership, spends the season's Cent entry fee, and creates the
+  /// team, all inside one server-side transaction. Throws with the
+  /// server's message on insufficient balance or any other failure —
+  /// nothing is left half-done.
   Future<ChampionshipTeam> registerTeam({
     required String seasonId,
     required int classroomId,
@@ -105,22 +110,29 @@ class ChampionshipService {
     String? description,
     String? category,
   }) async {
+    final row = await _client.rpc('championship_register_team_paid', params: {
+      'p_season_id': seasonId,
+      'p_classroom_id': classroomId,
+      'p_name': name,
+      'p_description': description,
+      'p_category': category,
+      'p_logo_url': logoUrl,
+    });
+    return ChampionshipTeam.fromMap(row as Map<String, dynamic>);
+  }
+
+  /// Reuses the same shared Cent balance ZetraPay/CoinService reads —
+  /// so the number shown here always matches the wallet screen.
+  Future<num> fetchMyCentBalance() async {
     final uid = _uid;
-    if (uid == null) throw Exception('Not signed in');
+    if (uid == null) return 0;
     final row = await _client
-        .from('championship_teams')
-        .insert({
-          'season_id': seasonId,
-          'tutor_id': uid,
-          'classroom_id': classroomId,
-          'name': name,
-          'logo_url': logoUrl,
-          'description': description,
-          'category': category,
-        })
-        .select()
-        .single();
-    return ChampionshipTeam.fromMap(row);
+        .from('app_currency_balances')
+        .select('balance')
+        .eq('user_id', uid)
+        .eq('app_id', 'naijalearn')
+        .maybeSingle();
+    return (row?['balance'] as num?) ?? 0;
   }
 
   // ---------------------------------------------------------------
@@ -356,7 +368,7 @@ class ChampionshipService {
     int teamLimit = 32,
     int rosterLimit = 10,
     int playersPerRound = 5,
-    int entryFeeKobo = 0,
+    num entryFeeCent = 0,
   }) async {
     final uid = _uid;
     if (uid == null) throw Exception('Not signed in');
@@ -373,7 +385,7 @@ class ChampionshipService {
           'team_limit': teamLimit,
           'roster_limit': rosterLimit,
           'players_per_round': playersPerRound,
-          'entry_fee_kobo': entryFeeKobo,
+          'entry_fee_cent': entryFeeCent,
           'created_by': uid,
         })
         .select()
@@ -522,5 +534,53 @@ class ChampionshipService {
   Future<Map<String, String>> fetchTeamNamesBySeason(String seasonId) async {
     final rows = await _client.from('championship_teams').select('id, name').eq('season_id', seasonId);
     return {for (final r in rows) r['id'] as String: r['name'] as String};
+  }
+
+  // ---------------------------------------------------------------
+  // PRIZES & PAYOUTS (admin only — enforced server-side in the RPCs)
+  // ---------------------------------------------------------------
+
+  /// Sum of paid entry fees for the season — shown to admin BEFORE they
+  /// finalize, so the percentage split isn't a guess against an unknown pool.
+  Future<num> fetchCollectedEntryFees(String seasonId) async {
+    final rows = await _client.from('championship_payments').select('amount_cent').eq('season_id', seasonId).eq('status', 'paid');
+    num total = 0;
+    for (final r in rows) {
+      total += (r['amount_cent'] as num);
+    }
+    return total;
+  }
+
+  Future<ChampionshipPrize> finalizePrize({
+    required String seasonId,
+    required String winnerTeamId,
+    required num tutorPct,
+    required num playerPct,
+    required num platformPct,
+  }) async {
+    final row = await _client.rpc('championship_finalize_prize', params: {
+      'p_season_id': seasonId,
+      'p_winner_team_id': winnerTeamId,
+      'p_tutor_pct': tutorPct,
+      'p_player_pct': playerPct,
+      'p_platform_pct': platformPct,
+    });
+    return ChampionshipPrize.fromMap(row as Map<String, dynamic>);
+  }
+
+  Future<List<ChampionshipPayout>> fetchPayoutsForSeason(String seasonId) async {
+    final rows = await _client
+        .from('championship_payouts')
+        .select('*, profiles(username)')
+        .eq('season_id', seasonId)
+        .order('created_at');
+    return rows.map<ChampionshipPayout>(ChampionshipPayout.fromMap).toList();
+  }
+
+  /// Does the actual Cent credit — admin-gated server-side, bypassing
+  /// the 10-Cent cap on the client-callable credit_app_currency RPC.
+  Future<ChampionshipPayout> processPayout(String payoutId) async {
+    final row = await _client.rpc('championship_process_payout', params: {'p_payout_id': payoutId});
+    return ChampionshipPayout.fromMap(row as Map<String, dynamic>);
   }
 }

@@ -39,15 +39,16 @@ class _AdminChampionshipView extends StatelessWidget {
     }
 
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: _SeasonPicker(provider: provider),
-          bottom: const TabBar(tabs: [
+          bottom: const TabBar(isScrollable: true, tabs: [
             Tab(text: 'Teams'),
             Tab(text: 'Rounds'),
             Tab(text: 'Matches'),
             Tab(text: 'Question Sets'),
+            Tab(text: 'Payouts'),
           ]),
         ),
         floatingActionButton: provider.seasons.isEmpty
@@ -70,6 +71,7 @@ class _AdminChampionshipView extends StatelessWidget {
                   _RoundsTab(provider: provider),
                   _MatchesTab(provider: provider),
                   _QuestionSetsTab(provider: provider),
+                  _PayoutsTab(provider: provider),
                 ],
               ),
       ),
@@ -131,6 +133,7 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
   final nameCtrl = TextEditingController();
   final descCtrl = TextEditingController();
   final teamLimitCtrl = TextEditingController(text: '32');
+  final entryFeeCtrl = TextEditingController(text: '0');
   final rosterLimitCtrl = TextEditingController(text: '10');
   final playersPerRoundCtrl = TextEditingController(text: '5');
   DateTime? regStart;
@@ -219,6 +222,12 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                     ),
                   ),
                 ]),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: entryFeeCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Entry fee (Cent, 0 for free)', border: OutlineInputBorder()),
+                ),
                 if (provider.actionError != null) ...[
                   const SizedBox(height: 10),
                   Text(provider.actionError!, style: const TextStyle(color: Colors.red)),
@@ -238,6 +247,7 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                             teamLimit: int.tryParse(teamLimitCtrl.text) ?? 32,
                             rosterLimit: int.tryParse(rosterLimitCtrl.text) ?? 10,
                             playersPerRound: int.tryParse(playersPerRoundCtrl.text) ?? 5,
+                            entryFeeCent: num.tryParse(entryFeeCtrl.text) ?? 0,
                           );
                           setState(() => submitting = false);
                           if (ok && ctx.mounted) Navigator.pop(ctx);
@@ -565,6 +575,124 @@ class _MatchesTab extends StatelessWidget {
 // ---------------------------------------------------------------------
 // QUESTION SETS TAB
 // ---------------------------------------------------------------------
+
+class _PayoutsTab extends StatelessWidget {
+  final AdminChampionshipProvider provider;
+  const _PayoutsTab({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final approvedTeams = provider.teams.where((t) => t.status == 'approved').toList();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.3), borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Collected entry fees: ${provider.collectedEntryFees} Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text('Finalizing splits this pool between the winning tutor, their roster, and the platform. Nothing is paid out until you process each payout below.', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: approvedTeams.isEmpty ? null : () => _showFinalizeDialog(context, provider, approvedTeams),
+                icon: const Icon(Icons.emoji_events_rounded),
+                label: const Text('Finalize Prize for Champion'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (provider.actionError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(provider.actionError!, style: TextStyle(color: scheme.error)),
+          ),
+        Text('Payouts', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (provider.payouts.isEmpty) const Text('No payouts yet — finalize a prize to generate them.'),
+        ...provider.payouts.map((p) => Card(
+              child: ListTile(
+                title: Text('${p.recipientName ?? p.recipientId} (${p.recipientType})'),
+                subtitle: Text('${p.amountCent} Cent • ${p.status}'),
+                trailing: (p.status == 'pending' || p.status == 'approved')
+                    ? FilledButton(
+                        onPressed: () => provider.processPayout(p.id),
+                        child: const Text('Pay'),
+                      )
+                    : Icon(
+                        p.status == 'paid' ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                        color: p.status == 'paid' ? Colors.green : scheme.error,
+                      ),
+              ),
+            )),
+      ],
+    );
+  }
+
+  void _showFinalizeDialog(BuildContext context, AdminChampionshipProvider provider, List<ChampionshipTeam> teams) {
+    String? winnerId;
+    final tutorCtrl = TextEditingController(text: '20');
+    final playerCtrl = TextEditingController(text: '60');
+    final platformCtrl = TextEditingController(text: '20');
+    bool submitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Finalize Prize'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(labelText: 'Champion team'),
+                  items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
+                  onChanged: (v) => winnerId = v,
+                ),
+                const SizedBox(height: 10),
+                TextField(controller: tutorCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tutor %')),
+                const SizedBox(height: 8),
+                TextField(controller: playerCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Players %')),
+                const SizedBox(height: 8),
+                TextField(controller: platformCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Platform %')),
+                const SizedBox(height: 8),
+                const Text('Must sum to 100.', style: TextStyle(fontSize: 11)),
+                if (provider.actionError != null)
+                  Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      if (winnerId == null) return;
+                      setState(() => submitting = true);
+                      final ok = await provider.finalizePrize(
+                        winnerTeamId: winnerId!,
+                        tutorPct: num.tryParse(tutorCtrl.text) ?? 0,
+                        playerPct: num.tryParse(playerCtrl.text) ?? 0,
+                        platformPct: num.tryParse(platformCtrl.text) ?? 0,
+                      );
+                      setState(() => submitting = false);
+                      if (ok && ctx.mounted) Navigator.pop(ctx);
+                    },
+              child: submitting ? const CircularProgressIndicator() : const Text('Finalize'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _QuestionSetsTab extends StatelessWidget {
   final AdminChampionshipProvider provider;

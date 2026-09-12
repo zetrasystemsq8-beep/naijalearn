@@ -1,6 +1,7 @@
 // lib/championship_tutor_provider.dart
 
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'championship_models.dart';
 import 'championship_service.dart';
 
@@ -14,6 +15,7 @@ class TutorChampionshipProvider extends ChangeNotifier {
   bool isApprovedTutor = false;
   ChampionshipSeason? season;
   List<Map<String, dynamic>> myClassrooms = [];
+  num myCentBalance = 0;
   ChampionshipTeam? team;
   List<ChampionshipPlayer> roster = [];
   List<Map<String, dynamic>> eligibleStudents = []; // from the team's classroom
@@ -37,6 +39,7 @@ class TutorChampionshipProvider extends ChangeNotifier {
         return;
       }
       myClassrooms = await _service.fetchMyClassrooms();
+      myCentBalance = await _service.fetchMyCentBalance();
       team = await _service.fetchMyTutorTeam(season!.id);
       if (team != null) {
         await _loadTeamDetail();
@@ -100,10 +103,12 @@ class TutorChampionshipProvider extends ChangeNotifier {
         category: category,
       );
       await _loadTeamDetail();
+      myCentBalance = await _service.fetchMyCentBalance();
       notifyListeners();
       return true;
     } catch (e) {
-      actionError = 'Could not register team: $e';
+      final message = e is PostgrestException ? e.message : e.toString();
+      actionError = 'Could not register team: $message';
       notifyListeners();
       return false;
     }

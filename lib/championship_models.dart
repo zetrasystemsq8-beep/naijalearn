@@ -16,7 +16,7 @@ class ChampionshipSeason {
   final int teamLimit;
   final int rosterLimit;
   final int playersPerRound;
-  final int entryFeeKobo;
+  final num entryFeeCent;
 
   ChampionshipSeason({
     required this.id,
@@ -30,7 +30,7 @@ class ChampionshipSeason {
     required this.teamLimit,
     required this.rosterLimit,
     required this.playersPerRound,
-    required this.entryFeeKobo,
+    required this.entryFeeCent,
   });
 
   factory ChampionshipSeason.fromMap(Map<String, dynamic> map) => ChampionshipSeason(
@@ -45,7 +45,7 @@ class ChampionshipSeason {
         teamLimit: map['team_limit'] as int,
         rosterLimit: map['roster_limit'] as int,
         playersPerRound: map['players_per_round'] as int,
-        entryFeeKobo: map['entry_fee_kobo'] as int,
+        entryFeeCent: map['entry_fee_cent'] as num,
       );
 }
 
@@ -229,6 +229,69 @@ class ChampionshipAttempt {
         correctCount: map['correct_count'] as int,
         status: map['status'] as String,
         serverDeadline: map['server_deadline'] == null ? null : DateTime.parse(map['server_deadline'] as String),
+      );
+}
+
+class ChampionshipPrize {
+  final String id;
+  final String seasonId;
+  final String winnerTeamId;
+  final num prizePoolCent;
+  final num platformAmountCent;
+  final num tutorAmountCent;
+  final num studentAmountCent;
+  final String status;
+
+  ChampionshipPrize({
+    required this.id,
+    required this.seasonId,
+    required this.winnerTeamId,
+    required this.prizePoolCent,
+    required this.platformAmountCent,
+    required this.tutorAmountCent,
+    required this.studentAmountCent,
+    required this.status,
+  });
+
+  factory ChampionshipPrize.fromMap(Map<String, dynamic> map) => ChampionshipPrize(
+        id: map['id'] as String,
+        seasonId: map['season_id'] as String,
+        winnerTeamId: map['winner_team_id'] as String,
+        prizePoolCent: map['prize_pool_cent'] as num,
+        platformAmountCent: map['platform_amount_cent'] as num,
+        tutorAmountCent: map['tutor_amount_cent'] as num,
+        studentAmountCent: map['student_amount_cent'] as num,
+        status: map['status'] as String,
+      );
+}
+
+class ChampionshipPayout {
+  final String id;
+  final String seasonId;
+  final String recipientId;
+  final String recipientType; // tutor | student | platform
+  final num amountCent;
+  final String status; // pending | approved | processing | paid | failed | cancelled
+  final String? recipientName; // populated via joined profiles select
+
+  ChampionshipPayout({
+    required this.id,
+    required this.seasonId,
+    required this.recipientId,
+    required this.recipientType,
+    required this.amountCent,
+    required this.status,
+    this.recipientName,
+  });
+
+  factory ChampionshipPayout.fromMap(Map<String, dynamic> map) => ChampionshipPayout(
+        id: map['id'] as String,
+        seasonId: map['season_id'] as String,
+        recipientId: map['recipient_id'] as String,
+        recipientType: map['recipient_type'] as String,
+        amountCent: map['amount_cent'] as num,
+        status: map['status'] as String,
+        recipientName: map['profiles']?['username'] as String?,
       );
 }
 

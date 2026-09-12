@@ -67,6 +67,41 @@ class _TutorChampionshipView extends StatelessWidget {
   }
 }
 
+class _EntryFeeBanner extends StatelessWidget {
+  final num entryFeeCent;
+  final num balanceCent;
+  const _EntryFeeBanner({required this.entryFeeCent, required this.balanceCent});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final free = entryFeeCent <= 0;
+    final affordable = balanceCent >= entryFeeCent;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: free || affordable ? scheme.primaryContainer.withOpacity(0.4) : scheme.errorContainer.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(free ? Icons.celebration_rounded : Icons.toll_rounded, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              free
+                  ? 'This season is free to enter.'
+                  : 'Entry fee: $entryFeeCent Cent  •  Your balance: $balanceCent Cent'
+                      '${affordable ? '' : ' — not enough Cent to register'}',
+              style: const TextStyle(fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RegisterTeamForm extends StatefulWidget {
   final TutorChampionshipProvider provider;
   const _RegisterTeamForm({required this.provider});
@@ -83,6 +118,8 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
   int? _classroomId;
   bool _submitting = false;
 
+  bool get _canAfford => widget.provider.myCentBalance >= widget.provider.season!.entryFeeCent;
+
   @override
   Widget build(BuildContext context) {
     final classrooms = widget.provider.myClassrooms;
@@ -92,6 +129,11 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
         Text('Register Your Team', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         Text('Season: ${widget.provider.season!.name}', style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 6),
+        _EntryFeeBanner(
+          entryFeeCent: widget.provider.season!.entryFeeCent,
+          balanceCent: widget.provider.myCentBalance,
+        ),
         const SizedBox(height: 20),
         Form(
           key: _formKey,
@@ -132,7 +174,7 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
               ],
               const SizedBox(height: 20),
               FilledButton(
-                onPressed: _submitting || classrooms.isEmpty ? null : _submit,
+                onPressed: (_submitting || classrooms.isEmpty || !_canAfford) ? null : _submit,
                 child: _submitting
                     ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('Register Team'),
