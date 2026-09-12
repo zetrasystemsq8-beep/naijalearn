@@ -1,32 +1,27 @@
 // lib/challenge_feature.dart
 //
-// ⚡ FIXED VERSION.
+// ⚡ v2 — COMPETITIVE LEADERBOARD.
 //
-// FIX 1 — creator never answered their own challenge: CreateChallengeScreen
-// now pushes the creator through the SAME answer screen as their friend
-// immediately after creating the challenge, submits their score via the
-// existing submitAttempt RPC (which — per your codebase's established
-// security-definer/auth.uid() pattern — should attribute the score to
-// the creator server-side), and only offers the WhatsApp share step
-// afterward. Previously it shared before anyone had answered anything.
+// Backed by challenges_migration_v2.sql (challenges + challenge_attempts,
+// one row per user per challenge, best-score-kept). This replaces the old
+// "you vs the creator only" model with a real ranked leaderboard anyone can
+// come back to — see MyChallengesScreen and ChallengeLeaderboardScreen.
 //
-// FIX 2 — unreliable subject pills: ChoiceChip (Material's built-in
-// widget) is replaced with _SubjectPillButton, a hand-built pill that
-// renders identically every time — no dependency on Material 3's chip
-// theming, which is what was producing the washed-out/no-icon look.
+// FLOW:
+//   1. Creator picks a subject, answers it themselves (CreateChallengeScreen
+//      -> ChallengeAnswerScreen), lands on ChallengeCreatedResultScreen,
+//      which offers both "Share to WhatsApp" and "View Leaderboard".
+//   2. A friend taps the shared link -> deep link -> ChallengeAnswerScreen
+//      (fetches the challenge fresh) -> ChallengeResultScreen, same two
+//      options.
+//   3. EITHER person can open "My Challenges" from the hub at any time and
+//      see every challenge they've touched, each with its full ranked
+//      board — so results are a permanent in-app place, not a one-off
+//      WhatsApp message someone has to remember.
 //
-// FIX 3 — AppBar contrast: every AppBar in this file now sets an
-// explicit iconTheme + titleTextStyle in addition to foregroundColor,
-// so there's no ambiguity about where the white color comes from.
-//
-// FIX 4 — one shared answer screen: ChallengeAnswerScreen now accepts
-// EITHER a challengeId (friend, via deep link — fetches from Supabase)
-// OR pre-resolved questions + challengeId (creator, right after
-// creation — no extra round trip needed). Same UI, same code path,
-// instead of two separate quiz implementations to keep in sync.
-//
-// Everything else — ChallengeService, deep link handling, share-text
-// builders — is unchanged from your version.
+// Retakes keep your BEST score on the board (see submit_challenge_attempt
+// in the SQL) — attempt_count still climbs, so grinding is visible without
+// punishing an off day.
 
 import 'dart:async';
 import 'dart:math';
@@ -46,6 +41,8 @@ class _ChallengeTheme {
   static const cyan = Color(0xFF00E5FF);
   static const purple = Color(0xFFB388FF);
   static const gold = Color(0xFFFFD700);
+  static const silver = Color(0xFFC0C0C0);
+  static const bronze = Color(0xFFCD7F32);
 
   static BoxDecoration glassCard({Color accent = cyan}) => BoxDecoration(
         gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [cardTop, cardBottom]),
@@ -54,8 +51,6 @@ class _ChallengeTheme {
         boxShadow: [BoxShadow(color: accent.withOpacity(0.18), blurRadius: 30, spreadRadius: 1)],
       );
 
-  // FIX 3: explicit iconTheme + titleTextStyle, not just foregroundColor,
-  // so the AppBar's text/back-arrow contrast can never be ambiguous.
   static AppBar appBar(String title, {bool showBack = true}) => AppBar(
         title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: bg,
@@ -68,8 +63,66 @@ class _ChallengeTheme {
 }
 
 /// =========================================================================
-/// SERVICE  (unchanged — logic only)
+/// SERVICE
 /// =========================================================================
+
+class ChallengeAttempt {
+  final String userId;
+  final String username;
+  final int score;
+  final int total;
+  final int attemptCount;
+  final bool isMe;
+
+  ChallengeAttempt({
+    required this.userId,
+    required this.username,
+    required this.score,
+    required this.total,
+    required this.attemptCount,
+    required this.isMe,
+  });
+
+  factory ChallengeAttempt.fromMap(Map<String, dynamic> map) => ChallengeAttempt(
+        userId: map['user_id'] as String? ?? '',
+        username: map['username'] as String? ?? 'Player',
+        score: (map['score'] as num?)?.toInt() ?? 0,
+        total: (map['total'] as num?)?.toInt() ?? 0,
+        attemptCount: (map['attempt_count'] as num?)?.toInt() ?? 1,
+        isMe: map['is_me'] as bool? ?? false,
+      );
+
+  double get pct => total > 0 ? score / total : 0.0;
+}
+
+class ChallengeWithAttempts {
+  final String id;
+  final String subject;
+  final String creatorUsername;
+  final String creatorId;
+  final List<String> questionIds;
+  final List<ChallengeAttempt> attempts;
+
+  ChallengeWithAttempts({
+    required this.id,
+    required this.subject,
+    required this.creatorUsername,
+    required this.creatorId,
+    required this.questionIds,
+    required this.attempts,
+  });
+
+  factory ChallengeWithAttempts.fromMap(Map<String, dynamic> map) => ChallengeWithAttempts(
+        id: map['id'] as String,
+        subject: map['subject'] as String? ?? 'Practice',
+        creatorUsername: map['creator_username'] as String? ?? 'Someone',
+        creatorId: map['creator_id'] as String? ?? '',
+        questionIds: (map['question_ids'] as List? ?? []).cast<String>(),
+        attempts: (map['attempts'] as List? ?? [])
+            .map((a) => ChallengeAttempt.fromMap(Map<String, dynamic>.from(a as Map)))
+            .toList(),
+      );
+}
 
 class ChallengeService {
   ChallengeService._();
@@ -87,24 +140,29 @@ class ChallengeService {
     return result as String;
   }
 
-  Future<Map<String, dynamic>?> getChallenge(String challengeId) async {
-    final result = await _client.rpc('get_challenge', params: {'p_challenge_id': challengeId});
-    if (result == null) return null;
-    return Map<String, dynamic>.from(result as Map);
-  }
-
   Future<void> submitAttempt({required String challengeId, required int score, required int total}) async {
     await _client.rpc('submit_challenge_attempt', params: {'p_challenge_id': challengeId, 'p_score': score, 'p_total': total});
   }
 
-  Future<List<Map<String, dynamic>>> getLeaderboard(String challengeId) async {
-    final rows = await _client.rpc('get_challenge_leaderboard', params: {'p_challenge_id': challengeId});
-    return (rows as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
+  /// Single round trip: challenge details + full ranked leaderboard.
+  Future<ChallengeWithAttempts?> getChallengeWithAttempts(String challengeId) async {
+    final result = await _client.rpc('get_challenge_with_attempts', params: {'p_challenge_id': challengeId});
+    if (result == null) return null;
+    return ChallengeWithAttempts.fromMap(Map<String, dynamic>.from(result as Map));
+  }
+
+  /// Every challenge the current user created or has played, each with its
+  /// full ranked attempt list. Powers MyChallengesScreen.
+  Future<List<ChallengeWithAttempts>> getMyChallenges() async {
+    final result = await _client.rpc('get_my_challenges');
+    return (result as List)
+        .map((c) => ChallengeWithAttempts.fromMap(Map<String, dynamic>.from(c as Map)))
+        .toList();
   }
 }
 
 /// =========================================================================
-/// SHARE TEXT + WHATSAPP  (unchanged — logic only)
+/// SHARE TEXT + WHATSAPP
 /// =========================================================================
 
 String _landingLink(String challengeId) => '$kChallengeLandingPageBaseUrl?id=$challengeId';
@@ -140,7 +198,7 @@ Future<void> shareToWhatsApp(String text) async {
 }
 
 /// =========================================================================
-/// DEEP LINK LISTENER  (unchanged — logic only)
+/// DEEP LINK LISTENER
 /// =========================================================================
 
 class ChallengeDeepLinkListener {
@@ -153,7 +211,7 @@ class ChallengeDeepLinkListener {
       final initial = await appLinks.getInitialLink();
       if (initial != null) _handle(initial, navigatorKey);
     } catch (e) {
-      debugPrint('[ChallengeDeepLink] getInitialAppLink failed: $e');
+      debugPrint('[ChallengeDeepLink] getInitialLink failed: $e');
     }
     _sub?.cancel();
     _sub = appLinks.uriLinkStream.listen((uri) => _handle(uri, navigatorKey), onError: (e) => debugPrint('[ChallengeDeepLink] stream error: $e'));
@@ -212,6 +270,15 @@ class ChallengesHubScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 _HubCard(
                   accent: _ChallengeTheme.gold,
+                  icon: Icons.leaderboard_rounded,
+                  title: 'My Challenges',
+                  subtitle: 'See every leaderboard you\'re on — who\'s winning, who to beat',
+                  ctaLabel: 'View My Challenges',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyChallengesScreen())),
+                ),
+                const SizedBox(height: 16),
+                _HubCard(
+                  accent: _ChallengeTheme.purple,
                   icon: Icons.wb_sunny_rounded,
                   title: 'Daily Question',
                   subtitle: "Share today's question — answer is hidden until they open the app",
@@ -228,8 +295,8 @@ class ChallengesHubScreen extends StatelessWidget {
                       Text('How it works', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                       SizedBox(height: 10),
                       _HowItWorksLine(number: '1', text: 'Create a challenge and answer it yourself'),
-                      _HowItWorksLine(number: '2', text: 'Share it to WhatsApp — your friend taps the link and answers inside NaijaLearn'),
-                      _HowItWorksLine(number: '3', text: 'You both see the scores — share the result to invite the next person'),
+                      _HowItWorksLine(number: '2', text: 'Share it to WhatsApp — anyone who taps it joins the same leaderboard'),
+                      _HowItWorksLine(number: '3', text: 'Check "My Challenges" anytime to see who\'s on top — retake to climb'),
                     ],
                   ),
                 ),
@@ -315,8 +382,6 @@ class _HubCard extends StatelessWidget {
   }
 }
 
-/// FIX 2: reliable subject pill — replaces ChoiceChip entirely. No
-/// dependency on Material 3 chip theming; renders the same every time.
 class _SubjectPillButton extends StatelessWidget {
   final SubjectInfo subject;
   final bool selected;
@@ -354,7 +419,6 @@ class _SubjectPillButton extends StatelessWidget {
 
 /// =========================================================================
 /// CREATE A CHALLENGE
-/// FIX 1: creator now answers before sharing — see _createAndAnswer.
 /// =========================================================================
 
 class CreateChallengeScreen extends StatefulWidget {
@@ -371,9 +435,6 @@ class _CreateChallengeScreenState extends State<CreateChallengeScreen> {
 
   static const List<int> _counts = [5, 10, 15];
 
-  /// FIX 1: creates the challenge, then immediately routes the CREATOR
-  /// through the same answer screen their friend will see — instead of
-  /// jumping straight to sharing before anyone has a score on record.
   Future<void> _createAndAnswer() async {
     final subject = _selectedSubject;
     if (subject == null) return;
@@ -393,9 +454,6 @@ class _CreateChallengeScreenState extends State<CreateChallengeScreen> {
       );
 
       if (!mounted) return;
-      // Creator answers their own challenge right now — same screen a
-      // friend uses via deep link, just given the questions directly
-      // instead of fetching them (they were just picked above).
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ChallengeAnswerScreen(
           challengeId: challengeId,
@@ -483,15 +541,11 @@ class _CreateChallengeScreenState extends State<CreateChallengeScreen> {
 }
 
 /// =========================================================================
-/// ANSWER A CHALLENGE — shared by creator (immediately after creating)
-/// and friend (via deep link). FIX 4: one screen, one code path.
+/// ANSWER A CHALLENGE
 /// =========================================================================
 
 class ChallengeAnswerScreen extends StatefulWidget {
   final String challengeId;
-  /// If provided (creator's first attempt), questions are used directly
-  /// instead of fetching the challenge from Supabase — skips a round
-  /// trip and the "resolve question IDs" step entirely.
   final List<Question>? preloadedQuestions;
   final String? preloadedSubject;
   final bool isCreatorFirstAttempt;
@@ -509,7 +563,6 @@ class ChallengeAnswerScreen extends StatefulWidget {
 }
 
 class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
-  Map<String, dynamic>? _challenge;
   List<Question> _questions = [];
   String _subject = '';
   bool _loading = true;
@@ -534,7 +587,7 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
 
   Future<void> _load() async {
     try {
-      final challenge = await ChallengeService.instance.getChallenge(widget.challengeId);
+      final challenge = await ChallengeService.instance.getChallengeWithAttempts(widget.challengeId);
       if (challenge == null) {
         setState(() {
           _error = 'This challenge no longer exists.';
@@ -543,10 +596,9 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
         return;
       }
 
-      final ids = (challenge['question_ids'] as List).cast<String>();
       final all = QuestionRepository.getAll();
       final byId = {for (final q in all) q.id: q};
-      final resolved = ids.map((id) => byId[id]).whereType<Question>().toList();
+      final resolved = challenge.questionIds.map((id) => byId[id]).whereType<Question>().toList();
 
       if (resolved.isEmpty) {
         setState(() {
@@ -557,9 +609,8 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
       }
 
       setState(() {
-        _challenge = challenge;
         _questions = resolved;
-        _subject = challenge['subject'] as String? ?? 'Practice';
+        _subject = challenge.subject;
         _loading = false;
       });
     } catch (e) {
@@ -600,8 +651,6 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
     if (!mounted) return;
 
     if (widget.isCreatorFirstAttempt) {
-      // Creator just answered their own challenge — take them to share,
-      // not to a "you vs them" comparison (there's no opponent score yet).
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => ChallengeCreatedResultScreen(subject: _subject, score: _correctCount, total: _questions.length, challengeId: widget.challengeId),
       ));
@@ -609,15 +658,7 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
     }
 
     Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => ChallengeResultScreen(
-        subject: _challenge?['subject'] as String? ?? _subject,
-        score: _correctCount,
-        total: _questions.length,
-        challengeId: widget.challengeId,
-        creatorScore: (_challenge?['creator_score'] as num?)?.toInt(),
-        creatorTotal: (_challenge?['creator_total'] as num?)?.toInt(),
-        creatorUsername: _challenge?['creator_username'] as String?,
-      ),
+      builder: (_) => ChallengeResultScreen(subject: _subject, score: _correctCount, total: _questions.length, challengeId: widget.challengeId),
     ));
   }
 
@@ -715,10 +756,7 @@ class _ChallengeAnswerScreenState extends State<ChallengeAnswerScreen> {
 }
 
 /// =========================================================================
-/// NEW — shown to the CREATOR right after they finish their own attempt.
-/// No "vs" comparison (no opponent yet) — just their score + the share CTA
-/// that used to fire immediately on creation, now correctly placed after
-/// they actually have a score to challenge people with.
+/// CREATOR'S OWN-SCORE SCREEN — right after they finish their first attempt
 /// =========================================================================
 
 class ChallengeCreatedResultScreen extends StatelessWidget {
@@ -769,6 +807,19 @@ class ChallengeCreatedResultScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
+                  icon: const Icon(Icons.leaderboard_rounded),
+                  label: const Text('View Leaderboard', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ChallengeLeaderboardScreen(challengeId: challengeId, subject: subject),
+                  )),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done', style: TextStyle(color: Colors.white54))),
             ],
           ),
@@ -779,8 +830,7 @@ class ChallengeCreatedResultScreen extends StatelessWidget {
 }
 
 /// =========================================================================
-/// RESULT + SHARE — shown to a FRIEND after answering someone else's
-/// challenge (has a creator score to compare against).
+/// FRIEND'S RESULT SCREEN — right after answering someone else's challenge
 /// =========================================================================
 
 class ChallengeResultScreen extends StatelessWidget {
@@ -788,9 +838,6 @@ class ChallengeResultScreen extends StatelessWidget {
   final int score;
   final int total;
   final String challengeId;
-  final int? creatorScore;
-  final int? creatorTotal;
-  final String? creatorUsername;
 
   const ChallengeResultScreen({
     super.key,
@@ -798,18 +845,11 @@ class ChallengeResultScreen extends StatelessWidget {
     required this.score,
     required this.total,
     required this.challengeId,
-    this.creatorScore,
-    this.creatorTotal,
-    this.creatorUsername,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hasComparison = creatorScore != null && creatorTotal != null && creatorTotal! > 0;
-    final myPct = total > 0 ? score / total : 0.0;
-    final theirPct = hasComparison ? creatorScore! / creatorTotal! : 0.0;
-    final iWon = hasComparison && myPct > theirPct;
-    final tied = hasComparison && myPct == theirPct;
+    final pct = total > 0 ? score / total : 0.0;
 
     return Scaffold(
       backgroundColor: _ChallengeTheme.bg,
@@ -829,17 +869,7 @@ class ChallengeResultScreen extends StatelessWidget {
                     const SizedBox(height: 14),
                     Text('$score/$total', style: const TextStyle(color: Colors.white, fontSize: 56, fontWeight: FontWeight.w900)),
                     const SizedBox(height: 6),
-                    Text('${(myPct * 100).toStringAsFixed(0)}% correct', style: const TextStyle(color: Colors.white60)),
-                    if (hasComparison) ...[
-                      const SizedBox(height: 20),
-                      Container(height: 1, color: Colors.white12),
-                      const SizedBox(height: 16),
-                      Text(
-                        tied ? "It's a tie with ${creatorUsername ?? 'them'}! 🤝" : iWon ? 'You beat ${creatorUsername ?? 'them'}! 🎉' : '${creatorUsername ?? 'They'} scored higher — run it back 👀',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                    ],
+                    Text('${(pct * 100).toStringAsFixed(0)}% correct', style: const TextStyle(color: Colors.white60)),
                   ],
                 ),
               ),
@@ -849,6 +879,19 @@ class ChallengeResultScreen extends StatelessWidget {
                 height: 56,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: _ChallengeTheme.cyan, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
+                  icon: const Icon(Icons.leaderboard_rounded),
+                  label: const Text('See Where You Rank', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ChallengeLeaderboardScreen(challengeId: challengeId, subject: subject),
+                  )),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
                   icon: const Icon(Icons.chat_rounded),
                   label: const Text('Share Result — Beat My Score', style: TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: () => shareToWhatsApp(buildResultShareText(subject: subject, score: score, total: total, challengeId: challengeId)),
@@ -863,3 +906,363 @@ class ChallengeResultScreen extends StatelessWidget {
     );
   }
 }
+
+/// =========================================================================
+/// LEADERBOARD — the competitive centerpiece. Ranked, medal-coded, "You"
+/// highlighted, pull-to-refresh so it never feels stale.
+/// =========================================================================
+
+class ChallengeLeaderboardScreen extends StatefulWidget {
+  final String challengeId;
+  final String subject;
+  const ChallengeLeaderboardScreen({super.key, required this.challengeId, required this.subject});
+
+  @override
+  State<ChallengeLeaderboardScreen> createState() => _ChallengeLeaderboardScreenState();
+}
+
+class _ChallengeLeaderboardScreenState extends State<ChallengeLeaderboardScreen> {
+  ChallengeWithAttempts? _data;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await ChallengeService.instance.getChallengeWithAttempts(widget.challengeId);
+      setState(() {
+        _data = data;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Could not load the leaderboard. Pull down to try again.';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _ChallengeTheme.bg,
+      appBar: _ChallengeTheme.appBar('${widget.subject} Leaderboard'),
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: _ChallengeTheme.cyan,
+          backgroundColor: _ChallengeTheme.cardTop,
+          onRefresh: _load,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(color: _ChallengeTheme.cyan))
+              : _error != null
+                  ? ListView(children: [Padding(padding: const EdgeInsets.all(40), child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)))])
+                  : (_data == null || _data!.attempts.isEmpty)
+                      ? ListView(children: const [
+                          Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Text('No one has played this yet — be the first!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                          ),
+                        ])
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(20),
+                          itemCount: _data!.attempts.length,
+                          itemBuilder: (context, index) {
+                            final attempt = _data!.attempts[index];
+                            return _LeaderboardRow(rank: index + 1, attempt: attempt);
+                          },
+                        ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LeaderboardRow extends StatelessWidget {
+  final int rank;
+  final ChallengeAttempt attempt;
+  const _LeaderboardRow({required this.rank, required this.attempt});
+
+  Color? get _medalColor {
+    switch (rank) {
+      case 1:
+        return _ChallengeTheme.gold;
+      case 2:
+        return _ChallengeTheme.silver;
+      case 3:
+        return _ChallengeTheme.bronze;
+      default:
+        return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final medal = _medalColor;
+    final isTop = rank == 1;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: attempt.isMe ? _ChallengeTheme.cyan.withOpacity(0.12) : Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: attempt.isMe ? _ChallengeTheme.cyan : (medal ?? Colors.white12),
+          width: attempt.isMe || medal != null ? 1.6 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 36,
+            child: medal != null
+                ? Icon(isTop ? Icons.emoji_events_rounded : Icons.military_tech_rounded, color: medal, size: 26)
+                : Text('#$rank', style: const TextStyle(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        attempt.username,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14.5),
+                      ),
+                    ),
+                    if (attempt.isMe) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: _ChallengeTheme.cyan, borderRadius: BorderRadius.circular(6)),
+                        child: const Text('YOU', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 9)),
+                      ),
+                    ],
+                  ],
+                ),
+                if (attempt.attemptCount > 1) ...[
+                  const SizedBox(height: 2),
+                  Text('${attempt.attemptCount} attempts', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
+                ],
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${attempt.score}/${attempt.total}', style: TextStyle(color: medal ?? Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('${(attempt.pct * 100).toStringAsFixed(0)}%', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// MY CHALLENGES — every challenge the user created or played, each with
+/// a compact top-3 preview that opens into the full leaderboard.
+/// =========================================================================
+
+class MyChallengesScreen extends StatefulWidget {
+  const MyChallengesScreen({super.key});
+
+  @override
+  State<MyChallengesScreen> createState() => _MyChallengesScreenState();
+}
+
+class _MyChallengesScreenState extends State<MyChallengesScreen> {
+  List<ChallengeWithAttempts> _challenges = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final challenges = await ChallengeService.instance.getMyChallenges();
+      setState(() {
+        _challenges = challenges;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Could not load your challenges. Pull down to try again.';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _ChallengeTheme.bg,
+      appBar: _ChallengeTheme.appBar('My Challenges'),
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: _ChallengeTheme.cyan,
+          backgroundColor: _ChallengeTheme.cardTop,
+          onRefresh: _load,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(color: _ChallengeTheme.cyan))
+              : _error != null
+                  ? ListView(children: [Padding(padding: const EdgeInsets.all(40), child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)))])
+                  : _challenges.isEmpty
+                      ? ListView(children: const [
+                          Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Text('You haven\'t created or played any challenges yet.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                          ),
+                        ])
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(20),
+                          itemCount: _challenges.length,
+                          itemBuilder: (context, index) => _MyChallengeCard(challenge: _challenges[index]),
+                        ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MyChallengeCard extends StatelessWidget {
+  final ChallengeWithAttempts challenge;
+  const _MyChallengeCard({required this.challenge});
+
+  @override
+  Widget build(BuildContext context) {
+    final top3 = challenge.attempts.take(3).toList();
+    final myRank = challenge.attempts.indexWhere((a) => a.isMe);
+    final isLeading = myRank == 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ChallengeLeaderboardScreen(challengeId: challenge.id, subject: challenge.subject),
+          )),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: _ChallengeTheme.glassCard(accent: isLeading ? _ChallengeTheme.gold : _ChallengeTheme.cyan),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(challenge.subject, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                          const SizedBox(height: 2),
+                          Text('by ${challenge.creatorUsername}', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
+                    if (isLeading)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: _ChallengeTheme.gold.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.emoji_events_rounded, color: _ChallengeTheme.gold, size: 14),
+                            SizedBox(width: 4),
+                            Text('LEADING', style: TextStyle(color: _ChallengeTheme.gold, fontWeight: FontWeight.w900, fontSize: 10)),
+                          ],
+                        ),
+                      )
+                    else if (myRank > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+                        child: Text('#${myRank + 1}', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ...top3.asMap().entries.map((e) {
+                  final rank = e.key + 1;
+                  final a = e.value;
+                  final medalColor = rank == 1
+                      ? _ChallengeTheme.gold
+                      : rank == 2
+                          ? _ChallengeTheme.silver
+                          : rank == 3
+                              ? _ChallengeTheme.bronze
+                              : Colors.white38;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 18, child: Text('$rank', style: TextStyle(color: medalColor, fontWeight: FontWeight.bold, fontSize: 12))),
+                        Expanded(
+                          child: Text(
+                            a.isMe ? '${a.username} (you)' : a.username,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: a.isMe ? _ChallengeTheme.cyan : Colors.white.withOpacity(0.8), fontSize: 13, fontWeight: a.isMe ? FontWeight.bold : FontWeight.normal),
+                          ),
+                        ),
+                        Text('${a.score}/${a.total}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  );
+                }),
+                if (challenge.attempts.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('+${challenge.attempts.length - 3} more · tap to see full board', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// =========================================================================
+/// WIRING NOTES (unchanged from earlier setup — main.dart / manifest /
+/// pubspec.yaml already have these):
+/// =========================================================================
+///
+/// 1. pubspec.yaml: app_links: ^6.3.2
+/// 2. AndroidManifest.xml: naijalearn://challenge intent-filter
+/// 3. main.dart: navigatorKey, ChallengeDeepLinkListener.init(...),
+///    import 'challenge_feature.dart'
+/// 4. Community tab entry point — point it at ChallengesHubScreen instead
+///    of CreateChallengeScreen directly, so "My Challenges" is reachable:
+///
+///      _MenuTile(
+///        icon: Icons.bolt_rounded,
+///        label: 'Challenges',
+///        subtitle: 'Create, share, and climb the leaderboard',
+///        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+///          builder: (_) => const ChallengesHubScreen(),
+///        )),
+///      ),
