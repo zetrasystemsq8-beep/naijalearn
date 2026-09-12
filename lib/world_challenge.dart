@@ -271,7 +271,7 @@ class _WorldChallengeScreenState extends State<WorldChallengeScreen> {
             const SizedBox(height: 16),
             Text('Weekly World Challenge', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('Entry: 500 Cent. Top 3 scorers share the prize pool.', textAlign: TextAlign.center),
+            const Text('Entry: 1 CP. Top 3 scorers share the prize pool.', textAlign: TextAlign.center),
             const SizedBox(height: 24),
             if (_error != null) ...[
               Text(_error!, style: TextStyle(color: scheme.error)),
@@ -303,8 +303,8 @@ class _WorldChallengeScreenState extends State<WorldChallengeScreen> {
 /// QUIZ SCREEN
 /// =========================================================================
 ///
-/// Two safe additions here, both motivated by this being a paid (500
-/// Cent) entry with an irreversible submit:
+/// Two safe additions here, both motivated by this being a paid (1 CP)
+/// entry with an irreversible submit:
 ///  1. A confirmation dialog before the final submit (mirrors the
 ///     pattern already used by the regular exam screen), showing how
 ///     many questions were actually answered so a stray tap can't lock
