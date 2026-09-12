@@ -156,7 +156,7 @@ class AuthService {
 
   Future<void> _logLoginAttempt({required String identifier, required bool success}) async {
     try {
-      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success, 'p_app': 'naijalearn'});
+      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success});
     } catch (e) {
       debugPrint('[ZetraAuth] log_login_attempt failed (non-fatal, signature may need confirming): $e');
     }
@@ -440,6 +440,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   decoration: InputDecoration(
                                     labelText: 'ZetraMail',
                                     hintText: 'you@zetramail.ng',
+                                    helperText: 'Use the exact address shown in your Zetra ID app',
+                                    helperStyle: const TextStyle(fontSize: 11),
                                     filled: true,
                                     fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
                                     prefixIcon: Icon(Icons.email_outlined, color: scheme.primary),
@@ -513,6 +515,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : Icon(Icons.fingerprint_rounded, color: scheme.primary),
                             label: const Text('Sign in with Fingerprint', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Fingerprint skips the code below — password sign-in always sends one to ZetraMail.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.75)),
                         ),
                         const SizedBox(height: 10),
                         TextButton(
