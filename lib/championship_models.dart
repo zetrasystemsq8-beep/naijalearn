@@ -232,6 +232,36 @@ class ChampionshipAttempt {
       );
 }
 
+class ChampionshipQuestionSet {
+  final String id;
+  final String seasonId;
+  final String name;
+  final String subject;
+  final int durationSeconds;
+  final int questionCount;
+  final String? difficulty;
+
+  ChampionshipQuestionSet({
+    required this.id,
+    required this.seasonId,
+    required this.name,
+    required this.subject,
+    required this.durationSeconds,
+    required this.questionCount,
+    this.difficulty,
+  });
+
+  factory ChampionshipQuestionSet.fromMap(Map<String, dynamic> map) => ChampionshipQuestionSet(
+        id: map['id'] as String,
+        seasonId: map['season_id'] as String,
+        name: map['name'] as String,
+        subject: map['subject'] as String,
+        durationSeconds: map['duration_seconds'] as int,
+        questionCount: map['question_count'] as int,
+        difficulty: map['difficulty'] as String?,
+      );
+}
+
 /// A single tournament question, shaped for the quiz UI. Only ever
 /// fetched via ChampionshipService.fetchAttemptQuestions(), which goes
 /// through the server-side path — never a direct `questions` table

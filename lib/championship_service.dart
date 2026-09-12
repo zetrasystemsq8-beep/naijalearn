@@ -327,4 +327,200 @@ class ChampionshipService {
     });
     return ChampionshipAttempt.fromMap(row as Map<String, dynamic>);
   }
+
+  Future<List<Map<String, dynamic>>> fetchMyClassrooms() async {
+    final uid = _uid;
+    if (uid == null) return [];
+    final rows = await _client.from('classrooms').select('id, name').eq('tutor_id', uid);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  /// Every student already on a roster somewhere this season, so the
+  /// tutor's picker can gray them out before hitting the RLS error.
+  Future<Set<String>> fetchRosteredStudentIdsForSeason(String seasonId) async {
+    final rows = await _client.from('championship_players').select('student_id').eq('season_id', seasonId);
+    return rows.map<String>((r) => r['student_id'] as String).toSet();
+  }
+
+  // ---------------------------------------------------------------
+  // ADMIN — seasons / teams / rounds / matches / question sets
+  // ---------------------------------------------------------------
+
+  Future<ChampionshipSeason> createSeason({
+    required String name,
+    String? description,
+    required DateTime registrationStart,
+    required DateTime registrationEnd,
+    DateTime? startAt,
+    DateTime? endAt,
+    int teamLimit = 32,
+    int rosterLimit = 10,
+    int playersPerRound = 5,
+    int entryFeeKobo = 0,
+  }) async {
+    final uid = _uid;
+    if (uid == null) throw Exception('Not signed in');
+    final row = await _client
+        .from('championship_seasons')
+        .insert({
+          'name': name,
+          'description': description,
+          'status': 'draft',
+          'registration_start': registrationStart.toIso8601String(),
+          'registration_end': registrationEnd.toIso8601String(),
+          'start_at': startAt?.toIso8601String(),
+          'end_at': endAt?.toIso8601String(),
+          'team_limit': teamLimit,
+          'roster_limit': rosterLimit,
+          'players_per_round': playersPerRound,
+          'entry_fee_kobo': entryFeeKobo,
+          'created_by': uid,
+        })
+        .select()
+        .single();
+    return ChampionshipSeason.fromMap(row);
+  }
+
+  Future<void> updateSeasonStatus(String seasonId, String status) async {
+    await _client.from('championship_seasons').update({'status': status}).eq('id', seasonId);
+  }
+
+  Future<List<ChampionshipTeam>> fetchTeamsForSeason(String seasonId) async {
+    final rows = await _client.from('championship_teams').select().eq('season_id', seasonId);
+    return rows.map<ChampionshipTeam>(ChampionshipTeam.fromMap).toList();
+  }
+
+  Future<void> updateTeamStatus(String teamId, String status) async {
+    await _client.from('championship_teams').update({'status': status}).eq('id', teamId);
+  }
+
+  Future<void> disqualifyTeam({required String teamId, required String reason}) async {
+    final uid = _uid;
+    await _client.from('championship_teams').update({
+      'status': 'disqualified',
+      'disqualified_reason': reason,
+      'disqualified_by': uid,
+      'disqualified_at': DateTime.now().toIso8601String(),
+    }).eq('id', teamId);
+  }
+
+  Future<ChampionshipRound> createRound({
+    required String seasonId,
+    required int roundNumber,
+    required String name,
+    required DateTime opensAt,
+    required DateTime closesAt,
+    String? questionSetId,
+  }) async {
+    final row = await _client
+        .from('championship_rounds')
+        .insert({
+          'season_id': seasonId,
+          'round_number': roundNumber,
+          'name': name,
+          'opens_at': opensAt.toIso8601String(),
+          'closes_at': closesAt.toIso8601String(),
+          'question_set_id': questionSetId,
+        })
+        .select()
+        .single();
+    return ChampionshipRound.fromMap(row);
+  }
+
+  Future<void> updateRoundStatus(String roundId, String status) async {
+    await _client.from('championship_rounds').update({'status': status}).eq('id', roundId);
+  }
+
+  Future<ChampionshipMatch> createMatch({
+    required String seasonId,
+    required String roundId,
+    required String teamAId,
+    required String teamBId,
+  }) async {
+    final row = await _client
+        .from('championship_matches')
+        .insert({
+          'season_id': seasonId,
+          'round_id': roundId,
+          'team_a_id': teamAId,
+          'team_b_id': teamBId,
+        })
+        .select()
+        .single();
+    return ChampionshipMatch.fromMap(row);
+  }
+
+  /// Admin-only: raw table (real scores, no hiding) rather than the
+  /// public score-hiding view.
+  Future<List<ChampionshipMatch>> fetchRawMatchesForRound(String roundId) async {
+    final rows = await _client.from('championship_matches').select().eq('round_id', roundId);
+    return rows.map<ChampionshipMatch>((m) => ChampionshipMatch(
+          id: m['id'] as String,
+          seasonId: m['season_id'] as String,
+          roundId: m['round_id'] as String,
+          teamAId: m['team_a_id'] as String,
+          teamBId: m['team_b_id'] as String,
+          teamAScore: m['team_a_score'] as num?,
+          teamBScore: m['team_b_score'] as num?,
+          winnerTeamId: m['winner_team_id'] as String?,
+          status: m['status'] as String,
+        )).toList();
+  }
+
+  Future<ChampionshipQuestionSet> createQuestionSet({
+    required String seasonId,
+    required String name,
+    required String subject,
+    required int durationSeconds,
+    String? difficulty,
+    required List<String> questionIds,
+  }) async {
+    final setRow = await _client
+        .from('championship_question_sets')
+        .insert({
+          'season_id': seasonId,
+          'name': name,
+          'subject': subject,
+          'duration_seconds': durationSeconds,
+          'question_count': questionIds.length,
+          'difficulty': difficulty,
+        })
+        .select()
+        .single();
+    final setId = setRow['id'] as String;
+
+    final items = List.generate(
+      questionIds.length,
+      (i) => {'question_set_id': setId, 'question_id': questionIds[i], 'question_order': i + 1, 'marks': 1},
+    );
+    if (items.isNotEmpty) {
+      await _client.from('championship_question_set_items').insert(items);
+    }
+    return ChampionshipQuestionSet.fromMap(setRow);
+  }
+
+  Future<List<ChampionshipQuestionSet>> fetchQuestionSetsForSeason(String seasonId) async {
+    final rows = await _client.from('championship_question_sets').select().eq('season_id', seasonId);
+    return rows.map<ChampionshipQuestionSet>(ChampionshipQuestionSet.fromMap).toList();
+  }
+
+  /// For the admin's question-picker when building a question set.
+  Future<List<Map<String, dynamic>>> fetchQuestionsBySubject(String subject, {int limit = 100}) async {
+    final rows = await _client.from('questions').select('id, question_text').eq('subject', subject).limit(limit);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  Future<List<String>> fetchDistinctSubjects() async {
+    final rows = await _client.from('questions').select('subject');
+    return rows.map<String>((r) => r['subject'] as String).toSet().toList()..sort();
+  }
+
+  // ---------------------------------------------------------------
+  // TEAM NAME LOOKUP (used by the bracket + tutor dashboards)
+  // ---------------------------------------------------------------
+
+  Future<Map<String, String>> fetchTeamNamesBySeason(String seasonId) async {
+    final rows = await _client.from('championship_teams').select('id, name').eq('season_id', seasonId);
+    return {for (final r in rows) r['id'] as String: r['name'] as String};
+  }
 }
