@@ -262,6 +262,14 @@ class AuthService {
 }
 
 Future<void> routeAfterFullyVerifiedLogin(BuildContext context, ZetraProfile profile) async {
+  // Fixes the timing bug where a brand-new user's Cent balance never
+  // loads: CoinService.instance is created once at app startup, before
+  // any login happens, so its own auto-init sees "no user" and never
+  // retries. This explicit refresh runs on EVERY successful login
+  // (password or fingerprint — both call this same function), so the
+  // real balance is always in place before the user reaches the app.
+  await CoinService.instance.refreshForCurrentUser();
+
   final attribution = await ReferralService.instance.getMyAttribution();
   if (!context.mounted) return;
   if (attribution == null) {

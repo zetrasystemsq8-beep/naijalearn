@@ -482,6 +482,16 @@ class CoinService extends ChangeNotifier {
   int? get pendingLoginBonusCent => _pendingLoginBonusCent;
   bool get isLoaded => _loaded;
 
+  /// Re-runs the full init/load sequence for whoever is CURRENTLY
+  /// signed in. Needed because CoinService.instance is created once, at
+  /// app startup, before any login happens — for a brand-new account,
+  /// _init() runs with no signed-in user, sets _loaded=true, and never
+  /// checks again on its own. Call this once, right after a successful
+  /// login (see routeAfterFullyVerifiedLogin in main.dart), so a new
+  /// user's real Cent balance actually loads instead of staying stuck
+  /// at the pre-login default of 0.
+  Future<void> refreshForCurrentUser() => _init();
+
   static const List<ShopItem> shopItems = [
     ShopItem(id: 'frame_gold', name: 'Gold Avatar Frame', emoji: '🖼️', cost: 150, category: 'frame', usefulness: 'Adds a gold ring around your avatar on your Profile once equipped.'),
     ShopItem(id: 'frame_fire', name: 'Fire Avatar Frame', emoji: '🔥', cost: 250, category: 'frame', usefulness: 'Adds a fire-orange ring around your avatar on your Profile once equipped.'),
