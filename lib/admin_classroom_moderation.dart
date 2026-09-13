@@ -51,6 +51,7 @@ class _ClassroomsTab extends StatefulWidget {
 
 class _ClassroomsTabState extends State<_ClassroomsTab> {
   final _client = Supabase.instance.client;
+  final _searchController = TextEditingController();
   List<Map<String, dynamic>> _classrooms = [];
   bool _loading = true;
 
@@ -60,10 +61,21 @@ class _ClassroomsTabState extends State<_ClassroomsTab> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rows = await _client.from('classrooms').select().order('created_at', ascending: false).limit(100);
+      var query = _client.from('classrooms').select();
+      final search = _searchController.text.trim();
+      if (search.isNotEmpty) {
+        query = query.ilike('name', '%$search%');
+      }
+      final rows = await query.order('created_at', ascending: false).limit(100);
       setState(() => _classrooms = List<Map<String, dynamic>>.from(rows));
     } catch (_) {
       // Non-fatal.
@@ -120,17 +132,39 @@ class _ClassroomsTabState extends State<_ClassroomsTab> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search classrooms by name',
+              prefixIcon: const Icon(Icons.search_rounded),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              isDense: true,
+            ),
+            onSubmitted: (_) => _load(),
+          ),
+        ),
+        Expanded(child: _buildList()),
+      ],
+    );
+  }
+
+  Widget _buildList() {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_classrooms.isEmpty) return const Center(child: Text('No classrooms yet'));
+    if (_classrooms.isEmpty) return const Center(child: Text('No classrooms found'));
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         itemCount: _classrooms.length,
         itemBuilder: (context, index) {
           final c = _classrooms[index];
           final status = c['status'] as String;
+          final examCategory = c['exam_category'] as String? ?? 'General/Other';
           return Card(
             margin: const EdgeInsets.only(bottom: 10),
             child: Padding(
@@ -145,7 +179,7 @@ class _ClassroomsTabState extends State<_ClassroomsTab> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text('${c['student_count']}/${c['capacity']} students · ${c['subject']}'),
+                  Text('${c['student_count']}/${c['capacity']} students · ${c['subject']} · $examCategory'),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,

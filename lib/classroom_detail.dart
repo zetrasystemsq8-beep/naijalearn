@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_enhancements.dart' show GradientButton;
 import 'buy_cent.dart';
 import 'classroom_home.dart';
 
@@ -136,7 +137,10 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
     final c = _classroom!;
     final name = c['name'] as String;
     final subject = c['subject'] as String;
+    final examCategory = c['exam_category'] as String;
     final description = c['description'] as String? ?? '';
+    final introInfo = c['intro_info'] as String? ?? '';
+    final rules = c['rules'] as String? ?? '';
     final studentCount = c['student_count'] as int;
     final capacity = c['capacity'] as int;
     final isPaid = c['is_paid'] as bool;
@@ -162,7 +166,12 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
             padding: const EdgeInsets.all(20),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                Text(name, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    Expanded(child: Text(name, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold))),
+                    if (examCategory != 'General/Other') Chip(label: Text(examCategory)),
+                  ],
+                ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -201,6 +210,20 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
                   ),
                 ),
 
+                if (introInfo.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Before you join', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(introInfo, style: Theme.of(context).textTheme.bodyMedium),
+                ],
+
+                if (rules.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Classroom rules', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(rules, style: Theme.of(context).textTheme.bodyMedium),
+                ],
+
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Container(
@@ -211,30 +234,36 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
                 ],
 
                 const SizedBox(height: 24),
-                SizedBox(
-                  height: 54,
-                  child: _isOwner
-                      ? FilledButton.icon(
-                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassroomHomeScreen(classroomId: widget.classroomId))),
-                          icon: const Icon(Icons.dashboard_outlined),
-                          label: const Text('Manage classroom'),
-                        )
-                      : _alreadyEnrolled
-                          ? FilledButton.icon(
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassroomHomeScreen(classroomId: widget.classroomId))),
-                              icon: const Icon(Icons.login_rounded),
-                              label: const Text('Go to classroom'),
-                            )
-                          : FilledButton(
-                              onPressed: (isFull || _joining) ? null : _join,
-                              child: _joining
-                                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
-                                  : Text(
-                                      isFull ? 'Classroom full' : (isPaid ? 'Join Class — ₦$priceCent' : 'Join Free Class'),
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                    ),
-                            ),
-                ),
+                if (_isOwner)
+                  SizedBox(
+                    height: 54,
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassroomHomeScreen(classroomId: widget.classroomId))),
+                      icon: const Icon(Icons.dashboard_outlined),
+                      label: const Text('Manage classroom'),
+                    ),
+                  )
+                else if (_alreadyEnrolled)
+                  SizedBox(
+                    height: 54,
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassroomHomeScreen(classroomId: widget.classroomId))),
+                      icon: const Icon(Icons.login_rounded),
+                      label: const Text('Go to classroom'),
+                    ),
+                  )
+                else if (isFull)
+                  const SizedBox(
+                    height: 54,
+                    child: Center(child: Text('Classroom full', style: TextStyle(fontWeight: FontWeight.w600))),
+                  )
+                else
+                  GradientButton(
+                    label: _joining ? 'Joining...' : (isPaid ? 'Join Class — ₦$priceCent' : 'Join Free Class'),
+                    icon: Icons.login_rounded,
+                    onPressed: _joining ? null : _join,
+                    height: 54,
+                  ),
               ]),
             ),
           ),
