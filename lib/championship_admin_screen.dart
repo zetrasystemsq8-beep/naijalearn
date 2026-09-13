@@ -500,7 +500,13 @@ class _MatchesTab extends StatelessWidget {
               ...matches.map((m) => ListTile(
                     dense: true,
                     title: Text('${provider.teamNames[m.teamAId] ?? '?'}  vs  ${provider.teamNames[m.teamBId] ?? '?'}'),
-                    subtitle: Text(m.scoresVisible ? 'Score: ${m.teamAScore} — ${m.teamBScore} (${m.status})' : m.status),
+                    subtitle: Text('Score: ${m.teamAScore} — ${m.teamBScore}  •  ${m.status}'),
+                    trailing: m.status == 'disputed'
+                        ? FilledButton(
+                            onPressed: () => _showResolveDisputeDialog(context, provider, m, r.id),
+                            child: const Text('Resolve'),
+                          )
+                        : null,
                   )),
               Padding(
                 padding: const EdgeInsets.all(12),
@@ -514,6 +520,38 @@ class _MatchesTab extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+
+  void _showResolveDisputeDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipMatch match, String roundId) {
+    final nameA = provider.teamNames[match.teamAId] ?? 'Team A';
+    final nameB = provider.teamNames[match.teamBId] ?? 'Team B';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Resolve Tied Match'),
+        content: Text(
+          'This match is tied even after both automatic tie-breakers (total correct answers, then average time). '
+          'Pick the winner after your sudden-death round:',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          OutlinedButton(
+            onPressed: () {
+              provider.resolveDisputedMatch(matchId: match.id, winnerTeamId: match.teamAId, roundId: roundId);
+              Navigator.pop(ctx);
+            },
+            child: Text(nameA),
+          ),
+          FilledButton(
+            onPressed: () {
+              provider.resolveDisputedMatch(matchId: match.id, winnerTeamId: match.teamBId, roundId: roundId);
+              Navigator.pop(ctx);
+            },
+            child: Text(nameB),
+          ),
+        ],
+      ),
     );
   }
 

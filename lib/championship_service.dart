@@ -443,6 +443,26 @@ class ChampionshipService {
     await _client.from('championship_rounds').update({'status': status}).eq('id', roundId);
   }
 
+  /// Does the real work of closing a round: sums each team's selected
+  /// players' scores, applies tie-breakers, sets winners — see
+  /// championship_close_round in SQL for the full logic. Use this
+  /// instead of updateRoundStatus(roundId, 'closed') whenever a round
+  /// is actually being closed, or matches will never get scored.
+  Future<void> closeRound(String roundId) async {
+    await _client.rpc('championship_close_round', params: {'p_round_id': roundId});
+  }
+
+  /// For a match left 'disputed' after a genuine tie (spec's third
+  /// tie-breaker — an admin-approved sudden-death round — isn't
+  /// something the system can resolve on its own).
+  Future<ChampionshipMatch> setMatchWinner({required String matchId, required String winnerTeamId}) async {
+    final row = await _client.rpc('championship_set_match_winner', params: {
+      'p_match_id': matchId,
+      'p_winner_team_id': winnerTeamId,
+    });
+    return ChampionshipMatch.fromMap(row as Map<String, dynamic>);
+  }
+
   Future<ChampionshipMatch> createMatch({
     required String seasonId,
     required String roundId,

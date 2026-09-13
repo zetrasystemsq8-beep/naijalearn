@@ -20,6 +20,8 @@ class AdminChampionshipProvider extends ChangeNotifier {
   List<ChampionshipQuestionSet> questionSets = [];
   Map<String, List<ChampionshipMatch>> matchesByRound = {};
   Map<String, String> teamNames = {}; // teamId -> name, for match display
+  List<ChampionshipPayout> payouts = [];
+  num collectedEntryFees = 0;
 
   Future<void> load() async {
     loading = true;
@@ -64,6 +66,8 @@ class AdminChampionshipProvider extends ChangeNotifier {
     for (final r in rounds) {
       matchesByRound[r.id] = await _service.fetchRawMatchesForRound(r.id);
     }
+    payouts = await _service.fetchPayoutsForSeason(id);
+    collectedEntryFees = await _service.fetchCollectedEntryFees(id);
   }
 
   Future<bool> createSeason({
@@ -74,7 +78,7 @@ class AdminChampionshipProvider extends ChangeNotifier {
     int teamLimit = 32,
     int rosterLimit = 10,
     int playersPerRound = 5,
-    int entryFeeKobo = 0,
+    num entryFeeCent = 0,
   }) async {
     actionError = null;
     try {
@@ -86,7 +90,7 @@ class AdminChampionshipProvider extends ChangeNotifier {
         teamLimit: teamLimit,
         rosterLimit: rosterLimit,
         playersPerRound: playersPerRound,
-        entryFeeKobo: entryFeeKobo,
+        entryFeeCent: entryFeeCent,
       );
       seasons = await _service.fetchAllSeasons();
       selectedSeason = s;
@@ -160,8 +164,14 @@ class AdminChampionshipProvider extends ChangeNotifier {
   }
 
   Future<void> setRoundStatus(String roundId, String status) async {
+    actionError = null;
     try {
-      await _service.updateRoundStatus(roundId, status);
+      if (status == 'closed') {
+        // Actually scores every match in the round — not just a flag flip.
+        await _service.closeRound(roundId);
+      } else {
+        await _service.updateRoundStatus(roundId, status);
+      }
       rounds = await _service.fetchRounds(selectedSeason!.id);
       matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
     } catch (e) {
@@ -221,4 +231,51 @@ class AdminChampionshipProvider extends ChangeNotifier {
   }
 
   Future<void> refresh() => load();
+
+  Future<void> resolveDisputedMatch({required String matchId, required String winnerTeamId, required String roundId}) async {
+    actionError = null;
+    try {
+      await _service.setMatchWinner(matchId: matchId, winnerTeamId: winnerTeamId);
+      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
+      notifyListeners();
+    } catch (e) {
+      actionError = 'Could not resolve match: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<bool> finalizePrize({
+    required String winnerTeamId,
+    required num tutorPct,
+    required num playerPct,
+    required num platformPct,
+  }) async {
+    actionError = null;
+    try {
+      await _service.finalizePrize(
+        seasonId: selectedSeason!.id,
+        winnerTeamId: winnerTeamId,
+        tutorPct: tutorPct,
+        playerPct: playerPct,
+        platformPct: platformPct,
+      );
+      payouts = await _service.fetchPayoutsForSeason(selectedSeason!.id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      actionError = 'Could not finalize prize: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> processPayout(String payoutId) async {
+    try {
+      await _service.processPayout(payoutId);
+      payouts = await _service.fetchPayoutsForSeason(selectedSeason!.id);
+    } catch (e) {
+      actionError = 'Could not process payout: $e';
+    }
+    notifyListeners();
+  }
 }
