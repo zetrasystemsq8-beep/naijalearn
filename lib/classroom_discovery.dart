@@ -1,17 +1,15 @@
 // lib/classroom_discovery.dart
 //
-// "Discover Classes" — embeddable widget (no own Scaffold/AppBar), meant
-// to live inside classes_home.dart's "Classes" screen alongside
-// "My Classrooms", per the navigation decision (no separate top-level
-// screen or bottom-nav tab for this).
+// "Discover Classes" — embeddable widget (no own Scaffold/AppBar), lives
+// inside classes_home.dart. Default view is sectioned (Popular / New /
+// Browse by Exam / Browse by Subject) per the polish-pass spec; searching
+// or picking a filter switches to a flat filtered list.
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'classroom_detail.dart';
-import 'classroom_shared.dart' show kExamCategories;
-
-enum _SortMode { popular, newest }
+import 'classroom_shared.dart' show kExamCategories, loadSubjects, formatCpCent, isNewClassroom, isPopularClassroom;
 
 class ClassroomDiscoveryTab extends StatefulWidget {
   const ClassroomDiscoveryTab({super.key});
@@ -24,16 +22,25 @@ class _ClassroomDiscoveryTabState extends State<ClassroomDiscoveryTab> {
   final _client = Supabase.instance.client;
   final _searchController = TextEditingController();
 
-  List<Map<String, dynamic>> _classrooms = [];
   bool _loading = true;
   String? _error;
-  _SortMode _sort = _SortMode.popular;
-  String? _selectedCategory;
+
+  List<Map<String, dynamic>> _popular = [];
+  List<Map<String, dynamic>> _newest = [];
+  List<Map<String, dynamic>> _filtered = [];
+  List<String> _subjects = [];
+
+  String? _activeExam;
+  String? _activeSubject;
+  bool get _filterActive => _searchController.text.trim().isNotEmpty || _activeExam != null || _activeSubject != null;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    loadSubjects().then((s) {
+      if (mounted) setState(() => _subjects = s);
+    });
+    _loadHome();
   }
 
   @override
@@ -42,39 +49,72 @@ class _ClassroomDiscoveryTabState extends State<ClassroomDiscoveryTab> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadHome() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      var query = _client.from('classrooms').select().eq('status', 'active');
-
-      if (_selectedCategory != null) {
-        query = query.eq('exam_category', _selectedCategory!);
-      }
-      final search = _searchController.text.trim();
-      if (search.isNotEmpty) {
-        query = query.ilike('name', '%$search%');
-      }
-
-      final ordered = _sort == _SortMode.popular
-          ? query.order('student_count', ascending: false)
-          : query.order('created_at', ascending: false);
-
-      final rows = await ordered.limit(50);
-      setState(() => _classrooms = List<Map<String, dynamic>>.from(rows));
-    } catch (e) {
+      final popular = await _client.from('classrooms').select().eq('status', 'active').order('student_count', ascending: false).limit(10);
+      final newest = await _client.from('classrooms').select().eq('status', 'active').order('created_at', ascending: false).limit(10);
+      setState(() {
+        _popular = List<Map<String, dynamic>>.from(popular);
+        _newest = List<Map<String, dynamic>>.from(newest);
+      });
+    } catch (_) {
       setState(() => _error = 'Could not load classes right now.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  Future<void> _runFilter() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      var query = _client.from('classrooms').select().eq('status', 'active');
+      if (_activeExam != null) query = query.eq('exam_category', _activeExam!);
+      if (_activeSubject != null) query = query.eq('subject', _activeSubject!);
+      final search = _searchController.text.trim();
+      if (search.isNotEmpty) query = query.ilike('name', '%$search%');
+
+      final rows = await query.order('student_count', ascending: false).limit(50);
+      setState(() => _filtered = List<Map<String, dynamic>>.from(rows));
+    } catch (_) {
+      setState(() => _error = 'Could not load classes right now.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _selectExam(String? exam) {
+    setState(() {
+      _activeExam = exam;
+      _activeSubject = null;
+    });
+    if (exam != null) _runFilter();
+  }
+
+  void _selectSubject(String? subject) {
+    setState(() {
+      _activeSubject = subject;
+      _activeExam = null;
+    });
+    if (subject != null) _runFilter();
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _activeExam = null;
+      _activeSubject = null;
+      _searchController.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
     return Column(
       children: [
         Padding(
@@ -84,87 +124,113 @@ class _ClassroomDiscoveryTabState extends State<ClassroomDiscoveryTab> {
             decoration: InputDecoration(
               hintText: 'Search classes',
               prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _filterActive ? IconButton(icon: const Icon(Icons.close_rounded), onPressed: _clearFilters) : null,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               isDense: true,
             ),
-            onSubmitted: (_) => _load(),
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _runFilter(),
           ),
         ),
-
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              ChoiceChip(
-                label: const Text('Popular'),
-                selected: _sort == _SortMode.popular && _selectedCategory == null,
-                onSelected: (_) {
-                  setState(() {
-                    _sort = _SortMode.popular;
-                    _selectedCategory = null;
-                  });
-                  _load();
-                },
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('New'),
-                selected: _sort == _SortMode.newest && _selectedCategory == null,
-                onSelected: (_) {
-                  setState(() {
-                    _sort = _SortMode.newest;
-                    _selectedCategory = null;
-                  });
-                  _load();
-                },
-              ),
-              const SizedBox(width: 12),
-              Container(width: 1, color: scheme.outline),
-              const SizedBox(width: 12),
-              ...kExamCategories.map((c) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(c),
-                      selected: _selectedCategory == c,
-                      onSelected: (v) {
-                        setState(() => _selectedCategory = v ? c : null);
-                        _load();
-                      },
-                    ),
-                  )),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
                   ? Center(child: Text(_error!))
-                  : _classrooms.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.school_outlined, size: 48, color: scheme.onSurfaceVariant),
-                              const SizedBox(height: 12),
-                              const Text('No classes found'),
-                            ],
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: _load,
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            itemCount: _classrooms.length,
-                            itemBuilder: (context, index) => _ClassroomCard(classroom: _classrooms[index]),
-                          ),
-                        ),
+                  : RefreshIndicator(
+                      onRefresh: _filterActive ? _runFilter : _loadHome,
+                      child: _filterActive ? _buildFilteredList() : _buildSectionedHome(),
+                    ),
         ),
       ],
+    );
+  }
+
+  Widget _buildFilteredList() {
+    if (_filtered.isEmpty) {
+      return ListView(children: const [
+        Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: Text('No classes match that search')),
+        ),
+      ]);
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      itemCount: _filtered.length,
+      itemBuilder: (context, index) => _ClassroomCard(classroom: _filtered[index]),
+    );
+  }
+
+  Widget _buildSectionedHome() {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        if (_popular.isNotEmpty) ...[
+          _SectionHeader('Popular Classes'),
+          _HorizontalClassroomList(classrooms: _popular),
+        ],
+        if (_newest.isNotEmpty) ...[
+          _SectionHeader('New Classes'),
+          _HorizontalClassroomList(classrooms: _newest),
+        ],
+        _SectionHeader('Browse by Exam'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: kExamCategories.map((e) => ChoiceChip(label: Text(e), selected: false, onSelected: (_) => _selectExam(e))).toList(),
+          ),
+        ),
+        const SizedBox(height: 20),
+        _SectionHeader('Browse by Subject'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _subjects.map((s) => ChoiceChip(label: Text(s), selected: false, onSelected: (_) => _selectSubject(s))).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+      child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+class _HorizontalClassroomList extends StatelessWidget {
+  final List<Map<String, dynamic>> classrooms;
+  const _HorizontalClassroomList({required this.classrooms});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 230,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: classrooms.length,
+        itemBuilder: (context, index) => SizedBox(
+          width: 230,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: _ClassroomCard(classroom: classrooms[index]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -184,6 +250,11 @@ class _ClassroomCard extends StatelessWidget {
     final isPaid = classroom['is_paid'] as bool;
     final priceCent = classroom['price_cent'] as int;
     final coverUrl = classroom['cover_image_url'] as String?;
+    final durationDays = classroom['duration_days'] as int?;
+    final createdAt = DateTime.tryParse(classroom['created_at'] as String? ?? '');
+
+    final isNew = createdAt != null && isNewClassroom(createdAt);
+    final isPopular = isPopularClassroom(studentCount, capacity);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -196,44 +267,60 @@ class _ClassroomCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: coverUrl != null
-                  ? Image.network(coverUrl, fit: BoxFit.cover)
-                  : Container(
-                      color: scheme.primaryContainer,
-                      alignment: Alignment.center,
-                      child: Icon(Icons.school_rounded, color: scheme.onPrimaryContainer, size: 32),
+            Stack(
+              children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: coverUrl != null
+                      ? Image.network(coverUrl, fit: BoxFit.cover)
+                      : Container(
+                          color: scheme.primaryContainer,
+                          alignment: Alignment.center,
+                          child: Icon(Icons.school_rounded, color: scheme.onPrimaryContainer, size: 32),
+                        ),
+                ),
+                if (isPopular || isNew)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: isPopular ? Colors.orange : Colors.green, borderRadius: BorderRadius.circular(6)),
+                      child: Text(isPopular ? 'POPULAR' : 'NEW', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                     ),
+                  ),
+              ],
             ),
             Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text(subject, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5)),
-                      if (examCategory != 'General/Other') ...[
-                        const SizedBox(width: 6),
-                        Chip(label: Text(examCategory), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(Icons.people_outline_rounded, size: 14, color: scheme.onSurfaceVariant),
-                      const SizedBox(width: 4),
-                      Text('$studentCount/$capacity students', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-                      const Spacer(),
-                      Text(
-                        isPaid ? '₦$priceCent' : 'Free',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: isPaid ? scheme.primary : Colors.green),
+                      Icon(Icons.verified_rounded, size: 12, color: scheme.primary),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          '$subject • $examCategory',
+                          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11.5),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$studentCount students${durationDays != null ? ' • $durationDays days' : ''}',
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    isPaid ? formatCpCent(priceCent) : 'Free',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isPaid ? scheme.primary : Colors.green, fontSize: 15),
                   ),
                 ],
               ),
