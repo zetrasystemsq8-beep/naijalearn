@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'championship_tutor_provider.dart';
 import 'championship_models.dart';
+import 'championship_bracket.dart';
 
 class TutorChampionshipScreen extends StatelessWidget {
   const TutorChampionshipScreen({super.key});
@@ -31,7 +32,19 @@ class _TutorChampionshipView extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Championship — Coach Dashboard')),
+      appBar: AppBar(
+        title: const Text('Championship — Coach Dashboard'),
+        actions: [
+          if (provider.season != null)
+            IconButton(
+              icon: const Icon(Icons.account_tree_rounded),
+              tooltip: 'Tournament Bracket',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChampionshipBracketScreen(seasonId: provider.season!.id)),
+              ),
+            ),
+        ],
+      ),
       backgroundColor: scheme.surface,
       body: RefreshIndicator(
         onRefresh: provider.refresh,

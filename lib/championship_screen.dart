@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'championship_provider.dart';
 import 'championship_models.dart';
 import 'championship_quiz_screen.dart';
+import 'championship_bracket.dart';
 
 class StudentChampionshipScreen extends StatelessWidget {
   const StudentChampionshipScreen({super.key});
@@ -41,6 +42,16 @@ class _StudentChampionshipView extends StatelessWidget {
               expandedHeight: 140,
               pinned: true,
               backgroundColor: scheme.primary,
+              actions: [
+                if (provider.season != null)
+                  IconButton(
+                    icon: const Icon(Icons.account_tree_rounded, color: Colors.white),
+                    tooltip: 'Tournament Bracket',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => ChampionshipBracketScreen(seasonId: provider.season!.id)),
+                    ),
+                  ),
+              ],
               flexibleSpace: FlexibleSpaceBar(
                 title: const Text('Academic Championship', style: TextStyle(color: Colors.white)),
                 background: Container(

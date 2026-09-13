@@ -51,6 +51,8 @@ import 'guest_mode.dart';
 import 'app_update.dart';
 import 'referral_code_screen.dart';
 import 'challenge_feature.dart';
+import 'championship_entry_screen.dart';
+import 'championship_admin_screen.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -156,7 +158,7 @@ class AuthService {
 
   Future<void> _logLoginAttempt({required String identifier, required bool success}) async {
     try {
-      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success});
+      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success, 'p_app': 'naijalearn'});
     } catch (e) {
       debugPrint('[ZetraAuth] log_login_attempt failed (non-fatal, signature may need confirming): $e');
     }
@@ -440,8 +442,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                   decoration: InputDecoration(
                                     labelText: 'ZetraMail',
                                     hintText: 'you@zetramail.ng',
-                                    helperText: 'Use the exact address shown in your Zetra ID app',
-                                    helperStyle: const TextStyle(fontSize: 11),
                                     filled: true,
                                     fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
                                     prefixIcon: Icon(Icons.email_outlined, color: scheme.primary),
@@ -515,12 +515,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : Icon(Icons.fingerprint_rounded, color: scheme.primary),
                             label: const Text('Sign in with Fingerprint', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Fingerprint skips the code below — password sign-in always sends one to ZetraMail.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.75)),
                         ),
                         const SizedBox(height: 10),
                         TextButton(
@@ -1273,15 +1267,30 @@ class _StudyTab extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _MenuTile(icon: Icons.library_books_rounded, label: 'Textbooks', subtitle: 'All subject lessons and notes', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TextbookShelfScreen()))),
-                  _MenuTile(icon: Icons.calendar_month_rounded, label: 'Study Plan', subtitle: 'Your day-by-day plan to exam day', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyPlanScreen()))),
-                  _MenuTile(icon: Icons.style_rounded, label: 'Flashcards', subtitle: 'Spaced-repetition revision cards', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlashcardsScreen()))),
-                  _MenuTile(icon: Icons.school_rounded, label: 'Mock Exam', subtitle: 'JAMB-style, up to 4 subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
-                  _MenuTile(icon: Icons.psychology_alt_rounded, label: 'AI Study Coach', subtitle: 'Personalized focus plan', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
-                  _MenuTile(icon: Icons.auto_awesome_rounded, label: 'NAI Mentor', subtitle: 'Your personal study companion', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NaiChatScreen()))),
-                  _MenuTile(icon: Icons.auto_stories_rounded, label: 'Mistakes Vault', subtitle: 'Review questions you got wrong', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
-                  _MenuTile(icon: Icons.center_focus_strong_rounded, label: 'Focus Mode', subtitle: 'Targeted practice on your weakest subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FocusModeScreen()))),
-                  _MenuTile(icon: Icons.star_rounded, label: 'Bookmarks', subtitle: 'Your saved questions', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BookmarksScreen()))),
+                  _MenuSection(
+                    title: 'LEARN',
+                    items: [
+                      _MenuSectionItem(icon: Icons.library_books_rounded, iconColor: Colors.blue, label: 'Textbooks', subtitle: 'All subject lessons and notes', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TextbookShelfScreen()))),
+                      _MenuSectionItem(icon: Icons.calendar_month_rounded, iconColor: Colors.teal, label: 'Study Plan', subtitle: 'Your day-by-day plan to exam day', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyPlanScreen()))),
+                      _MenuSectionItem(icon: Icons.style_rounded, iconColor: Colors.purple, label: 'Flashcards', subtitle: 'Spaced-repetition revision cards', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlashcardsScreen()))),
+                      _MenuSectionItem(icon: Icons.school_rounded, iconColor: Colors.indigo, label: 'Mock Exam', subtitle: 'JAMB-style, up to 4 subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MockExamScreen()))),
+                    ],
+                  ),
+                  _MenuSection(
+                    title: 'AI TOOLS',
+                    items: [
+                      _MenuSectionItem(icon: Icons.psychology_alt_rounded, iconColor: Colors.deepPurple, label: 'AI Study Coach', subtitle: 'Personalized focus plan', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StudyCoachScreen()))),
+                      _MenuSectionItem(icon: Icons.auto_awesome_rounded, iconColor: Colors.pink, label: 'NAI Mentor', subtitle: 'Your personal study companion', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NaiChatScreen()))),
+                    ],
+                  ),
+                  _MenuSection(
+                    title: 'REVIEW',
+                    items: [
+                      _MenuSectionItem(icon: Icons.auto_stories_rounded, iconColor: Colors.brown, label: 'Mistakes Vault', subtitle: 'Review questions you got wrong', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MistakesVaultScreen()))),
+                      _MenuSectionItem(icon: Icons.center_focus_strong_rounded, iconColor: Colors.orange, label: 'Focus Mode', subtitle: 'Targeted practice on your weakest subjects', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FocusModeScreen()))),
+                      _MenuSectionItem(icon: Icons.star_rounded, iconColor: Colors.amber.shade700, label: 'Bookmarks', subtitle: 'Your saved questions', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BookmarksScreen()))),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1310,14 +1319,73 @@ class _CommunityTab extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('🏆 Community'), automaticallyImplyLeading: false),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: [
-          _MenuTile(icon: Icons.leaderboard_rounded, label: 'Leaderboard', subtitle: 'See how you rank', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-          _MenuTile(icon: Icons.bolt_rounded, label: 'Quiz Battle', subtitle: 'Live head-to-head challenge', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen()))),
-          _MenuTile(icon: Icons.emoji_events_rounded, label: 'World Challenge', subtitle: 'Weekly competition, 500 Cent entry', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen()))),
-          _MenuTile(icon: Icons.groups_2_rounded, label: 'Study Squads', subtitle: 'Study together, chat, battle other squads', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen()))),
-          _MenuTile(icon: Icons.emoji_events_rounded, label: 'Hall of Fame', subtitle: 'Top students by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen()))),
-          _MenuTile(icon: Icons.bolt_rounded, label: 'Challenge a Friend', subtitle: 'Share questions, compare scores', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChallengesHubScreen()))),
+          _MenuSection(
+            title: 'TOURNAMENTS',
+            items: [
+              _MenuSectionItem(
+                icon: Icons.emoji_events_rounded,
+                iconColor: Colors.amber.shade700,
+                label: 'Academic Championship',
+                subtitle: 'Tutor-led team tournaments, elimination rounds',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChampionshipEntryScreen())),
+                trailingBadge: const _NewBadge(),
+              ),
+              _MenuSectionItem(
+                icon: Icons.public_rounded,
+                iconColor: Colors.blue,
+                label: 'World Challenge',
+                subtitle: 'Weekly competition, top 3 share the prize',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WorldChallengeScreen())),
+              ),
+            ],
+          ),
+          _MenuSection(
+            title: 'HEAD-TO-HEAD',
+            items: [
+              _MenuSectionItem(
+                icon: Icons.bolt_rounded,
+                iconColor: Colors.orange,
+                label: 'Quiz Battle',
+                subtitle: 'Live real-time challenge',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BattleLobbyScreen())),
+              ),
+              _MenuSectionItem(
+                icon: Icons.send_rounded,
+                iconColor: Colors.teal,
+                label: 'Challenge a Friend',
+                subtitle: 'Share questions, compare scores',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChallengesHubScreen())),
+              ),
+            ],
+          ),
+          _MenuSection(
+            title: 'RANKINGS & TEAMS',
+            items: [
+              _MenuSectionItem(
+                icon: Icons.leaderboard_rounded,
+                iconColor: Colors.indigo,
+                label: 'Leaderboard',
+                subtitle: 'See how you rank',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+              ),
+              _MenuSectionItem(
+                icon: Icons.military_tech_rounded,
+                iconColor: Colors.deepPurple,
+                label: 'Hall of Fame',
+                subtitle: 'Top students by subject',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen())),
+              ),
+              _MenuSectionItem(
+                icon: Icons.groups_2_rounded,
+                iconColor: Colors.green,
+                label: 'Study Squads',
+                subtitle: 'Study together, chat, battle other squads',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen())),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1332,22 +1400,33 @@ class _ProgressTab extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('🎓 Progress'), automaticallyImplyLeading: false),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: [
-          _MenuTile(icon: Icons.bar_chart_rounded, label: 'Analytics', subtitle: 'Overall performance breakdown', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
-          _MenuTile(icon: Icons.calendar_view_week_rounded, label: 'Weekly Stats', subtitle: 'XP and accuracy this week', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
-          _MenuTile(icon: Icons.assignment_rounded, label: 'Report Card', subtitle: 'Shareable summary', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
-          _MenuTile(icon: Icons.insights_rounded, label: 'Score Predictor', subtitle: 'Estimated JAMB score', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
-          _MenuTile(icon: Icons.track_changes_rounded, label: 'Topic Mastery', subtitle: 'Your mastery level by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TopicMasteryScreen()))),
-          _MenuTile(icon: Icons.hourglass_bottom_rounded, label: 'Exam Countdown', subtitle: 'Days left to your WAEC/JAMB/NECO', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExamCountdownScreen()))),
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Rewards', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          _MenuTile(icon: Icons.casino_rounded, label: 'Daily Spin', subtitle: 'Spin once a day for coins and XP', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SpinWheelScreen()))),
-          _MenuTile(icon: Icons.storefront_rounded, label: 'Coin Shop', subtitle: 'Spend coins on frames and titles', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CoinShopScreen()))),
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Achievements', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          _MenuTile(icon: Icons.workspace_premium_rounded, label: 'Certification', subtitle: 'Earn a verified certificate', onTap: onPickCertificationSubject),
-          _MenuTile(icon: Icons.military_tech_rounded, label: 'Career Mode', subtitle: 'Ranks, tiers & avatars', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
+          _MenuSection(
+            title: 'PERFORMANCE',
+            items: [
+              _MenuSectionItem(icon: Icons.bar_chart_rounded, iconColor: Colors.blue, label: 'Analytics', subtitle: 'Overall performance breakdown', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen()))),
+              _MenuSectionItem(icon: Icons.calendar_view_week_rounded, iconColor: Colors.teal, label: 'Weekly Stats', subtitle: 'XP and accuracy this week', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WeeklyStatsScreen()))),
+              _MenuSectionItem(icon: Icons.assignment_rounded, iconColor: Colors.indigo, label: 'Report Card', subtitle: 'Shareable summary', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportCardScreen()))),
+              _MenuSectionItem(icon: Icons.insights_rounded, iconColor: Colors.deepPurple, label: 'Score Predictor', subtitle: 'Estimated JAMB score', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScorePredictorScreen()))),
+              _MenuSectionItem(icon: Icons.track_changes_rounded, iconColor: Colors.pink, label: 'Topic Mastery', subtitle: 'Your mastery level by subject', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TopicMasteryScreen()))),
+              _MenuSectionItem(icon: Icons.hourglass_bottom_rounded, iconColor: Colors.brown, label: 'Exam Countdown', subtitle: 'Days left to your WAEC/JAMB/NECO', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ExamCountdownScreen()))),
+            ],
+          ),
+          _MenuSection(
+            title: 'REWARDS',
+            items: [
+              _MenuSectionItem(icon: Icons.casino_rounded, iconColor: Colors.redAccent, label: 'Daily Spin', subtitle: 'Spin once a day for coins and XP', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SpinWheelScreen()))),
+              _MenuSectionItem(icon: Icons.storefront_rounded, iconColor: Colors.orange, label: 'Coin Shop', subtitle: 'Spend coins on frames and titles', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CoinShopScreen()))),
+            ],
+          ),
+          _MenuSection(
+            title: 'ACHIEVEMENTS',
+            items: [
+              _MenuSectionItem(icon: Icons.workspace_premium_rounded, iconColor: Colors.amber.shade700, label: 'Certification', subtitle: 'Earn a verified certificate', onTap: onPickCertificationSubject),
+              _MenuSectionItem(icon: Icons.military_tech_rounded, iconColor: Colors.green, label: 'Career Mode', subtitle: 'Ranks, tiers & avatars', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CareerModeScreen()))),
+            ],
+          ),
         ],
       ),
     );
@@ -1394,38 +1473,54 @@ class _ProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          _MenuTile(icon: Icons.person_rounded, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
-          _MenuTile(icon: Icons.sticky_note_2_rounded, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
-          _MenuTile(icon: Icons.account_balance_wallet_rounded, label: 'My Wallet', subtitle: 'View your NaijaLearn balance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()))),
-          _MenuTile(
-            icon: Icons.cloud_upload_rounded,
-            label: 'Migrate Questions (run once)',
-            subtitle: 'Debug: pushes all questions to Supabase',
-            onTap: () async {
-              try {
-                final client = Supabase.instance.client;
-                final all = QuestionRepository.getAll();
-                const batchSize = 200;
-                for (var i = 0; i < all.length; i += batchSize) {
-                  final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
-                  await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
-                }
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
-              } catch (e) {
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
-              }
-            },
+          _MenuSection(
+            title: 'ACCOUNT',
+            items: [
+              _MenuSectionItem(icon: Icons.person_rounded, iconColor: Colors.indigo, label: 'My Profile', subtitle: 'Badges, mastery & stats', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()))),
+              _MenuSectionItem(icon: Icons.sticky_note_2_rounded, iconColor: Colors.orange, label: 'Revision Notes', subtitle: 'Quick notes for last-minute revision', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotesScreen()))),
+              _MenuSectionItem(icon: Icons.account_balance_wallet_rounded, iconColor: Colors.green, label: 'My Wallet', subtitle: 'View your NaijaLearn balance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()))),
+            ],
           ),
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text('SETTINGS', style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold, color: scheme.onSurfaceVariant, letterSpacing: 0.3)),
+          ),
           Container(
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
+            margin: const EdgeInsets.only(bottom: 20),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
             child: SwitchListTile(secondary: Icon(provider.darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded), title: const Text('Dark Mode'), value: provider.darkMode, onChanged: (_) => provider.toggleDarkMode()),
           ),
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('Support', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          _MenuTile(icon: Icons.support_agent_rounded, label: 'Contact Support', subtitle: 'Reach the team — WhatsApp, phone, or email', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen()))),
-          const SizedBox(height: 10),
+          _MenuSection(
+            title: 'SUPPORT',
+            items: [
+              _MenuSectionItem(icon: Icons.support_agent_rounded, iconColor: Colors.blue, label: 'Contact Support', subtitle: 'Reach the team — WhatsApp, phone, or email', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen()))),
+            ],
+          ),
+          _MenuSection(
+            title: 'DEVELOPER',
+            items: [
+              _MenuSectionItem(
+                icon: Icons.cloud_upload_rounded,
+                iconColor: Colors.grey,
+                label: 'Migrate Questions',
+                subtitle: 'Run once: pushes all questions to Supabase',
+                onTap: () async {
+                  try {
+                    final client = Supabase.instance.client;
+                    final all = QuestionRepository.getAll();
+                    const batchSize = 200;
+                    for (var i = 0; i < all.length; i += batchSize) {
+                      final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
+                      await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
+                    }
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
+                  } catch (e) {
+                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
+                  }
+                },
+              ),
+            ],
+          ),
           Material(
             color: scheme.errorContainer.withOpacity(0.5),
             borderRadius: BorderRadius.circular(16),
@@ -1669,10 +1764,12 @@ class ContactSupportScreen extends StatelessWidget {
               final loaded = snap.connectionState == ConnectionState.done;
               final isAdmin = loaded && snap.data != null && snap.data!['is_admin'] == true;
               if (!loaded || !isAdmin) return const SizedBox.shrink();
-              return Column(
-                children: [
-                  _MenuTile(icon: Icons.admin_panel_settings_rounded, label: 'Admin', subtitle: 'Manage cent purchase requests', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen()))),
-                  _MenuTile(icon: Icons.link_rounded, label: 'Referral Stats', subtitle: 'See signups by referral code', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen()))),
+              return _MenuSection(
+                title: 'ADMIN',
+                items: [
+                  _MenuSectionItem(icon: Icons.admin_panel_settings_rounded, iconColor: Colors.red, label: 'Admin', subtitle: 'Manage cent purchase requests', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen()))),
+                  _MenuSectionItem(icon: Icons.link_rounded, iconColor: Colors.blue, label: 'Referral Stats', subtitle: 'See signups by referral code', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen()))),
+                  _MenuSectionItem(icon: Icons.emoji_events_rounded, iconColor: Colors.amber.shade700, label: 'Championship Admin', subtitle: 'Seasons, rounds, matches, payouts', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminChampionshipScreen()))),
                 ],
               );
             },
@@ -1700,6 +1797,114 @@ class _StatPill extends StatelessWidget {
           Text(label, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
+    );
+  }
+}
+
+/// Groups related nav items into ONE bordered container with a section
+/// label above it — replaces stacking individual _MenuTile cards, which
+/// read as "a pile of boxes" rather than an organized menu.
+class _MenuSection extends StatelessWidget {
+  final String title;
+  final List<_MenuSectionItem> items;
+  const _MenuSection({required this.title, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.4,
+                  ),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              children: [
+                for (int i = 0; i < items.length; i++) ...[
+                  _MenuSectionRow(item: items[i]),
+                  if (i < items.length - 1) Divider(height: 1, indent: 66, endIndent: 14, color: scheme.outlineVariant.withOpacity(0.4)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuSectionItem {
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget? trailingBadge;
+  const _MenuSectionItem({required this.icon, this.iconColor, required this.label, required this.subtitle, required this.onTap, this.trailingBadge});
+}
+
+class _MenuSectionRow extends StatelessWidget {
+  final _MenuSectionItem item;
+  const _MenuSectionRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: item.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: (item.iconColor ?? scheme.primary).withOpacity(0.13), borderRadius: BorderRadius.circular(10)),
+                child: Icon(item.icon, color: item.iconColor ?? scheme.primary, size: 19),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                    Text(item.subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              if (item.trailingBadge != null) ...[item.trailingBadge!, const SizedBox(width: 6)],
+              Icon(Icons.chevron_right_rounded, size: 20, color: scheme.onSurfaceVariant.withOpacity(0.6)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(color: Colors.amber.shade700, borderRadius: BorderRadius.circular(6)),
+      child: const Text('NEW', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
     );
   }
 }
