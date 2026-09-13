@@ -4,7 +4,8 @@
 // server-side. Paying the classroom creation fee (read server-side from
 // app_config, not hardcoded) and creating the classroom happen
 // atomically in that RPC; if the fee can't be charged, nothing is
-// created.
+// created. A preview step shows the tutor exactly what students will
+// see before anything is charged or published.
 
 import 'dart:io';
 
@@ -15,7 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_enhancements.dart' show GradientHeader, GradientButton;
 import 'buy_cent.dart';
-import 'classroom_shared.dart' show kExamCategories, loadSubjects;
+import 'classroom_shared.dart' show kExamCategories, loadSubjects, formatCpCent;
 
 enum _Duration { thirtyDays, ninetyDays, unlimited }
 
@@ -45,8 +46,6 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
   bool _submitting = false;
   String? _error;
 
-  // Fetched once from app_config so the fee shown matches what will
-  // actually be charged — never hardcoded in the UI.
   int? _creationFeeCent;
   double? _platformFeePercent;
   bool _loadingConfig = true;
@@ -125,13 +124,54 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
     }
   }
 
-  Future<void> _submit() async {
+  String get _durationLabel {
+    switch (_duration) {
+      case _Duration.thirtyDays:
+        return '30 days';
+      case _Duration.ninetyDays:
+        return '90 days';
+      case _Duration.unlimited:
+        return 'Unlimited';
+    }
+  }
+
+  Future<void> _openPreview() async {
     if (!_formKey.currentState!.validate()) return;
     if (_subject == null) {
       setState(() => _error = 'Select a subject');
       return;
     }
+    setState(() => _error = null);
 
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        expand: false,
+        builder: (context, scrollController) => _ClassroomPreview(
+          scrollController: scrollController,
+          name: _nameController.text.trim(),
+          subject: _subject!,
+          examCategory: _examCategory,
+          description: _descriptionController.text.trim(),
+          introInfo: _introController.text.trim(),
+          rules: _rulesController.text.trim(),
+          coverImage: _coverImage,
+          isPaid: _isPaid,
+          priceCent: _isPaid ? (int.tryParse(_priceController.text) ?? 0) : 0,
+          capacity: int.tryParse(_capacityController.text) ?? 0,
+          durationLabel: _durationLabel,
+          creationFeeCent: _creationFeeCent ?? 2000,
+        ),
+      ),
+    );
+
+    if (confirmed == true) _submit();
+  }
+
+  Future<void> _submit() async {
     setState(() {
       _submitting = true;
       _error = null;
@@ -180,8 +220,8 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Not enough Cent'),
-        content: Text('Creating a classroom costs $fee Cent. Your wallet balance is too low — top up first.'),
+        title: const Text('Not enough balance'),
+        content: Text('Creating a classroom costs ${formatCpCent(fee)}. Top up your wallet first.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
@@ -199,7 +239,7 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final feeLabel = _loadingConfig ? '...' : '${_creationFeeCent ?? 2000}';
+    final feeLabel = _loadingConfig ? '...' : formatCpCent(_creationFeeCent ?? 2000);
     final feePercent = _platformFeePercent ?? 10.0;
 
     return Scaffold(
@@ -223,14 +263,17 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Creating a classroom costs $feeLabel Cent, charged when you tap create below.',
+                              'Creating a classroom costs $feeLabel, charged after you preview and publish.',
                               style: TextStyle(color: scheme.onPrimaryContainer, fontSize: 12.5),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
+
+                    _SectionLabel('Classroom Information'),
+                    const SizedBox(height: 12),
 
                     GestureDetector(
                       onTap: _pickCover,
@@ -261,11 +304,17 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(labelText: 'Classroom name', hintText: 'e.g. JAMB Biology Masterclass 2027', border: OutlineInputBorder()),
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter a classroom name' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _descriptionController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'Description', hintText: 'What will students learn?', border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 16),
 
@@ -290,14 +339,10 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                       }).toList(),
                     ),
 
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _descriptionController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(labelText: 'Description', hintText: 'What will students learn?', border: OutlineInputBorder()),
-                    ),
+                    const SizedBox(height: 28),
+                    _SectionLabel('Learning Experience'),
+                    const SizedBox(height: 12),
 
-                    const SizedBox(height: 16),
                     TextFormField(
                       controller: _introController,
                       maxLines: 3,
@@ -307,7 +352,6 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                         border: OutlineInputBorder(),
                       ),
                     ),
-
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _rulesController,
@@ -318,10 +362,35 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                         border: OutlineInputBorder(),
                       ),
                     ),
-
-                    const SizedBox(height: 20),
-                    Text('Classroom type', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _capacityController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(labelText: 'Maximum students', border: OutlineInputBorder()),
+                      validator: (v) {
+                        final n = int.tryParse(v ?? '');
+                        if (n == null || n <= 0) return 'Enter a valid capacity';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Duration', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
+                    SegmentedButton<_Duration>(
+                      segments: const [
+                        ButtonSegment(value: _Duration.thirtyDays, label: Text('30 days')),
+                        ButtonSegment(value: _Duration.ninetyDays, label: Text('90 days')),
+                        ButtonSegment(value: _Duration.unlimited, label: Text('Unlimited')),
+                      ],
+                      selected: {_duration},
+                      onSelectionChanged: (s) => setState(() => _duration = s.first),
+                    ),
+
+                    const SizedBox(height: 28),
+                    _SectionLabel('Pricing'),
+                    const SizedBox(height: 12),
+
                     SegmentedButton<bool>(
                       segments: const [
                         ButtonSegment(value: true, label: Text('Paid')),
@@ -337,7 +406,7 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                         controller: _priceController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: const InputDecoration(labelText: 'Price per student (₦ / Cent)', border: OutlineInputBorder()),
+                        decoration: const InputDecoration(labelText: 'Price per student (in Cent)', border: OutlineInputBorder()),
                         validator: (v) {
                           if (!_isPaid) return null;
                           final n = int.tryParse(v ?? '');
@@ -352,38 +421,12 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                           final price = int.parse(_priceController.text);
                           final fee = (price * feePercent / 100).round();
                           return Text(
-                            'You receive ₦${price - fee} per student · NaijaLearn takes ₦$fee (${feePercent.toStringAsFixed(0)}%)',
+                            'Students pay ${formatCpCent(price)} · you receive ${formatCpCent(price - fee)} · NaijaLearn takes ${formatCpCent(fee)} (${feePercent.toStringAsFixed(0)}%)',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                           );
                         }),
                       ],
                     ],
-
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _capacityController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(labelText: 'Maximum students', border: OutlineInputBorder()),
-                      validator: (v) {
-                        final n = int.tryParse(v ?? '');
-                        if (n == null || n <= 0) return 'Enter a valid capacity';
-                        return null;
-                      },
-                    ),
-
-                    const SizedBox(height: 16),
-                    Text('Duration', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    SegmentedButton<_Duration>(
-                      segments: const [
-                        ButtonSegment(value: _Duration.thirtyDays, label: Text('30 days')),
-                        ButtonSegment(value: _Duration.ninetyDays, label: Text('90 days')),
-                        ButtonSegment(value: _Duration.unlimited, label: Text('Unlimited')),
-                      ],
-                      selected: {_duration},
-                      onSelectionChanged: (s) => setState(() => _duration = s.first),
-                    ),
 
                     if (_error != null) ...[
                       const SizedBox(height: 16),
@@ -396,9 +439,9 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
 
                     const SizedBox(height: 24),
                     GradientButton(
-                      label: _submitting ? 'Creating...' : 'Pay $feeLabel Cent & Create Classroom',
-                      icon: Icons.school_rounded,
-                      onPressed: _submitting ? null : _submit,
+                      label: 'Preview Classroom',
+                      icon: Icons.visibility_outlined,
+                      onPressed: _submitting ? null : _openPreview,
                       height: 54,
                     ),
                   ],
@@ -408,6 +451,133 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold));
+  }
+}
+
+class _ClassroomPreview extends StatefulWidget {
+  final ScrollController scrollController;
+  final String name, subject, examCategory, description, introInfo, rules, durationLabel;
+  final XFile? coverImage;
+  final bool isPaid;
+  final int priceCent, capacity, creationFeeCent;
+
+  const _ClassroomPreview({
+    required this.scrollController,
+    required this.name,
+    required this.subject,
+    required this.examCategory,
+    required this.description,
+    required this.introInfo,
+    required this.rules,
+    required this.coverImage,
+    required this.isPaid,
+    required this.priceCent,
+    required this.capacity,
+    required this.durationLabel,
+    required this.creationFeeCent,
+  });
+
+  @override
+  State<_ClassroomPreview> createState() => _ClassroomPreviewState();
+}
+
+class _ClassroomPreviewState extends State<_ClassroomPreview> {
+  bool _submitting = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Row(
+            children: [
+              Expanded(child: Text('This is how students will see your classroom', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold))),
+              IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(context, false)),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            controller: widget.scrollController,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: widget.coverImage != null
+                      ? Image.file(File(widget.coverImage!.path), fit: BoxFit.cover)
+                      : Container(color: scheme.primaryContainer, child: Icon(Icons.school_rounded, color: scheme.onPrimaryContainer, size: 40)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(child: Text(widget.name, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))),
+                  if (widget.examCategory != 'General/Other') Chip(label: Text(widget.examCategory), visualDensity: VisualDensity.compact),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(widget.subject, style: TextStyle(color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 10),
+              Text('0/${widget.capacity} students • ${widget.durationLabel}', style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 14),
+              Text(
+                widget.isPaid ? formatCpCent(widget.priceCent) : 'Free',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: widget.isPaid ? scheme.primary : Colors.green),
+              ),
+              if (widget.description.isNotEmpty) ...[
+                const Divider(height: 32),
+                Text('About This Classroom', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Text(widget.description),
+              ],
+              if (widget.introInfo.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(widget.introInfo),
+              ],
+              if (widget.rules.isNotEmpty) ...[
+                const Divider(height: 32),
+                Text('Classroom Rules', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Text(widget.rules),
+              ],
+            ],
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: SizedBox(
+              height: 54,
+              child: FilledButton(
+                onPressed: _submitting
+                    ? null
+                    : () {
+                        setState(() => _submitting = true);
+                        Navigator.pop(context, true);
+                      },
+                child: Text('Publish — Pay ${formatCpCent(widget.creationFeeCent)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

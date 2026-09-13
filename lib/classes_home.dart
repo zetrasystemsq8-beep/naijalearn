@@ -120,7 +120,7 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
     return Scaffold(
       body: Column(
         children: [
-          const GradientHeader(title: 'Classes', subtitle: 'Learn from tutors, or teach your own class'),
+          const GradientHeader(title: 'Learn with a tutor. Learn with a class.', subtitle: 'Join structured classrooms built for serious students.'),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(

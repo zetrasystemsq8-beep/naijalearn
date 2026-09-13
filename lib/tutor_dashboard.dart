@@ -6,10 +6,12 @@
 // not true (e.g. a stale cached route).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'classroom_chat_widget.dart';
+import 'classroom_shared.dart' show formatCpCent;
 
 class TutorDashboardScreen extends StatefulWidget {
   final int classroomId;
@@ -47,7 +49,7 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
     if (_classroom == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('Classroom not found')));
 
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_classroom!['name'] as String, overflow: TextOverflow.ellipsis),
@@ -57,6 +59,7 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
             Tab(text: 'Lessons'),
             Tab(text: 'Assignments'),
             Tab(text: 'Announcements'),
+            Tab(text: 'Invite'),
             Tab(text: 'Chat'),
           ]),
         ),
@@ -66,6 +69,7 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
           _LessonsTab(classroomId: widget.classroomId),
           _AssignmentsTab(classroomId: widget.classroomId),
           _AnnouncementsComposeTab(classroomId: widget.classroomId),
+          _InviteTab(classroom: _classroom!),
           ClassroomChatWidget(classroomId: widget.classroomId, isTutor: true),
         ]),
       ),
@@ -202,7 +206,7 @@ class _RevenueRow extends StatelessWidget {
         children: [
           Text(label, style: TextStyle(fontWeight: highlight ? FontWeight.bold : FontWeight.normal)),
           Text(
-            '${isDeduction ? '-' : ''}₦$cent',
+            '${isDeduction ? '-' : ''}${formatCpCent(cent)}',
             style: TextStyle(fontWeight: FontWeight.bold, color: highlight ? Colors.green : (isDeduction ? Colors.red : null)),
           ),
         ],
@@ -789,6 +793,87 @@ class _AnnouncementsComposeTabState extends State<_AnnouncementsComposeTab> {
                         },
                       ),
                     ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invite Students
+// ---------------------------------------------------------------------------
+class _InviteTab extends StatelessWidget {
+  final Map<String, dynamic> classroom;
+  const _InviteTab({required this.classroom});
+
+  String _shareMessage() {
+    final name = classroom['name'] as String;
+    final subject = classroom['subject'] as String;
+    final examCategory = classroom['exam_category'] as String;
+    final durationDays = classroom['duration_days'] as int?;
+    final isPaid = classroom['is_paid'] as bool;
+    final priceCent = classroom['price_cent'] as int;
+    final code = classroom['invite_code'] as String? ?? '';
+
+    return "You've been invited to join a NaijaLearn classroom.\n\n"
+        '$name\n'
+        'Subject: $subject${examCategory != 'General/Other' ? ' • $examCategory' : ''}\n'
+        '${durationDays != null ? 'Duration: $durationDays days\n' : ''}'
+        'Price: ${isPaid ? formatCpCent(priceCent) : 'Free'}\n\n'
+        'Join using this code in NaijaLearn: $code';
+  }
+
+  void _copy(BuildContext context, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied.')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final code = classroom['invite_code'] as String?;
+
+    if (code == null) {
+      return const Center(child: Text('Invite code not available for this classroom yet.'));
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text('Invite Students', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text(
+          'Share this code so students can find and join your classroom. '
+          'They still have to complete payment themselves — the code only opens the classroom preview.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            children: [
+              Text(code, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24, fontFamily: 'monospace', color: scheme.onPrimaryContainer, letterSpacing: 1)),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _copy(context, code, 'Code'),
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Copy Code'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () => _copy(context, _shareMessage(), 'Share message'),
+          icon: const Icon(Icons.share_outlined),
+          label: const Text('Copy Share Message'),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Paste the copied message into WhatsApp, SMS, or wherever you reach your students. '
+          '(A native share sheet needs the share_plus package — not added here since it wasn\'t confirmed as already a dependency.)',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic),
         ),
       ],
     );

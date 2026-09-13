@@ -24,6 +24,7 @@ class ClassroomHomeScreen extends StatefulWidget {
 class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
   final _client = Supabase.instance.client;
   Map<String, dynamic>? _classroom;
+  Map<String, dynamic>? _enrollment;
   bool _isTutor = false;
   bool _loading = true;
 
@@ -36,9 +37,25 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
   Future<void> _load() async {
     try {
       final classroom = await _client.from('classrooms').select().eq('id', widget.classroomId).single();
+      final userId = _client.auth.currentUser?.id;
+      final isTutor = classroom['tutor_id'] == userId;
+
+      Map<String, dynamic>? enrollment;
+      if (!isTutor && userId != null) {
+        final row = await _client
+            .from('classroom_enrollments')
+            .select()
+            .eq('classroom_id', widget.classroomId)
+            .eq('student_id', userId)
+            .eq('status', 'active')
+            .maybeSingle();
+        enrollment = row != null ? Map<String, dynamic>.from(row) : null;
+      }
+
       setState(() {
         _classroom = Map<String, dynamic>.from(classroom);
-        _isTutor = classroom['tutor_id'] == _client.auth.currentUser?.id;
+        _isTutor = isTutor;
+        _enrollment = enrollment;
       });
     } catch (_) {
       // handled by null _classroom below
@@ -57,12 +74,41 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
       return TutorDashboardScreen(classroomId: widget.classroomId);
     }
 
+    final expiresAt = _enrollment?['expires_at'] as String?;
+    final expiryDate = expiresAt != null ? DateTime.tryParse(expiresAt) : null;
+    final isExpired = expiryDate != null && expiryDate.isBefore(DateTime.now());
+
+    if (isExpired) {
+      return Scaffold(
+        appBar: AppBar(title: Text(_classroom!['name'] as String, overflow: TextOverflow.ellipsis)),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_clock_outlined, size: 48, color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 16),
+                Text('Access Expired', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text(
+                  'Your access to this classroom has ended. Contact the tutor or platform support if you believe this is a mistake.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_classroom!['name'] as String, overflow: TextOverflow.ellipsis),
-          bottom: const TabBar(tabs: [
+          bottom: const TabBar(isScrollable: true, tabs: [
+            Tab(text: 'Overview'),
             Tab(text: 'Lessons'),
             Tab(text: 'Assignments'),
             Tab(text: 'Announcements'),
@@ -70,6 +116,7 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
           ]),
         ),
         body: TabBarView(children: [
+          _StudentOverviewTab(classroomId: widget.classroomId),
           _StudentLessonsTab(classroomId: widget.classroomId),
           _StudentAssignmentsTab(classroomId: widget.classroomId),
           _AnnouncementsTab(classroomId: widget.classroomId),
@@ -150,7 +197,23 @@ class _StudentLessonsTabState extends State<_StudentLessonsTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_lessons.isEmpty) return const Center(child: Text('No lessons uploaded yet'));
+    if (_lessons.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.menu_book_outlined, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              const Text('No lessons yet', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text("Your tutor hasn't published the first lesson yet.", textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
+    }
 
     final progress = _lessons.isEmpty ? 0.0 : _completedIds.length / _lessons.length;
 
@@ -278,7 +341,23 @@ class _StudentAssignmentsTabState extends State<_StudentAssignmentsTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_assignments.isEmpty) return const Center(child: Text('No assignments yet'));
+    if (_assignments.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.assignment_outlined, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              const Text('No assignments yet', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text("Your tutor hasn't posted an assignment yet.", textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -377,7 +456,23 @@ class _AnnouncementsTabState extends State<_AnnouncementsTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_announcements.isEmpty) return const Center(child: Text('No announcements yet'));
+    if (_announcements.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.campaign_outlined, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              const Text('No announcements yet', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text("Your tutor hasn't posted an update yet.", textAlign: TextAlign.center),
+            ],
+          ),
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -404,6 +499,169 @@ class _AnnouncementsTabState extends State<_AnnouncementsTab> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Overview — "Continue Learning" + latest announcement + progress +
+// pending assignments, per the polish-pass spec. Reuses simple queries
+// rather than a combined RPC; acceptable at this scale.
+// ---------------------------------------------------------------------------
+class _StudentOverviewTab extends StatefulWidget {
+  final int classroomId;
+  const _StudentOverviewTab({required this.classroomId});
+
+  @override
+  State<_StudentOverviewTab> createState() => _StudentOverviewTabState();
+}
+
+class _StudentOverviewTabState extends State<_StudentOverviewTab> {
+  final _client = Supabase.instance.client;
+  bool _loading = true;
+  Map<String, dynamic>? _nextLesson;
+  Map<String, dynamic>? _latestAnnouncement;
+  int _totalLessons = 0;
+  int _completedLessons = 0;
+  int _pendingAssignments = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final userId = _client.auth.currentUser?.id;
+
+      final lessons = await _client
+          .from('classroom_lessons')
+          .select()
+          .eq('classroom_id', widget.classroomId)
+          .order('position');
+      final lessonList = List<Map<String, dynamic>>.from(lessons);
+
+      Set<int> completedIds = {};
+      if (userId != null && lessonList.isNotEmpty) {
+        final completions = await _client
+            .from('classroom_lesson_completions')
+            .select('lesson_id')
+            .eq('student_id', userId)
+            .inFilter('lesson_id', lessonList.map((l) => l['id'] as int).toList());
+        completedIds = (completions as List).map((c) => c['lesson_id'] as int).toSet();
+      }
+
+      Map<String, dynamic>? nextLesson;
+      for (final l in lessonList) {
+        if (!completedIds.contains(l['id'])) {
+          nextLesson = l;
+          break;
+        }
+      }
+
+      final announcement = await _client
+          .from('classroom_announcements')
+          .select()
+          .eq('classroom_id', widget.classroomId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      int pendingAssignments = 0;
+      if (userId != null) {
+        final assignments = await _client.from('classroom_assignments').select('id').eq('classroom_id', widget.classroomId);
+        final assignmentIds = (assignments as List).map((a) => a['id'] as int).toList();
+        if (assignmentIds.isNotEmpty) {
+          final submissions = await _client
+              .from('classroom_assignment_submissions')
+              .select('assignment_id')
+              .eq('student_id', userId)
+              .inFilter('assignment_id', assignmentIds);
+          final submittedIds = (submissions as List).map((s) => s['assignment_id'] as int).toSet();
+          pendingAssignments = assignmentIds.where((id) => !submittedIds.contains(id)).length;
+        }
+      }
+
+      setState(() {
+        _nextLesson = nextLesson;
+        _latestAnnouncement = announcement;
+        _totalLessons = lessonList.length;
+        _completedLessons = completedIds.length;
+        _pendingAssignments = pendingAssignments;
+      });
+    } catch (_) {
+      // Non-fatal — sections just show their own empty states.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    final scheme = Theme.of(context).colorScheme;
+    final progress = _totalLessons > 0 ? _completedLessons / _totalLessons : null;
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_nextLesson != null) ...[
+            Text('Continue Learning', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.play_circle_outline_rounded, color: scheme.primary),
+                title: Text(_nextLesson!['title'] as String),
+                subtitle: const Text('Next lesson'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => DefaultTabController.of(context).animateTo(1),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          if (_latestAnnouncement != null) ...[
+            Text('Latest Announcement', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(_latestAnnouncement!['message'] as String, maxLines: 3, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          Text('Your Progress', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          if (progress != null) ...[
+            ClipRRect(borderRadius: BorderRadius.circular(8), child: LinearProgressIndicator(value: progress, minHeight: 8)),
+            const SizedBox(height: 6),
+            Text('$_completedLessons/$_totalLessons lessons completed', style: Theme.of(context).textTheme.bodySmall),
+          ] else
+            Text('No lessons to track yet.', style: Theme.of(context).textTheme.bodySmall),
+
+          if (_pendingAssignments > 0) ...[
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orange.withOpacity(0.3))),
+              child: Row(
+                children: [
+                  Icon(Icons.assignment_late_outlined, color: Colors.orange.shade800),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text('$_pendingAssignments assignment${_pendingAssignments > 1 ? 's' : ''} pending', style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.w600))),
+                  TextButton(onPressed: () => DefaultTabController.of(context).animateTo(2), child: const Text('View')),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
