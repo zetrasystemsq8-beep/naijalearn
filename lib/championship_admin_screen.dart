@@ -287,7 +287,9 @@ class _TeamsTab extends StatelessWidget {
             trailing: PopupMenuButton<String>(
               onSelected: (v) {
                 if (v == 'disqualify') {
-                  _showDisqualifyDialog(context, provider, t.id);
+                  _showDisqualifyDialog(context, provider, t);
+                } else if (v == 'refund') {
+                  _showRefundDialog(context, provider, t);
                 } else {
                   provider.setTeamStatus(t.id, v);
                 }
@@ -297,6 +299,7 @@ class _TeamsTab extends StatelessWidget {
                 PopupMenuItem(value: 'rejected', child: Text('Reject')),
                 PopupMenuItem(value: 'withdrawn', child: Text('Mark withdrawn')),
                 PopupMenuItem(value: 'disqualify', child: Text('Disqualify…')),
+                PopupMenuItem(value: 'refund', child: Text('Refund…')),
               ],
             ),
           ),
@@ -305,23 +308,97 @@ class _TeamsTab extends StatelessWidget {
     );
   }
 
-  void _showDisqualifyDialog(BuildContext context, AdminChampionshipProvider provider, String teamId) {
+  void _showDisqualifyDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipTeam team) {
     final ctrl = TextEditingController();
+    bool alsoRefund = false;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Disqualify team'),
-        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Reason')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              provider.disqualifyTeam(teamId, ctrl.text.trim().isEmpty ? 'No reason given' : ctrl.text.trim());
-              Navigator.pop(ctx);
-            },
-            child: const Text('Disqualify'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Disqualify team'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Reason')),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: alsoRefund,
+                title: const Text('Also refund entry fee', style: TextStyle(fontSize: 13)),
+                onChanged: (v) => setState(() => alsoRefund = v ?? false),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                final reason = ctrl.text.trim().isEmpty ? 'No reason given' : ctrl.text.trim();
+                await provider.disqualifyTeam(team.id, reason);
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (alsoRefund && context.mounted) {
+                  _showRefundDialog(context, provider, team, prefillReason: 'Disqualification refund: $reason');
+                }
+              },
+              child: const Text('Disqualify'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showRefundDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipTeam team, {String? prefillReason}) {
+    final fullFee = provider.selectedSeason?.entryFeeCent ?? 0;
+    final amountCtrl = TextEditingController(text: fullFee.toString());
+    final reasonCtrl = TextEditingController(text: prefillReason ?? '');
+    bool submitting = false;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Text('Refund ${team.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Entry fee was $fullFee Cent.', style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: amountCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Refund amount (Cent)'),
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: reasonCtrl, decoration: const InputDecoration(labelText: 'Reason')),
+              if (provider.actionError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      final amount = num.tryParse(amountCtrl.text) ?? 0;
+                      if (amount <= 0) return;
+                      setState(() => submitting = true);
+                      final ok = await provider.refundTeam(
+                        teamId: team.id,
+                        amountCent: amount,
+                        reason: reasonCtrl.text.trim().isEmpty ? 'No reason given' : reasonCtrl.text.trim(),
+                      );
+                      setState(() => submitting = false);
+                      if (ok && ctx.mounted) Navigator.pop(ctx);
+                    },
+              child: submitting ? const CircularProgressIndicator() : const Text('Refund'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -352,12 +429,19 @@ class _RoundsTab extends StatelessWidget {
                         title: Text('${r.roundNumber}. ${r.name}'),
                         subtitle: Text('${r.status} • opens ${_fmt(r.opensAt)} • closes ${_fmt(r.closesAt)}'),
                         trailing: PopupMenuButton<String>(
-                          onSelected: (v) => provider.setRoundStatus(r.id, v),
+                          onSelected: (v) {
+                            if (v == 'reset') {
+                              _showResetRoundDialog(context, provider, r);
+                            } else {
+                              provider.setRoundStatus(r.id, v);
+                            }
+                          },
                           itemBuilder: (_) => const [
                             PopupMenuItem(value: 'scheduled', child: Text('Set: scheduled')),
                             PopupMenuItem(value: 'open', child: Text('Open round')),
                             PopupMenuItem(value: 'closed', child: Text('Close round')),
                             PopupMenuItem(value: 'cancelled', child: Text('Cancel round')),
+                            PopupMenuItem(value: 'reset', child: Text('Reset round (wipes attempts)…')),
                           ],
                         ),
                       ),
@@ -378,6 +462,34 @@ class _RoundsTab extends StatelessWidget {
   }
 
   String _fmt(DateTime d) => '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  void _showResetRoundDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Reset ${round.name}?'),
+        content: const Text(
+          'This permanently deletes every attempt and answer submitted for this round, clears match scores/winners, '
+          'and sets the round back to scheduled. Use this only if you need to change the question set after players '
+          'have already started — there is no undo.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            onPressed: () async {
+              final ok = await provider.resetRound(round.id);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (!ok && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.actionError ?? 'Reset failed')));
+              }
+            },
+            child: const Text('Reset Round'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showCreateRoundSheet(BuildContext context, AdminChampionshipProvider provider) {
     final nameCtrl = TextEditingController();
@@ -673,60 +785,101 @@ class _PayoutsTab extends StatelessWidget {
 
   void _showFinalizeDialog(BuildContext context, AdminChampionshipProvider provider, List<ChampionshipTeam> teams) {
     String? winnerId;
+    int? rosterCount;
     final tutorCtrl = TextEditingController(text: '20');
     final playerCtrl = TextEditingController(text: '60');
     final platformCtrl = TextEditingController(text: '20');
     bool submitting = false;
+    final pool = provider.collectedEntryFees;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Finalize Prize'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Champion team'),
-                  items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
-                  onChanged: (v) => winnerId = v,
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: tutorCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tutor %')),
-                const SizedBox(height: 8),
-                TextField(controller: playerCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Players %')),
-                const SizedBox(height: 8),
-                TextField(controller: platformCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Platform %')),
-                const SizedBox(height: 8),
-                const Text('Must sum to 100.', style: TextStyle(fontSize: 11)),
-                if (provider.actionError != null)
-                  Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-              ],
+        builder: (ctx, setState) {
+          final tutorPct = num.tryParse(tutorCtrl.text) ?? 0;
+          final playerPct = num.tryParse(playerCtrl.text) ?? 0;
+          final platformPct = num.tryParse(platformCtrl.text) ?? 0;
+          final tutorAmt = pool * tutorPct / 100;
+          final platformAmt = pool * platformPct / 100;
+          final studentTotal = pool - tutorAmt - platformAmt;
+          final perPlayer = (rosterCount != null && rosterCount! > 0) ? studentTotal / rosterCount! : null;
+          final pctSum = tutorPct + playerPct + platformPct;
+
+          Future<void> onWinnerChanged(String? v) async {
+            winnerId = v;
+            setState(() => rosterCount = null);
+            if (v == null) return;
+            final roster = await ChampionshipService.instance.fetchRoster(v);
+            setState(() => rosterCount = roster.length);
+          }
+
+          return AlertDialog(
+            title: const Text('Finalize Prize'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Collected pool: $pool Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: 'Champion team'),
+                    items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
+                    onChanged: onWinnerChanged,
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(controller: tutorCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tutor %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 8),
+                  TextField(controller: playerCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Players %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 8),
+                  TextField(controller: platformCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Platform %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 4),
+                  Text(
+                    pctSum == 100 ? 'Sums to 100 ✓' : 'Sums to $pctSum — must equal 100',
+                    style: TextStyle(fontSize: 11, color: pctSum == 100 ? Colors.green : Colors.red),
+                  ),
+                  const Divider(height: 20),
+                  Text('Preview — this is exactly what will be paid out, not an estimate:', style: Theme.of(ctx).textTheme.labelSmall),
+                  const SizedBox(height: 6),
+                  Text('Tutor receives: ${tutorAmt.toStringAsFixed(2)} Cent'),
+                  Text(
+                    winnerId == null
+                        ? 'Each player receives: — (pick a team first)'
+                        : rosterCount == null
+                            ? 'Each player receives: loading roster…'
+                            : rosterCount == 0
+                                ? 'Each player receives: — (team has no active roster)'
+                                : 'Each of $rosterCount players receives: ${perPlayer!.toStringAsFixed(2)} Cent',
+                  ),
+                  Text('Platform keeps: ${platformAmt.toStringAsFixed(2)} Cent'),
+                  if (provider.actionError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                  ],
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: submitting
-                  ? null
-                  : () async {
-                      if (winnerId == null) return;
-                      setState(() => submitting = true);
-                      final ok = await provider.finalizePrize(
-                        winnerTeamId: winnerId!,
-                        tutorPct: num.tryParse(tutorCtrl.text) ?? 0,
-                        playerPct: num.tryParse(playerCtrl.text) ?? 0,
-                        platformPct: num.tryParse(platformCtrl.text) ?? 0,
-                      );
-                      setState(() => submitting = false);
-                      if (ok && ctx.mounted) Navigator.pop(ctx);
-                    },
-              child: submitting ? const CircularProgressIndicator() : const Text('Finalize'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: (submitting || winnerId == null || pctSum != 100)
+                    ? null
+                    : () async {
+                        setState(() => submitting = true);
+                        final ok = await provider.finalizePrize(
+                          winnerTeamId: winnerId!,
+                          tutorPct: tutorPct,
+                          playerPct: playerPct,
+                          platformPct: platformPct,
+                        );
+                        setState(() => submitting = false);
+                        if (ok && ctx.mounted) Navigator.pop(ctx);
+                      },
+                child: submitting ? const CircularProgressIndicator() : const Text('Finalize'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

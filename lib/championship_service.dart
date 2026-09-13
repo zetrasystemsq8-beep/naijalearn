@@ -406,14 +406,32 @@ class ChampionshipService {
     await _client.from('championship_teams').update({'status': status}).eq('id', teamId);
   }
 
-  Future<void> disqualifyTeam({required String teamId, required String reason}) async {
-    final uid = _uid;
-    await _client.from('championship_teams').update({
-      'status': 'disqualified',
-      'disqualified_reason': reason,
-      'disqualified_by': uid,
-      'disqualified_at': DateTime.now().toIso8601String(),
-    }).eq('id', teamId);
+  /// Goes through the audited RPC now — every disqualification is
+  /// logged to championship_audit_log, not just a silent status flip.
+  Future<ChampionshipTeam> disqualifyTeam({required String teamId, required String reason}) async {
+    final row = await _client.rpc('championship_disqualify_team', params: {
+      'p_team_id': teamId,
+      'p_reason': reason,
+    });
+    return ChampionshipTeam.fromMap(row as Map<String, dynamic>);
+  }
+
+  /// Refund is a distinct, audited action from status changes — a team
+  /// can be refunded without being disqualified (voluntary withdrawal)
+  /// or disqualified without a refund (misconduct), admin's call either way.
+  Future<void> refundTeam({required String teamId, required num amountCent, required String reason}) async {
+    await _client.rpc('championship_refund_team', params: {
+      'p_team_id': teamId,
+      'p_refund_amount_cent': amountCent,
+      'p_reason': reason,
+    });
+  }
+
+  /// The only way to change a round's question_set_id after any attempt
+  /// exists — wipes attempts/answers and resets the round to scheduled.
+  /// Never a silent swap; see the DB trigger that blocks the alternative.
+  Future<void> resetRound(String roundId) async {
+    await _client.rpc('championship_reset_round', params: {'p_round_id': roundId});
   }
 
   Future<ChampionshipRound> createRound({

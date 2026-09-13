@@ -136,6 +136,35 @@ class AdminChampionshipProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> refundTeam({required String teamId, required num amountCent, required String reason}) async {
+    actionError = null;
+    try {
+      await _service.refundTeam(teamId: teamId, amountCent: amountCent, reason: reason);
+      collectedEntryFees = await _service.fetchCollectedEntryFees(selectedSeason!.id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      actionError = 'Could not process refund: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> resetRound(String roundId) async {
+    actionError = null;
+    try {
+      await _service.resetRound(roundId);
+      rounds = await _service.fetchRounds(selectedSeason!.id);
+      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      actionError = 'Could not reset round: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> createRound({
     required int roundNumber,
     required String name,
