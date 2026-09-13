@@ -53,6 +53,9 @@ import 'referral_code_screen.dart';
 import 'challenge_feature.dart';
 import 'championship_entry_screen.dart';
 import 'championship_admin_screen.dart';
+import 'classes_home.dart';
+import 'admin_tutor_applications.dart';
+import 'admin_classroom_moderation.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -1268,6 +1271,18 @@ class _StudyTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _MenuSection(
+                    title: 'CLASSES',
+                    items: [
+                      _MenuSectionItem(
+                        icon: Icons.class_rounded,
+                        iconColor: Colors.pinkAccent,
+                        label: 'Tutor Classes',
+                        subtitle: 'Learn with a tutor in a structured classroom',
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ClassesHomeScreen())),
+                      ),
+                    ],
+                  ),
+                  _MenuSection(
                     title: 'LEARN',
                     items: [
                       _MenuSectionItem(icon: Icons.library_books_rounded, iconColor: Colors.blue, label: 'Textbooks', subtitle: 'All subject lessons and notes', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TextbookShelfScreen()))),
@@ -1770,6 +1785,8 @@ class ContactSupportScreen extends StatelessWidget {
                   _MenuSectionItem(icon: Icons.admin_panel_settings_rounded, iconColor: Colors.red, label: 'Admin', subtitle: 'Manage cent purchase requests', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen()))),
                   _MenuSectionItem(icon: Icons.link_rounded, iconColor: Colors.blue, label: 'Referral Stats', subtitle: 'See signups by referral code', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen()))),
                   _MenuSectionItem(icon: Icons.emoji_events_rounded, iconColor: Colors.amber.shade700, label: 'Championship Admin', subtitle: 'Seasons, rounds, matches, payouts', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminChampionshipScreen()))),
+                  _MenuSectionItem(icon: Icons.how_to_reg_rounded, iconColor: Colors.purple, label: 'Tutor Applications', subtitle: 'Approve or reject tutor applications', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminTutorApplicationsScreen()))),
+                  _MenuSectionItem(icon: Icons.shield_moon_rounded, iconColor: Colors.deepOrange, label: 'Classroom Moderation', subtitle: 'Suspend classrooms, review reports', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminClassroomModerationScreen()))),
                 ],
               );
             },
