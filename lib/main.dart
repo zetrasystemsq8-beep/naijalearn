@@ -20,16 +20,6 @@
 // the shared `log_login_attempt` RPC. The exact parameter signature
 // hasn't been confirmed with the platform maintainer yet — wrapped so
 // it can never break login if wrong; confirm and adjust once known.
-//
-// CHAMPIONSHIP (TEMPORARY A/B WIRING): both the old, already-shipped
-// championship system (championship_entry_screen.dart +
-// championship_admin_screen.dart) and the new rebuilt one
-// (championship.dart, imported under the `champ_new` prefix to avoid
-// class-name collisions like AdminChampionshipScreen existing in both)
-// are wired in side by side right now, each behind its own menu tile
-// labelled "(New)" where relevant. This is intentional and temporary —
-// once the new version is confirmed to fully replace the old one in
-// real testing, remove the old imports/files and the prefix.
 
 import 'dart:async';
 import 'dart:convert';
@@ -63,7 +53,6 @@ import 'referral_code_screen.dart';
 import 'challenge_feature.dart';
 import 'championship_entry_screen.dart';
 import 'championship_admin_screen.dart';
-import 'championship.dart' as champ_new;
 import 'classes_home.dart';
 import 'admin_tutor_applications.dart';
 import 'admin_classroom_moderation.dart';
@@ -1367,14 +1356,6 @@ class _CommunityTab extends StatelessWidget {
                 trailingBadge: const _NewBadge(),
               ),
               _MenuSectionItem(
-                icon: Icons.emoji_events_rounded,
-                iconColor: Colors.deepPurple,
-                label: 'Academic Championship (New)',
-                subtitle: 'Testing the rebuilt version',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const champ_new.ChampionshipHomeScreen())),
-                trailingBadge: const _NewBadge(),
-              ),
-              _MenuSectionItem(
                 icon: Icons.public_rounded,
                 iconColor: Colors.blue,
                 label: 'World Challenge',
@@ -1812,7 +1793,6 @@ class ContactSupportScreen extends StatelessWidget {
                   _MenuSectionItem(icon: Icons.admin_panel_settings_rounded, iconColor: Colors.red, label: 'Admin', subtitle: 'Manage cent purchase requests', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminPanelScreen()))),
                   _MenuSectionItem(icon: Icons.link_rounded, iconColor: Colors.blue, label: 'Referral Stats', subtitle: 'See signups by referral code', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminReferralStatsScreen()))),
                   _MenuSectionItem(icon: Icons.emoji_events_rounded, iconColor: Colors.amber.shade700, label: 'Championship Admin', subtitle: 'Seasons, rounds, matches, payouts', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminChampionshipScreen()))),
-                  _MenuSectionItem(icon: Icons.emoji_events_rounded, iconColor: Colors.deepPurple, label: 'Championship Admin (New)', subtitle: 'Testing the rebuilt version', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const champ_new.AdminChampionshipScreen()))),
                   _MenuSectionItem(icon: Icons.how_to_reg_rounded, iconColor: Colors.purple, label: 'Tutor Applications', subtitle: 'Approve or reject tutor applications', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminTutorApplicationsScreen()))),
                   _MenuSectionItem(icon: Icons.shield_moon_rounded, iconColor: Colors.deepOrange, label: 'Classroom Moderation', subtitle: 'Suspend classrooms, review reports', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminClassroomModerationScreen()))),
                 ],
