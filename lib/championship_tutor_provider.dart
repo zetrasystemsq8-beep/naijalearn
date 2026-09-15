@@ -1,4 +1,8 @@
 // lib/championship_tutor_provider.dart
+// REPLACES the earlier version. Roster is username-based now (no
+// classroom-student picker list — tutor types a username, server
+// validates classroom membership). Round selection is a whole-list
+// replace via tutor_select_round_players, not per-checkbox toggles.
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,15 +20,14 @@ class TutorChampionshipProvider extends ChangeNotifier {
   ChampionshipSeason? season;
   List<Map<String, dynamic>> myClassrooms = [];
   num myCentBalance = 0;
+
   ChampionshipTeam? team;
   List<ChampionshipPlayer> roster = [];
-  List<Map<String, dynamic>> eligibleStudents = []; // from the team's classroom
-  Set<String> rosteredElsewhere = {};
 
+  List<ChampionshipBracketRow> myMatches = [];
   List<ChampionshipRound> rounds = [];
-  ChampionshipRound? selectedRound;
-  ChampionshipMatch? matchForSelectedRound;
-  List<ChampionshipPlayer> currentSelections = [];
+  ChampionshipBracketRow? selectedMatch;
+  List<String> currentSelectionStudentIds = [];
 
   Future<void> load() async {
     loading = true;
@@ -55,35 +58,34 @@ class TutorChampionshipProvider extends ChangeNotifier {
 
   Future<void> _loadTeamDetail() async {
     roster = await _service.fetchRoster(team!.id);
-    eligibleStudents = await _service.fetchEligibleClassroomStudents(classroomId: team!.classroomId);
-    rosteredElsewhere = await _service.fetchRosteredStudentIdsForSeason(season!.id);
     rounds = await _service.fetchRounds(season!.id);
-    if (rounds.isNotEmpty) {
-      selectedRound = rounds.cast<ChampionshipRound?>().firstWhere(
-            (r) => r?.status == 'scheduled' || r?.status == 'open',
-            orElse: () => rounds.first,
-          );
-      await _loadRoundDetail();
+    final bracket = await _service.fetchBracket(season!.id);
+    myMatches = bracket.where((r) => r.involvesTeam(team!.id)).toList()
+      ..sort((a, b) => a.roundNumber.compareTo(b.roundNumber));
+    if (myMatches.isNotEmpty) {
+      selectedMatch = myMatches.firstWhere((m) => m.roundStatus != 'closed', orElse: () => myMatches.last);
+      await _loadSelection();
     }
   }
 
-  Future<void> _loadRoundDetail() async {
-    if (selectedRound == null || team == null) return;
-    matchForSelectedRound = await _service.fetchTeamMatchForRound(roundId: selectedRound!.id, teamId: team!.id);
-    if (matchForSelectedRound != null) {
-      currentSelections = await _service.fetchSelectionsForMatch(
-        matchId: matchForSelectedRound!.id,
-        teamId: team!.id,
-      );
-    } else {
-      currentSelections = [];
+  ChampionshipRound? get selectedRound {
+    if (selectedMatch == null) return null;
+    try {
+      return rounds.firstWhere((r) => r.id == selectedMatch!.roundId);
+    } catch (_) {
+      return null;
     }
   }
 
-  Future<void> selectRound(ChampionshipRound round) async {
-    selectedRound = round;
+  Future<void> _loadSelection() async {
+    if (selectedMatch == null || team == null) return;
+    currentSelectionStudentIds = await _service.fetchSelectionForMatch(matchId: selectedMatch!.matchId, teamId: team!.id);
+  }
+
+  Future<void> selectMatch(ChampionshipBracketRow match) async {
+    selectedMatch = match;
     notifyListeners();
-    await _loadRoundDetail();
+    await _loadSelection();
     notifyListeners();
   }
 
@@ -95,15 +97,16 @@ class TutorChampionshipProvider extends ChangeNotifier {
   }) async {
     actionError = null;
     try {
-      team = await _service.registerTeam(
+      final id = await _service.registerTeam(
         seasonId: season!.id,
         classroomId: classroomId,
         name: name,
         description: description,
         category: category,
       );
-      await _loadTeamDetail();
+      team = await _service.fetchTeamById(id);
       myCentBalance = await _service.fetchMyCentBalance();
+      await _loadTeamDetail();
       notifyListeners();
       return true;
     } catch (e) {
@@ -114,29 +117,24 @@ class TutorChampionshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> addToRoster(String studentId) async {
+  Future<bool> addToRoster(String username) async {
     actionError = null;
-    if (roster.length >= season!.rosterLimit) {
-      actionError = 'Roster is full (${season!.rosterLimit} players max).';
-      notifyListeners();
-      return false;
-    }
     try {
-      await _service.addPlayerToRoster(seasonId: season!.id, teamId: team!.id, studentId: studentId);
+      await _service.addPlayerToRoster(teamId: team!.id, username: username);
       roster = await _service.fetchRoster(team!.id);
-      rosteredElsewhere = await _service.fetchRosteredStudentIdsForSeason(season!.id);
       notifyListeners();
       return true;
     } catch (e) {
-      actionError = 'Could not add player — they may already be on a Championship team this season.';
+      final message = e is PostgrestException ? e.message : e.toString();
+      actionError = message;
       notifyListeners();
       return false;
     }
   }
 
-  Future<void> removeFromRoster(String playerRowId) async {
+  Future<void> removeFromRoster(String studentId) async {
     try {
-      await _service.removePlayerFromRoster(playerRowId);
+      await _service.removePlayerFromRoster(teamId: team!.id, studentId: studentId);
       roster = await _service.fetchRoster(team!.id);
     } catch (e) {
       actionError = 'Could not remove player: $e';
@@ -144,39 +142,41 @@ class TutorChampionshipProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get canEditSelectionForCurrentRound => selectedRound?.status == 'scheduled';
-
-  Future<bool> toggleSelection(String studentId) async {
+  Future<bool> lockRoster() async {
     actionError = null;
-    if (!canEditSelectionForCurrentRound || matchForSelectedRound == null) {
-      actionError = 'Selections are locked once the round opens.';
-      notifyListeners();
-      return false;
-    }
-    final already = currentSelections.any((p) => p.studentId == studentId);
     try {
-      if (already) {
-        await _service.deselectPlayerForMatch(matchId: matchForSelectedRound!.id, studentId: studentId);
-      } else {
-        if (currentSelections.length >= season!.playersPerRound) {
-          actionError = 'Only ${season!.playersPerRound} players can be selected per round.';
-          notifyListeners();
-          return false;
-        }
-        await _service.selectPlayerForMatch(
-          matchId: matchForSelectedRound!.id,
-          teamId: team!.id,
-          studentId: studentId,
-        );
-      }
-      currentSelections = await _service.fetchSelectionsForMatch(
-        matchId: matchForSelectedRound!.id,
-        teamId: team!.id,
-      );
+      await _service.lockRoster(team!.id);
+      team = await _service.fetchTeamById(team!.id);
       notifyListeners();
       return true;
     } catch (e) {
-      actionError = 'Could not update selection: $e';
+      actionError = 'Could not lock roster: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  bool get canEditSelection {
+    final round = selectedRound;
+    if (round == null) return false;
+    return !round.hasOpened;
+  }
+
+  Future<bool> saveSelection(List<String> studentIds) async {
+    actionError = null;
+    if (studentIds.length > season!.playersPerRound) {
+      actionError = 'Only ${season!.playersPerRound} players can be selected per round.';
+      notifyListeners();
+      return false;
+    }
+    try {
+      await _service.selectRoundPlayers(matchId: selectedMatch!.matchId, studentIds: studentIds);
+      currentSelectionStudentIds = studentIds;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      final message = e is PostgrestException ? e.message : e.toString();
+      actionError = 'Could not save selection: $message';
       notifyListeners();
       return false;
     }

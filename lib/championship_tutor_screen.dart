@@ -1,9 +1,5 @@
 // lib/championship_tutor_screen.dart
-//
-// Tutor dashboard (spec sections 4-10, 21). Enforces in the UI what RLS
-// also enforces server-side, so tutors get a clear message instead of a
-// raw Postgres error: classroom-only roster picks, roster size cap,
-// players-per-round cap, and a hard lock once a round opens.
+// REPLACES the earlier version.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -46,10 +42,7 @@ class _TutorChampionshipView extends StatelessWidget {
         ],
       ),
       backgroundColor: scheme.surface,
-      body: RefreshIndicator(
-        onRefresh: provider.refresh,
-        child: _buildBody(context, provider),
-      ),
+      body: RefreshIndicator(onRefresh: provider.refresh, child: _buildBody(context, provider)),
     );
   }
 
@@ -62,10 +55,7 @@ class _TutorChampionshipView extends StatelessWidget {
     }
     if (!provider.isApprovedTutor) {
       return ListView(children: const [
-        Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('Your tutor account is not yet approved, so you cannot register a Championship team.'),
-        ),
+        Padding(padding: EdgeInsets.all(24), child: Text('Your tutor account is not yet approved, so you cannot register a Championship team.')),
       ]);
     }
     if (provider.season == null) {
@@ -104,8 +94,7 @@ class _EntryFeeBanner extends StatelessWidget {
             child: Text(
               free
                   ? 'This season is free to enter.'
-                  : 'Entry fee: $entryFeeCent Cent  •  Your balance: $balanceCent Cent'
-                      '${affordable ? '' : ' — not enough Cent to register'}',
+                  : 'Entry fee: $entryFeeCent Cent  •  Your balance: $balanceCent Cent${affordable ? '' : ' — not enough Cent to register'}',
               style: const TextStyle(fontSize: 12.5),
             ),
           ),
@@ -143,10 +132,7 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
         const SizedBox(height: 6),
         Text('Season: ${widget.provider.season!.name}', style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 6),
-        _EntryFeeBanner(
-          entryFeeCent: widget.provider.season!.entryFeeCent,
-          balanceCent: widget.provider.myCentBalance,
-        ),
+        _EntryFeeBanner(entryFeeCent: widget.provider.season!.entryFeeCent, balanceCent: widget.provider.myCentBalance),
         const SizedBox(height: 20),
         Form(
           key: _formKey,
@@ -158,9 +144,7 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
               else
                 DropdownButtonFormField<int>(
                   decoration: const InputDecoration(labelText: 'Classroom to represent', border: OutlineInputBorder()),
-                  items: classrooms
-                      .map((c) => DropdownMenuItem<int>(value: c['id'] as int, child: Text(c['name'] as String)))
-                      .toList(),
+                  items: classrooms.map((c) => DropdownMenuItem<int>(value: c['id'] as int, child: Text(c['name'] as String))).toList(),
                   onChanged: (v) => setState(() => _classroomId = v),
                   validator: (v) => v == null ? 'Choose a classroom' : null,
                 ),
@@ -171,16 +155,9 @@ class _RegisterTeamFormState extends State<_RegisterTeamForm> {
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter a team name' : null,
               ),
               const SizedBox(height: 14),
-              TextFormField(
-                controller: _categoryCtrl,
-                decoration: const InputDecoration(labelText: 'Category (e.g. JAMB, WAEC)', border: OutlineInputBorder()),
-              ),
+              TextFormField(controller: _categoryCtrl, decoration: const InputDecoration(labelText: 'Category (e.g. JAMB, WAEC)', border: OutlineInputBorder())),
               const SizedBox(height: 14),
-              TextFormField(
-                controller: _descCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Short description', border: OutlineInputBorder()),
-              ),
+              TextFormField(controller: _descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Short description', border: OutlineInputBorder())),
               if (widget.provider.actionError != null) ...[
                 const SizedBox(height: 12),
                 Text(widget.provider.actionError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -225,10 +202,7 @@ class _TeamDashboard extends StatelessWidget {
       children: [
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withOpacity(0.4),
-            borderRadius: BorderRadius.circular(18),
-          ),
+          decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withOpacity(0.4), borderRadius: BorderRadius.circular(18)),
           child: Row(
             children: [
               CircleAvatar(radius: 26, backgroundColor: scheme.primaryContainer, child: Icon(Icons.shield_moon_rounded, color: scheme.onPrimaryContainer)),
@@ -238,7 +212,7 @@ class _TeamDashboard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(team.name, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                    Text('Status: ${team.status}', style: Theme.of(context).textTheme.bodySmall),
+                    Text('Status: ${team.status}${team.rosterLocked ? ' • Roster locked' : ''}', style: Theme.of(context).textTheme.bodySmall),
                     if (team.status == 'disqualified' && team.disqualifiedReason != null)
                       Text('Reason: ${team.disqualifiedReason}', style: TextStyle(color: scheme.error, fontSize: 12)),
                   ],
@@ -256,13 +230,47 @@ class _TeamDashboard extends StatelessWidget {
   }
 }
 
-class _RosterSection extends StatelessWidget {
+class _RosterSection extends StatefulWidget {
   final TutorChampionshipProvider provider;
   const _RosterSection({required this.provider});
 
   @override
+  State<_RosterSection> createState() => _RosterSectionState();
+}
+
+class _RosterSectionState extends State<_RosterSection> {
+  final _usernameCtrl = TextEditingController();
+  bool _adding = false;
+
+  Future<void> _addPlayer() async {
+    final username = _usernameCtrl.text.trim();
+    if (username.isEmpty) return;
+    setState(() => _adding = true);
+    final ok = await widget.provider.addToRoster(username);
+    setState(() => _adding = false);
+    if (ok) _usernameCtrl.clear();
+  }
+
+  Future<void> _confirmLockRoster() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Lock roster?'),
+        content: const Text('Once locked, you cannot add or remove players for the rest of the season. This cannot be undone by you — only admin can unlock it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Lock Roster')),
+        ],
+      ),
+    );
+    if (confirmed == true) widget.provider.lockRoster();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final provider = widget.provider;
+    final locked = provider.team!.rosterLocked;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withOpacity(0.4), borderRadius: BorderRadius.circular(18)),
@@ -271,97 +279,86 @@ class _RosterSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text('Roster (${provider.roster.length}/${provider.season!.rosterLimit})',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text('Roster (${provider.roster.length}/${provider.season!.rosterLimit})', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               const Spacer(),
-              TextButton.icon(
-                onPressed: () => _showAddPlayerSheet(context, provider),
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-                label: const Text('Add'),
-              ),
+              if (!locked)
+                TextButton.icon(onPressed: _confirmLockRoster, icon: const Icon(Icons.lock_rounded, size: 16), label: const Text('Lock')),
             ],
           ),
           if (provider.actionError != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(provider.actionError!, style: TextStyle(color: scheme.error, fontSize: 12)),
-            ),
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(provider.actionError!, style: TextStyle(color: scheme.error, fontSize: 12))),
           if (provider.roster.isEmpty)
             const Text('No players added yet.')
           else
             ...provider.roster.map((p) => ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(
-                    radius: 16,
-                    backgroundImage: p.studentAvatarUrl != null ? NetworkImage(p.studentAvatarUrl!) : null,
-                    child: p.studentAvatarUrl == null ? const Icon(Icons.person, size: 16) : null,
-                  ),
-                  title: Text(p.studentName ?? 'Player'),
-                  trailing: IconButton(
-                    icon: Icon(Icons.remove_circle_outline_rounded, color: scheme.error),
-                    onPressed: () => provider.removeFromRoster(p.id),
-                  ),
-                )),
-        ],
-      ),
-    );
-  }
-
-  void _showAddPlayerSheet(BuildContext context, TutorChampionshipProvider provider) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        expand: false,
-        builder: (context, scrollController) {
-          final rosterIds = provider.roster.map((p) => p.studentId).toSet();
-          final available = provider.eligibleStudents.where((s) => !rosterIds.contains(s['student_id'])).toList();
-          return ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text('Add from your classroom', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              if (available.isEmpty) const Text('No more eligible students in this classroom.'),
-              ...available.map((s) {
-                final studentId = s['student_id'] as String;
-                final taken = provider.rosteredElsewhere.contains(studentId);
-                final name = s['profiles']?['username'] as String? ?? 'Student';
-                return ListTile(
-                  leading: const Icon(Icons.person_outline_rounded),
-                  title: Text(name),
-                  subtitle: taken ? const Text('Already on another Championship team this season') : null,
-                  trailing: taken
+                  leading: const CircleAvatar(radius: 16, child: Icon(Icons.person, size: 16)),
+                  title: Text(p.username),
+                  trailing: locked
                       ? null
                       : IconButton(
-                          icon: const Icon(Icons.add_circle_outline_rounded),
-                          onPressed: () async {
-                            final ok = await provider.addToRoster(studentId);
-                            if (ok && context.mounted) Navigator.pop(context);
-                          },
+                          icon: Icon(Icons.remove_circle_outline_rounded, color: scheme.error),
+                          onPressed: () => provider.removeFromRoster(p.studentId),
                         ),
-                  enabled: !taken,
-                );
-              }),
-            ],
-          );
-        },
+                )),
+          if (!locked) ...[
+            const Divider(height: 24),
+            Text('Add by username (must be in this team\'s classroom)', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _usernameCtrl,
+                    decoration: const InputDecoration(hintText: 'username', border: OutlineInputBorder(), isDense: true),
+                    onSubmitted: (_) => _addPlayer(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _adding ? null : _addPlayer,
+                  child: _adding ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Add'),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
-class _RoundSelectionSection extends StatelessWidget {
+class _RoundSelectionSection extends StatefulWidget {
   final TutorChampionshipProvider provider;
   const _RoundSelectionSection({required this.provider});
 
   @override
+  State<_RoundSelectionSection> createState() => _RoundSelectionSectionState();
+}
+
+class _RoundSelectionSectionState extends State<_RoundSelectionSection> {
+  late Set<String> _pending;
+
+  @override
+  void initState() {
+    super.initState();
+    _pending = widget.provider.currentSelectionStudentIds.toSet();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RoundSelectionSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.provider.selectedMatch?.matchId != widget.provider.selectedMatch?.matchId) {
+      _pending = widget.provider.currentSelectionStudentIds.toSet();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (provider.rounds.isEmpty) {
-      return const Text('Rounds have not been scheduled yet.');
-    }
+    final provider = widget.provider;
+    if (provider.myMatches.isEmpty) return const Text('No matches scheduled yet.');
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: scheme.surfaceContainerHighest.withOpacity(0.4), borderRadius: BorderRadius.circular(18)),
@@ -372,36 +369,52 @@ class _RoundSelectionSection extends StatelessWidget {
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
-            children: provider.rounds
-                .map((r) => ChoiceChip(
-                      label: Text(r.name),
-                      selected: provider.selectedRound?.id == r.id,
-                      onSelected: (_) => provider.selectRound(r),
+            children: provider.myMatches
+                .map((m) => ChoiceChip(
+                      label: Text(m.roundName),
+                      selected: provider.selectedMatch?.matchId == m.matchId,
+                      onSelected: (_) async {
+                        await provider.selectMatch(m);
+                        setState(() => _pending = provider.currentSelectionStudentIds.toSet());
+                      },
                     ))
                 .toList(),
           ),
           const SizedBox(height: 14),
-          if (provider.matchForSelectedRound == null)
-            const Text('No match scheduled for your team in this round.')
-          else ...[
-            Text(
-              provider.canEditSelectionForCurrentRound
-                  ? 'Pick ${provider.season!.playersPerRound} players for this round (locks once the round opens):'
-                  : 'Selections are locked for this round.',
-              style: Theme.of(context).textTheme.bodySmall,
+          Text(
+            provider.canEditSelection
+                ? 'Pick up to ${provider.season!.playersPerRound} players (locks once the round opens):'
+                : 'Selection is locked for this round.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          if (provider.actionError != null) Text(provider.actionError!, style: TextStyle(color: scheme.error, fontSize: 12)),
+          ...provider.roster.map((p) {
+            final checked = _pending.contains(p.studentId);
+            return CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: checked,
+              onChanged: !provider.canEditSelection
+                  ? null
+                  : (v) => setState(() {
+                        if (v == true) {
+                          _pending.add(p.studentId);
+                        } else {
+                          _pending.remove(p.studentId);
+                        }
+                      }),
+              title: Text(p.username),
+            );
+          }),
+          if (provider.canEditSelection) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => provider.saveSelection(_pending.toList()),
+                child: const Text('Save Selection'),
+              ),
             ),
-            const SizedBox(height: 8),
-            if (provider.actionError != null)
-              Text(provider.actionError!, style: TextStyle(color: scheme.error, fontSize: 12)),
-            ...provider.roster.map((p) {
-              final selected = provider.currentSelections.any((s) => s.studentId == p.studentId);
-              return CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: selected,
-                onChanged: provider.canEditSelectionForCurrentRound ? (_) => provider.toggleSelection(p.studentId) : null,
-                title: Text(p.studentName ?? 'Player'),
-              );
-            }),
           ],
         ],
       ),

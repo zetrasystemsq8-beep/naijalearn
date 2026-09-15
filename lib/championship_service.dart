@@ -1,9 +1,12 @@
 // lib/championship_service.dart
 //
-// All Supabase access for the Academic Championship feature lives here —
-// screens and the provider never call Supabase.instance.client directly.
-// Uses the same client instance as AuthService (Supabase.instance.client),
-// so it shares the existing session/auth state automatically.
+// REPLACES the earlier version entirely. Every write in this schema goes
+// through a SECURITY DEFINER RPC — there are no client-writable INSERT/
+// UPDATE RLS policies on any championship_* table, by design (see the
+// clean-rebuild SQL: only `for select` policies exist). So unlike the
+// previous version of this file, there is no direct .insert()/.update()
+// anywhere below — only .select() for reads the RLS allows, and .rpc()
+// for everything else.
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'championship_models.dart';
@@ -16,7 +19,8 @@ class ChampionshipService {
   String? get _uid => _client.auth.currentUser?.id;
 
   // ---------------------------------------------------------------
-  // ROLE CHECKS
+  // ROLE CHECKS — untouched by the championship migration, same as
+  // before: profiles.is_admin and tutor_profiles.status='approved'.
   // ---------------------------------------------------------------
 
   Future<bool> isCurrentUserAdmin() async {
@@ -29,20 +33,34 @@ class ChampionshipService {
   Future<bool> isCurrentUserApprovedTutor() async {
     final uid = _uid;
     if (uid == null) return false;
-    final row = await _client
-        .from('tutor_profiles')
-        .select('status')
-        .eq('user_id', uid)
-        .maybeSingle();
+    final row = await _client.from('tutor_profiles').select('status').eq('user_id', uid).maybeSingle();
     return row?['status'] == 'approved';
   }
 
+  Future<List<Map<String, dynamic>>> fetchMyClassrooms() async {
+    final uid = _uid;
+    if (uid == null) return [];
+    final rows = await _client.from('classrooms').select('id, name').eq('tutor_id', uid);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  Future<num> fetchMyCentBalance() async {
+    final uid = _uid;
+    if (uid == null) return 0;
+    final row = await _client.from('app_currency_balances').select('balance').eq('user_id', uid).eq('app_id', 'naijalearn').maybeSingle();
+    return (row?['balance'] as num?) ?? 0;
+  }
+
   // ---------------------------------------------------------------
-  // SEASONS
+  // SEASONS — plain reads (cs_select allows any authenticated user);
+  // writes go through admin_* RPCs.
   // ---------------------------------------------------------------
 
-  /// The season students/tutors currently care about: the most recent
-  /// one that isn't finished/cancelled.
+  Future<List<ChampionshipSeason>> fetchAllSeasons() async {
+    final rows = await _client.from('championship_seasons').select().order('created_at', ascending: false);
+    return rows.map<ChampionshipSeason>(ChampionshipSeason.fromMap).toList();
+  }
+
   Future<ChampionshipSeason?> fetchActiveSeason() async {
     final rows = await _client
         .from('championship_seasons')
@@ -54,507 +72,165 @@ class ChampionshipService {
     return ChampionshipSeason.fromMap(rows.first);
   }
 
-  Future<List<ChampionshipSeason>> fetchAllSeasons() async {
-    final rows = await _client.from('championship_seasons').select().order('created_at', ascending: false);
-    return rows.map<ChampionshipSeason>(ChampionshipSeason.fromMap).toList();
+  Future<int> adminCreateSeason({
+    required String name,
+    String? description,
+    DateTime? registrationStart,
+    DateTime? registrationEnd,
+    DateTime? startAt,
+    DateTime? endAt,
+    int? teamLimit,
+    int rosterLimit = 10,
+    int playersPerRound = 5,
+    int entryFeeCent = 0,
+  }) async {
+    final id = await _client.rpc('admin_create_championship_season', params: {
+      'p_name': name,
+      'p_description': description,
+      'p_registration_start': registrationStart?.toIso8601String(),
+      'p_registration_end': registrationEnd?.toIso8601String(),
+      'p_start_at': startAt?.toIso8601String(),
+      'p_end_at': endAt?.toIso8601String(),
+      'p_team_limit': teamLimit,
+      'p_roster_limit': rosterLimit,
+      'p_players_per_round': playersPerRound,
+      'p_entry_fee_cent': entryFeeCent,
+    });
+    return id as int;
+  }
+
+  Future<void> adminUpdateSeasonStatus(int seasonId, String status) async {
+    await _client.rpc('admin_update_season_status', params: {'p_season_id': seasonId, 'p_status': status});
   }
 
   // ---------------------------------------------------------------
   // TEAMS
   // ---------------------------------------------------------------
 
-  /// The team the current student plays for in this season, or null.
-  Future<ChampionshipTeam?> fetchMyStudentTeam(String seasonId) async {
-    final uid = _uid;
-    if (uid == null) return null;
-    final playerRow = await _client
-        .from('championship_players')
-        .select('team_id')
-        .eq('season_id', seasonId)
-        .eq('student_id', uid)
-        .eq('status', 'active')
-        .maybeSingle();
-    if (playerRow == null) return null;
-    final teamRow = await _client
-        .from('championship_teams')
-        .select()
-        .eq('id', playerRow['team_id'] as String)
-        .single();
-    return ChampionshipTeam.fromMap(teamRow);
+  Future<List<ChampionshipTeam>> fetchTeamsForSeason(int seasonId) async {
+    final rows = await _client.from('championship_teams').select().eq('season_id', seasonId);
+    return rows.map<ChampionshipTeam>(ChampionshipTeam.fromMap).toList();
   }
 
-  /// The team the current tutor owns in this season, or null.
-  Future<ChampionshipTeam?> fetchMyTutorTeam(String seasonId) async {
-    final uid = _uid;
-    if (uid == null) return null;
-    final row = await _client
-        .from('championship_teams')
-        .select()
-        .eq('season_id', seasonId)
-        .eq('tutor_id', uid)
-        .maybeSingle();
+  Future<ChampionshipTeam?> fetchTeamById(int teamId) async {
+    final row = await _client.from('championship_teams').select().eq('id', teamId).maybeSingle();
     if (row == null) return null;
     return ChampionshipTeam.fromMap(row);
   }
 
-  /// Atomic paid registration — checks approved-tutor + classroom
-  /// ownership, spends the season's Cent entry fee, and creates the
-  /// team, all inside one server-side transaction. Throws with the
-  /// server's message on insufficient balance or any other failure —
-  /// nothing is left half-done.
-  Future<ChampionshipTeam> registerTeam({
-    required String seasonId,
+  /// The current tutor's team for a season, or null if they haven't
+  /// registered one. Uses tutor_get_my_team to discover the ID (it
+  /// resolves the caller's tutor_profiles.id internally), then a plain
+  /// select for the FULL row — the RPC's own jsonb omits description/category.
+  Future<ChampionshipTeam?> fetchMyTutorTeam(int seasonId) async {
+    final result = await _client.rpc('tutor_get_my_team', params: {'p_season_id': seasonId});
+    if (result == null) return null;
+    final id = (result as Map<String, dynamic>)['id'] as int;
+    return fetchTeamById(id);
+  }
+
+  /// Atomic paid registration: verifies approved tutor + classroom
+  /// ownership, spends the entry fee, creates the team — all inside
+  /// tutor_register_team. Throws with the server's message on failure.
+  Future<int> registerTeam({
+    required int seasonId,
     required int classroomId,
     required String name,
     String? logoUrl,
     String? description,
     String? category,
   }) async {
-    final row = await _client.rpc('championship_register_team_paid', params: {
+    final id = await _client.rpc('tutor_register_team', params: {
       'p_season_id': seasonId,
       'p_classroom_id': classroomId,
       'p_name': name,
+      'p_logo_url': logoUrl,
       'p_description': description,
       'p_category': category,
-      'p_logo_url': logoUrl,
     });
-    return ChampionshipTeam.fromMap(row as Map<String, dynamic>);
+    return id as int;
   }
 
-  /// Reuses the same shared Cent balance ZetraPay/CoinService reads —
-  /// so the number shown here always matches the wallet screen.
-  Future<num> fetchMyCentBalance() async {
-    final uid = _uid;
-    if (uid == null) return 0;
-    final row = await _client
-        .from('app_currency_balances')
-        .select('balance')
-        .eq('user_id', uid)
-        .eq('app_id', 'naijalearn')
-        .maybeSingle();
-    return (row?['balance'] as num?) ?? 0;
+  Future<void> adminApproveTeam(int teamId) async {
+    await _client.rpc('admin_approve_team', params: {'p_team_id': teamId});
+  }
+
+  Future<void> adminRejectTeam(int teamId, String reason) async {
+    await _client.rpc('admin_reject_team', params: {'p_team_id': teamId, 'p_reason': reason});
+  }
+
+  Future<void> adminDisqualifyTeam(int teamId, String reason) async {
+    await _client.rpc('admin_disqualify_team', params: {'p_team_id': teamId, 'p_reason': reason});
+  }
+
+  Future<void> adminRefundTeam({required int teamId, required int amountCent, required String reason}) async {
+    await _client.rpc('admin_refund_team', params: {
+      'p_team_id': teamId,
+      'p_amount_cent': amountCent,
+      'p_reason': reason,
+    });
   }
 
   // ---------------------------------------------------------------
   // ROSTER
   // ---------------------------------------------------------------
 
-  Future<List<ChampionshipPlayer>> fetchRoster(String teamId) async {
-    final rows = await _client
-        .from('championship_players')
-        .select('*, profiles(username, avatar_url)')
-        .eq('team_id', teamId)
-        .eq('status', 'active');
+  /// Direct select, not the tutor_get_my_roster RPC — that RPC checks
+  /// the caller IS the team's tutor internally and returns nothing
+  /// otherwise, but championship_players has an open select policy
+  /// (any authenticated user), so students/admin can read it directly.
+  Future<List<ChampionshipPlayer>> fetchRoster(int teamId) async {
+    final rows = await _client.from('championship_players').select().eq('team_id', teamId).eq('status', 'active');
     return rows.map<ChampionshipPlayer>(ChampionshipPlayer.fromMap).toList();
   }
 
-  /// Students eligible for this team's roster: the tutor's classroom
-  /// minus anyone already rostered this season (enforced again server-side
-  /// by RLS + the unique(season_id, student_id) constraint).
-  Future<List<Map<String, dynamic>>> fetchEligibleClassroomStudents({
-    required int classroomId,
-  }) async {
-    final rows = await _client
-        .from('classroom_students')
-        .select('student_id, profiles(username, avatar_url)')
-        .eq('classroom_id', classroomId);
-    return List<Map<String, dynamic>>.from(rows);
+  /// Throws with a clear message if the username doesn't exist, isn't
+  /// in the team's classroom, is already on another team this season,
+  /// or the roster is full/locked — all enforced server-side.
+  Future<void> addPlayerToRoster({required int teamId, required String username}) async {
+    await _client.rpc('tutor_add_player_to_roster', params: {'p_team_id': teamId, 'p_username': username});
   }
 
-  Future<void> addPlayerToRoster({
-    required String seasonId,
-    required String teamId,
-    required String studentId,
-  }) async {
-    await _client.from('championship_players').insert({
-      'season_id': seasonId,
-      'team_id': teamId,
-      'student_id': studentId,
-    });
+  Future<void> removePlayerFromRoster({required int teamId, required String studentId}) async {
+    await _client.rpc('tutor_remove_player_from_roster', params: {'p_team_id': teamId, 'p_student_id': studentId});
   }
 
-  Future<void> removePlayerFromRoster(String playerRowId) async {
-    await _client.from('championship_players').delete().eq('id', playerRowId);
+  Future<void> lockRoster(int teamId) async {
+    await _client.rpc('tutor_lock_roster', params: {'p_team_id': teamId});
   }
 
-  Future<ChampionshipTeam?> fetchTeamById(String teamId) async {
-    final row = await _client.from('championship_teams').select().eq('id', teamId).maybeSingle();
-    if (row == null) return null;
-    return ChampionshipTeam.fromMap(row);
-  }
-
-  Future<String?> fetchUsername(String profileId) async {
-    final row = await _client.from('profiles').select('username').eq('id', profileId).maybeSingle();
-    return row?['username'] as String?;
+  Future<void> adminUnlockRoster(int teamId) async {
+    await _client.rpc('admin_unlock_roster', params: {'p_team_id': teamId});
   }
 
   // ---------------------------------------------------------------
-  // ROUNDS & MATCHES
+  // QUESTION SETS
   // ---------------------------------------------------------------
 
-  Future<List<ChampionshipRound>> fetchRounds(String seasonId) async {
-    final rows = await _client
-        .from('championship_rounds')
-        .select()
-        .eq('season_id', seasonId)
-        .order('round_number');
-    return rows.map<ChampionshipRound>(ChampionshipRound.fromMap).toList();
-  }
-
-  /// This team's match in a given round, via the score-hiding public view.
-  Future<ChampionshipMatch?> fetchTeamMatchForRound({
-    required String roundId,
-    required String teamId,
-  }) async {
-    final rows = await _client
-        .from('championship_matches_public')
-        .select()
-        .eq('round_id', roundId)
-        .or('team_a_id.eq.$teamId,team_b_id.eq.$teamId')
-        .limit(1);
-    if (rows.isEmpty) return null;
-    return ChampionshipMatch.fromMap(rows.first);
-  }
-
-  Future<List<ChampionshipMatch>> fetchAllMatchesForSeason(String seasonId) async {
-    final rows = await _client.from('championship_matches_public').select().eq('season_id', seasonId);
-    return rows.map<ChampionshipMatch>(ChampionshipMatch.fromMap).toList();
-  }
-
-  /// Realtime stream of a single match row (public view has no realtime
-  /// support in Supabase, so we stream the base table and let the UI
-  /// itself decide whether to show the score based on round status).
-  Stream<List<Map<String, dynamic>>> watchMatch(String matchId) {
-    return _client.from('championship_matches').stream(primaryKey: ['id']).eq('id', matchId);
-  }
-
-  Stream<List<Map<String, dynamic>>> watchRound(String roundId) {
-    return _client.from('championship_rounds').stream(primaryKey: ['id']).eq('id', roundId);
-  }
-
-  // ---------------------------------------------------------------
-  // SELECTIONS (tutor picks players for a specific match)
-  // ---------------------------------------------------------------
-
-  Future<List<ChampionshipPlayer>> fetchSelectionsForMatch({
-    required String matchId,
-    required String teamId,
-  }) async {
-    final rows = await _client
-        .from('championship_selections')
-        .select('student_id, profiles(username, avatar_url)')
-        .eq('match_id', matchId)
-        .eq('team_id', teamId);
-    return rows
-        .map<ChampionshipPlayer>((m) => ChampionshipPlayer(
-              id: '', // selections don't have their own roster row id
-              seasonId: '',
-              teamId: teamId,
-              studentId: m['student_id'] as String,
-              status: 'active',
-              studentName: m['profiles']?['username'] as String?,
-              studentAvatarUrl: m['profiles']?['avatar_url'] as String?,
-            ))
-        .toList();
-  }
-
-  /// Throws if the round has already opened — RLS enforces this too,
-  /// but surfacing a clear error here saves a round trip's worth of confusion.
-  Future<void> selectPlayerForMatch({
-    required String matchId,
-    required String teamId,
-    required String studentId,
-  }) async {
-    await _client.from('championship_selections').insert({
-      'match_id': matchId,
-      'team_id': teamId,
-      'student_id': studentId,
-    });
-  }
-
-  Future<void> deselectPlayerForMatch({
-    required String matchId,
-    required String studentId,
-  }) async {
-    await _client
-        .from('championship_selections')
-        .delete()
-        .eq('match_id', matchId)
-        .eq('student_id', studentId);
-  }
-
-  /// Whether the current student has a locked selection for this match.
-  Future<bool> isCurrentStudentLockedForMatch(String matchId) async {
-    final uid = _uid;
-    if (uid == null) return false;
-    final row = await _client
-        .from('championship_selections')
-        .select('locked_at')
-        .eq('match_id', matchId)
-        .eq('student_id', uid)
-        .maybeSingle();
-    return row != null && row['locked_at'] != null;
-  }
-
-  // ---------------------------------------------------------------
-  // ATTEMPTS (the timed quiz)
-  // ---------------------------------------------------------------
-
-  Future<ChampionshipAttempt?> fetchMyAttempt(String matchId) async {
-    final uid = _uid;
-    if (uid == null) return null;
-    final row = await _client
-        .from('championship_attempts')
-        .select()
-        .eq('match_id', matchId)
-        .eq('student_id', uid)
-        .maybeSingle();
-    if (row == null) return null;
-    return ChampionshipAttempt.fromMap(row);
-  }
-
-  Future<ChampionshipAttempt> startAttempt(String matchId) async {
-    final row = await _client.rpc('championship_start_attempt', params: {'p_match_id': matchId});
-    return ChampionshipAttempt.fromMap(row as Map<String, dynamic>);
-  }
-
-  Future<List<ChampionshipQuizQuestion>> fetchAttemptQuestions(String attemptId) async {
-    final rows = await _client.rpc('championship_get_attempt_questions', params: {'p_attempt_id': attemptId});
-    return (rows as List)
-        .map<ChampionshipQuizQuestion>((m) => ChampionshipQuizQuestion.fromMap(m as Map<String, dynamic>))
-        .toList();
-  }
-
-  /// [answers] maps questionId -> selected option INDEX as a string ("0".."3").
-  Future<ChampionshipAttempt> submitAttempt({
-    required String attemptId,
-    required Map<String, String> answers,
-  }) async {
-    final payload = answers.entries
-        .map((e) => {'question_id': e.key, 'selected_answer': e.value})
-        .toList();
-    final row = await _client.rpc('championship_submit_attempt', params: {
-      'p_attempt_id': attemptId,
-      'p_answers': payload,
-    });
-    return ChampionshipAttempt.fromMap(row as Map<String, dynamic>);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchMyClassrooms() async {
-    final uid = _uid;
-    if (uid == null) return [];
-    final rows = await _client.from('classrooms').select('id, name').eq('tutor_id', uid);
-    return List<Map<String, dynamic>>.from(rows);
-  }
-
-  /// Every student already on a roster somewhere this season, so the
-  /// tutor's picker can gray them out before hitting the RLS error.
-  Future<Set<String>> fetchRosteredStudentIdsForSeason(String seasonId) async {
-    final rows = await _client.from('championship_players').select('student_id').eq('season_id', seasonId);
-    return rows.map<String>((r) => r['student_id'] as String).toSet();
-  }
-
-  // ---------------------------------------------------------------
-  // ADMIN — seasons / teams / rounds / matches / question sets
-  // ---------------------------------------------------------------
-
-  Future<ChampionshipSeason> createSeason({
-    required String name,
-    String? description,
-    required DateTime registrationStart,
-    required DateTime registrationEnd,
-    DateTime? startAt,
-    DateTime? endAt,
-    int teamLimit = 32,
-    int rosterLimit = 10,
-    int playersPerRound = 5,
-    num entryFeeCent = 0,
-  }) async {
-    final uid = _uid;
-    if (uid == null) throw Exception('Not signed in');
-    final row = await _client
-        .from('championship_seasons')
-        .insert({
-          'name': name,
-          'description': description,
-          'status': 'draft',
-          'registration_start': registrationStart.toIso8601String(),
-          'registration_end': registrationEnd.toIso8601String(),
-          'start_at': startAt?.toIso8601String(),
-          'end_at': endAt?.toIso8601String(),
-          'team_limit': teamLimit,
-          'roster_limit': rosterLimit,
-          'players_per_round': playersPerRound,
-          'entry_fee_cent': entryFeeCent,
-          'created_by': uid,
-        })
-        .select()
-        .single();
-    return ChampionshipSeason.fromMap(row);
-  }
-
-  Future<void> updateSeasonStatus(String seasonId, String status) async {
-    await _client.from('championship_seasons').update({'status': status}).eq('id', seasonId);
-  }
-
-  Future<List<ChampionshipTeam>> fetchTeamsForSeason(String seasonId) async {
-    final rows = await _client.from('championship_teams').select().eq('season_id', seasonId);
-    return rows.map<ChampionshipTeam>(ChampionshipTeam.fromMap).toList();
-  }
-
-  Future<void> updateTeamStatus(String teamId, String status) async {
-    await _client.from('championship_teams').update({'status': status}).eq('id', teamId);
-  }
-
-  /// Goes through the audited RPC now — every disqualification is
-  /// logged to championship_audit_log, not just a silent status flip.
-  Future<ChampionshipTeam> disqualifyTeam({required String teamId, required String reason}) async {
-    final row = await _client.rpc('championship_disqualify_team', params: {
-      'p_team_id': teamId,
-      'p_reason': reason,
-    });
-    return ChampionshipTeam.fromMap(row as Map<String, dynamic>);
-  }
-
-  /// Refund is a distinct, audited action from status changes — a team
-  /// can be refunded without being disqualified (voluntary withdrawal)
-  /// or disqualified without a refund (misconduct), admin's call either way.
-  Future<void> refundTeam({required String teamId, required num amountCent, required String reason}) async {
-    await _client.rpc('championship_refund_team', params: {
-      'p_team_id': teamId,
-      'p_refund_amount_cent': amountCent,
-      'p_reason': reason,
-    });
-  }
-
-  /// The only way to change a round's question_set_id after any attempt
-  /// exists — wipes attempts/answers and resets the round to scheduled.
-  /// Never a silent swap; see the DB trigger that blocks the alternative.
-  Future<void> resetRound(String roundId) async {
-    await _client.rpc('championship_reset_round', params: {'p_round_id': roundId});
-  }
-
-  Future<ChampionshipRound> createRound({
-    required String seasonId,
-    required int roundNumber,
-    required String name,
-    required DateTime opensAt,
-    required DateTime closesAt,
-    String? questionSetId,
-  }) async {
-    final row = await _client
-        .from('championship_rounds')
-        .insert({
-          'season_id': seasonId,
-          'round_number': roundNumber,
-          'name': name,
-          'opens_at': opensAt.toIso8601String(),
-          'closes_at': closesAt.toIso8601String(),
-          'question_set_id': questionSetId,
-        })
-        .select()
-        .single();
-    return ChampionshipRound.fromMap(row);
-  }
-
-  Future<void> updateRoundStatus(String roundId, String status) async {
-    await _client.from('championship_rounds').update({'status': status}).eq('id', roundId);
-  }
-
-  /// Does the real work of closing a round: sums each team's selected
-  /// players' scores, applies tie-breakers, sets winners — see
-  /// championship_close_round in SQL for the full logic. Use this
-  /// instead of updateRoundStatus(roundId, 'closed') whenever a round
-  /// is actually being closed, or matches will never get scored.
-  Future<void> closeRound(String roundId) async {
-    await _client.rpc('championship_close_round', params: {'p_round_id': roundId});
-  }
-
-  /// For a match left 'disputed' after a genuine tie (spec's third
-  /// tie-breaker — an admin-approved sudden-death round — isn't
-  /// something the system can resolve on its own).
-  Future<ChampionshipMatch> setMatchWinner({required String matchId, required String winnerTeamId}) async {
-    final row = await _client.rpc('championship_set_match_winner', params: {
-      'p_match_id': matchId,
-      'p_winner_team_id': winnerTeamId,
-    });
-    return ChampionshipMatch.fromMap(row as Map<String, dynamic>);
-  }
-
-  Future<ChampionshipMatch> createMatch({
-    required String seasonId,
-    required String roundId,
-    required String teamAId,
-    required String teamBId,
-  }) async {
-    final row = await _client
-        .from('championship_matches')
-        .insert({
-          'season_id': seasonId,
-          'round_id': roundId,
-          'team_a_id': teamAId,
-          'team_b_id': teamBId,
-        })
-        .select()
-        .single();
-    return ChampionshipMatch.fromMap(row);
-  }
-
-  /// Admin-only: raw table (real scores, no hiding) rather than the
-  /// public score-hiding view.
-  Future<List<ChampionshipMatch>> fetchRawMatchesForRound(String roundId) async {
-    final rows = await _client.from('championship_matches').select().eq('round_id', roundId);
-    return rows.map<ChampionshipMatch>((m) => ChampionshipMatch(
-          id: m['id'] as String,
-          seasonId: m['season_id'] as String,
-          roundId: m['round_id'] as String,
-          teamAId: m['team_a_id'] as String,
-          teamBId: m['team_b_id'] as String,
-          teamAScore: m['team_a_score'] as num?,
-          teamBScore: m['team_b_score'] as num?,
-          winnerTeamId: m['winner_team_id'] as String?,
-          status: m['status'] as String,
-        )).toList();
-  }
-
-  Future<ChampionshipQuestionSet> createQuestionSet({
-    required String seasonId,
+  Future<int> adminCreateQuestionSet({
+    required int seasonId,
     required String name,
     required String subject,
     required int durationSeconds,
-    String? difficulty,
     required List<String> questionIds,
   }) async {
-    final setRow = await _client
-        .from('championship_question_sets')
-        .insert({
-          'season_id': seasonId,
-          'name': name,
-          'subject': subject,
-          'duration_seconds': durationSeconds,
-          'question_count': questionIds.length,
-          'difficulty': difficulty,
-        })
-        .select()
-        .single();
-    final setId = setRow['id'] as String;
-
-    final items = List.generate(
-      questionIds.length,
-      (i) => {'question_set_id': setId, 'question_id': questionIds[i], 'question_order': i + 1, 'marks': 1},
-    );
-    if (items.isNotEmpty) {
-      await _client.from('championship_question_set_items').insert(items);
-    }
-    return ChampionshipQuestionSet.fromMap(setRow);
+    final id = await _client.rpc('admin_create_question_set', params: {
+      'p_season_id': seasonId,
+      'p_name': name,
+      'p_subject': subject,
+      'p_duration_seconds': durationSeconds,
+      'p_question_ids': questionIds,
+    });
+    return id as int;
   }
 
-  Future<List<ChampionshipQuestionSet>> fetchQuestionSetsForSeason(String seasonId) async {
+  /// Requires the RLS patch (cqs_select for admin) — without it this
+  /// silently returns an empty list rather than erroring.
+  Future<List<ChampionshipQuestionSet>> fetchQuestionSetsForSeason(int seasonId) async {
     final rows = await _client.from('championship_question_sets').select().eq('season_id', seasonId);
     return rows.map<ChampionshipQuestionSet>(ChampionshipQuestionSet.fromMap).toList();
   }
 
-  /// For the admin's question-picker when building a question set.
   Future<List<Map<String, dynamic>>> fetchQuestionsBySubject(String subject, {int limit = 100}) async {
     final rows = await _client.from('questions').select('id, question_text').eq('subject', subject).limit(limit);
     return List<Map<String, dynamic>>.from(rows);
@@ -566,59 +242,196 @@ class ChampionshipService {
   }
 
   // ---------------------------------------------------------------
-  // TEAM NAME LOOKUP (used by the bracket + tutor dashboards)
+  // ROUNDS
   // ---------------------------------------------------------------
 
-  Future<Map<String, String>> fetchTeamNamesBySeason(String seasonId) async {
-    final rows = await _client.from('championship_teams').select('id, name').eq('season_id', seasonId);
-    return {for (final r in rows) r['id'] as String: r['name'] as String};
+  Future<List<ChampionshipRound>> fetchRounds(int seasonId) async {
+    final rows = await _client.from('championship_rounds').select().eq('season_id', seasonId).order('round_number');
+    return rows.map<ChampionshipRound>(ChampionshipRound.fromMap).toList();
   }
 
-  // ---------------------------------------------------------------
-  // PRIZES & PAYOUTS (admin only — enforced server-side in the RPCs)
-  // ---------------------------------------------------------------
-
-  /// Sum of paid entry fees for the season — shown to admin BEFORE they
-  /// finalize, so the percentage split isn't a guess against an unknown pool.
-  Future<num> fetchCollectedEntryFees(String seasonId) async {
-    final rows = await _client.from('championship_payments').select('amount_cent').eq('season_id', seasonId).eq('status', 'paid');
-    num total = 0;
-    for (final r in rows) {
-      total += (r['amount_cent'] as num);
-    }
-    return total;
-  }
-
-  Future<ChampionshipPrize> finalizePrize({
-    required String seasonId,
-    required String winnerTeamId,
-    required num tutorPct,
-    required num playerPct,
-    required num platformPct,
+  Future<int> adminCreateRound({
+    required int seasonId,
+    required int roundNumber,
+    required String name,
+    required DateTime opensAt,
+    required DateTime closesAt,
+    required int questionSetId,
   }) async {
-    final row = await _client.rpc('championship_finalize_prize', params: {
+    final id = await _client.rpc('admin_create_round', params: {
+      'p_season_id': seasonId,
+      'p_round_number': roundNumber,
+      'p_name': name,
+      'p_opens_at': opensAt.toIso8601String(),
+      'p_closes_at': closesAt.toIso8601String(),
+      'p_question_set_id': questionSetId,
+    });
+    return id as int;
+  }
+
+  Future<void> adminSetRoundStatus(int roundId, String status) async {
+    await _client.rpc('admin_set_round_status', params: {'p_round_id': roundId, 'p_status': status});
+  }
+
+  /// Scores every match in the round and closes it — use this, not
+  /// adminSetRoundStatus(roundId, 'closed'), or nothing gets scored.
+  Future<void> adminCloseRound(int roundId) async {
+    await _client.rpc('admin_close_round', params: {'p_round_id': roundId});
+  }
+
+  /// The only way to change a round's question set after any attempt
+  /// exists — wipes attempts/answers and resets to scheduled.
+  Future<void> adminResetRound(int roundId) async {
+    await _client.rpc('admin_reset_round', params: {'p_round_id': roundId});
+  }
+
+  // ---------------------------------------------------------------
+  // MATCHES / BRACKET
+  // ---------------------------------------------------------------
+
+  Future<int> adminCreateMatch({required int roundId, required int teamAId, required int teamBId}) async {
+    final id = await _client.rpc('admin_create_match', params: {
+      'p_round_id': roundId,
+      'p_team_a_id': teamAId,
+      'p_team_b_id': teamBId,
+    });
+    return id as int;
+  }
+
+  /// The single source of truth for round+match+team-name+score display
+  /// across every screen — scores are null unless match_status='completed',
+  /// computed server-side in the RPC itself.
+  Future<List<ChampionshipBracketRow>> fetchBracket(int seasonId) async {
+    final rows = await _client.rpc('get_championship_bracket', params: {'p_season_id': seasonId});
+    return (rows as List).map<ChampionshipBracketRow>((m) => ChampionshipBracketRow.fromMap(m as Map<String, dynamic>)).toList();
+  }
+
+  Future<Map<String, dynamic>> adminComputeMatchResult(int matchId) async {
+    final result = await _client.rpc('admin_compute_match_result', params: {'p_match_id': matchId});
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> adminSetMatchWinner({required int matchId, required int winnerTeamId}) async {
+    await _client.rpc('admin_set_match_winner', params: {'p_match_id': matchId, 'p_winner_team_id': winnerTeamId});
+  }
+
+  // ---------------------------------------------------------------
+  // SELECTIONS
+  // ---------------------------------------------------------------
+
+  /// Whole-list replace, not per-player toggle — the server deletes the
+  /// team's existing selection for this match and inserts exactly this set.
+  Future<void> selectRoundPlayers({required int matchId, required List<String> studentIds}) async {
+    await _client.rpc('tutor_select_round_players', params: {'p_match_id': matchId, 'p_student_ids': studentIds});
+  }
+
+  Future<List<String>> fetchSelectionForMatch({required int matchId, required int teamId}) async {
+    final rows = await _client
+        .from('championship_selections')
+        .select('student_id')
+        .eq('match_id', matchId)
+        .eq('team_id', teamId);
+    return rows.map<String>((r) => r['student_id'] as String).toList();
+  }
+
+  Future<bool> isCurrentStudentSelected(int matchId) async {
+    final result = await _client.rpc('student_get_my_selection', params: {'p_match_id': matchId});
+    return result as bool;
+  }
+
+  // ---------------------------------------------------------------
+  // STUDENT STATUS / ATTEMPTS
+  // ---------------------------------------------------------------
+
+  Future<Map<String, dynamic>> studentGetMyStatus(int seasonId) async {
+    final result = await _client.rpc('student_get_my_championship_status', params: {'p_season_id': seasonId});
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  /// Direct select, not an RPC — ca_select's RLS already scopes this to
+  /// the caller's own row (student_id = auth.uid()), so no function is
+  /// needed just to read it back.
+  Future<Map<String, dynamic>?> fetchMyAttempt(int matchId) async {
+    final uid = _uid;
+    if (uid == null) return null;
+    return await _client.from('championship_attempts').select().eq('match_id', matchId).eq('student_id', uid).maybeSingle();
+  }
+
+  Stream<List<Map<String, dynamic>>> watchMatch(int matchId) {
+    return _client.from('championship_matches').stream(primaryKey: ['id']).eq('id', matchId);
+  }
+
+  Stream<List<Map<String, dynamic>>> watchRound(int roundId) {
+    return _client.from('championship_rounds').stream(primaryKey: ['id']).eq('id', roundId);
+  }
+
+  Future<List<ChampionshipQuizQuestion>> fetchMatchQuestions(int matchId) async {
+    final rows = await _client.rpc('student_get_match_questions', params: {'p_match_id': matchId});
+    return (rows as List).map<ChampionshipQuizQuestion>((m) => ChampionshipQuizQuestion.fromMap(m as Map<String, dynamic>)).toList();
+  }
+
+  Future<ChampionshipAttemptState> startAttempt(int matchId) async {
+    final result = await _client.rpc('student_start_attempt', params: {'p_match_id': matchId});
+    return ChampionshipAttemptState.fromMap(Map<String, dynamic>.from(result as Map));
+  }
+
+  /// [answers] maps questionId -> selected option INDEX. Returns
+  /// {score, correct_count, expired} — expired=true means the server
+  /// rejected the timing and zeroed the score instead of grading.
+  Future<Map<String, dynamic>> submitAttempt({required int matchId, required Map<String, int> answers}) async {
+    final result = await _client.rpc('student_submit_attempt', params: {
+      'p_match_id': matchId,
+      'p_answers': answers,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  // ---------------------------------------------------------------
+  // PRIZES & PAYOUTS
+  // ---------------------------------------------------------------
+
+  Future<int> adminFinalizePrize({
+    required int seasonId,
+    required int winnerTeamId,
+    required int prizePoolCent,
+    required num platformPct,
+    required num tutorPct,
+    required num studentPct,
+  }) async {
+    final id = await _client.rpc('admin_finalize_prize', params: {
       'p_season_id': seasonId,
       'p_winner_team_id': winnerTeamId,
-      'p_tutor_pct': tutorPct,
-      'p_player_pct': playerPct,
+      'p_prize_pool_cent': prizePoolCent,
       'p_platform_pct': platformPct,
+      'p_tutor_pct': tutorPct,
+      'p_student_pct': studentPct,
     });
-    return ChampionshipPrize.fromMap(row as Map<String, dynamic>);
+    return id as int;
   }
 
-  Future<List<ChampionshipPayout>> fetchPayoutsForSeason(String seasonId) async {
-    final rows = await _client
-        .from('championship_payouts')
-        .select('*, profiles(username)')
-        .eq('season_id', seasonId)
-        .order('created_at');
+  Future<void> adminCreatePayoutsForPrize(int prizeId) async {
+    await _client.rpc('admin_create_payouts_for_prize', params: {'p_prize_id': prizeId});
+  }
+
+  Future<List<ChampionshipPrize>> fetchPrizesForSeason(int seasonId) async {
+    final rows = await _client.from('championship_prizes').select().eq('season_id', seasonId);
+    return rows.map<ChampionshipPrize>(ChampionshipPrize.fromMap).toList();
+  }
+
+  Future<List<ChampionshipPayout>> fetchPayoutsForSeason(int seasonId) async {
+    final rows = await _client.from('championship_payouts').select().eq('season_id', seasonId).order('created_at');
     return rows.map<ChampionshipPayout>(ChampionshipPayout.fromMap).toList();
   }
 
-  /// Does the actual Cent credit — admin-gated server-side, bypassing
-  /// the 10-Cent cap on the client-callable credit_app_currency RPC.
-  Future<ChampionshipPayout> processPayout(String payoutId) async {
-    final row = await _client.rpc('championship_process_payout', params: {'p_payout_id': payoutId});
-    return ChampionshipPayout.fromMap(row as Map<String, dynamic>);
+  /// Non-'paid' transitions only (approved/cancelled/etc) — the server
+  /// itself refuses 'paid' through this path, see adminProcessPayout.
+  Future<void> adminSetPayoutStatus(int payoutId, String status) async {
+    await _client.rpc('admin_set_payout_status', params: {'p_payout_id': payoutId, 'p_status': status});
+  }
+
+  /// Does the real Cent credit — the only function allowed to mark a
+  /// payout 'paid'.
+  Future<void> adminProcessPayout(int payoutId) async {
+    await _client.rpc('admin_process_payout', params: {'p_payout_id': payoutId});
   }
 }

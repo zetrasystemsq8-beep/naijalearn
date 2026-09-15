@@ -1,46 +1,15 @@
 // lib/championship_bracket.dart
-//
-// Visual tournament bracket (spec section 19). Draws real connector
-// lines between a round's matches and the following round, using the
-// standard single-elimination layout formula: match i in round r sits
-// at y = unit * 2^r * (i + 0.5), which is why it lines up with the
-// midpoint of the two matches feeding into it.
-//
-// ASSUMPTION this widget documents rather than hides: it assumes each
-// round has exactly half as many matches as the previous one, ordered
-// so match `2i`/`2i+1` in round r feed match `i` in round r+1 — i.e. a
-// clean bracket, which is how the admin dashboard creates matches if
-// used round-by-round in order. If a season's matches don't fit that
-// shape (byes, irregular pairings), it falls back to a plain stacked
-// list per round with no connector lines instead of drawing something
-// misleading.
+// REPLACES the earlier version. get_championship_bracket returns one
+// flat list of rows (round+match+team names+scores already joined) —
+// this groups them by round_number client-side instead of the earlier
+// version's separate rounds/matches/teamNames fetches.
 
 import 'package:flutter/material.dart';
 import 'championship_service.dart';
 import 'championship_models.dart';
 
-class BracketMatchDisplay {
-  final String matchId;
-  final String teamAName;
-  final String teamBName;
-  final num? teamAScore;
-  final num? teamBScore;
-  final String? winnerName;
-  final String status;
-
-  BracketMatchDisplay({
-    required this.matchId,
-    required this.teamAName,
-    required this.teamBName,
-    this.teamAScore,
-    this.teamBScore,
-    this.winnerName,
-    required this.status,
-  });
-}
-
 class ChampionshipBracketScreen extends StatefulWidget {
-  final String seasonId;
+  final int seasonId;
   const ChampionshipBracketScreen({super.key, required this.seasonId});
 
   @override
@@ -52,7 +21,7 @@ class _ChampionshipBracketScreenState extends State<ChampionshipBracketScreen> {
   bool _loading = true;
   String? _error;
   List<String> _roundNames = [];
-  List<List<BracketMatchDisplay>> _bracket = [];
+  List<List<ChampionshipBracketRow>> _bracket = [];
 
   @override
   void initState() {
@@ -62,31 +31,15 @@ class _ChampionshipBracketScreenState extends State<ChampionshipBracketScreen> {
 
   Future<void> _load() async {
     try {
-      final rounds = await _service.fetchRounds(widget.seasonId);
-      final matches = await _service.fetchAllMatchesForSeason(widget.seasonId);
-      final teamNames = await _service.fetchTeamNamesBySeason(widget.seasonId);
-
-      rounds.sort((a, b) => a.roundNumber.compareTo(b.roundNumber));
-      final grouped = <List<ChampionshipMatch>>[];
-      for (final r in rounds) {
-        grouped.add(matches.where((m) => m.roundId == r.id).toList());
+      final rows = await _service.fetchBracket(widget.seasonId);
+      final byRound = <int, List<ChampionshipBracketRow>>{};
+      for (final r in rows) {
+        byRound.putIfAbsent(r.roundNumber, () => []).add(r);
       }
-
+      final sortedRoundNumbers = byRound.keys.toList()..sort();
       setState(() {
-        _roundNames = rounds.map((r) => r.name).toList();
-        _bracket = grouped
-            .map((roundMatches) => roundMatches
-                .map((m) => BracketMatchDisplay(
-                      matchId: m.id,
-                      teamAName: teamNames[m.teamAId] ?? 'TBD',
-                      teamBName: teamNames[m.teamBId] ?? 'TBD',
-                      teamAScore: m.teamAScore,
-                      teamBScore: m.teamBScore,
-                      winnerName: m.winnerTeamId != null ? teamNames[m.winnerTeamId] : null,
-                      status: m.status,
-                    ))
-                .toList())
-            .toList();
+        _roundNames = sortedRoundNumbers.map((n) => byRound[n]!.first.roundName).toList();
+        _bracket = sortedRoundNumbers.map((n) => byRound[n]!).toList();
         _loading = false;
       });
     } catch (e) {
@@ -121,16 +74,13 @@ class _ChampionshipBracketScreenState extends State<ChampionshipBracketScreen> {
   }
 }
 
-/// Pure/presentational — takes already-resolved display data so it can
-/// be reused from student/tutor/admin screens without duplicating
-/// fetch logic.
 class ChampionshipBracket extends StatelessWidget {
   final List<String> roundNames;
-  final List<List<BracketMatchDisplay>> rounds;
+  final List<List<ChampionshipBracketRow>> rounds;
   static const double cardWidth = 170;
   static const double cardHeight = 64;
   static const double columnGap = 56;
-  static const double unit = 96; // vertical slot height for round-0 matches
+  static const double unit = 96;
 
   const ChampionshipBracket({super.key, required this.roundNames, required this.rounds});
 
@@ -185,7 +135,7 @@ class ChampionshipBracket extends StatelessWidget {
 }
 
 class _BracketMatchCard extends StatelessWidget {
-  final BracketMatchDisplay match;
+  final ChampionshipBracketRow match;
   final double width;
   final double height;
   const _BracketMatchCard({required this.match, required this.width, required this.height});
@@ -193,7 +143,6 @@ class _BracketMatchCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final resolved = match.winnerName != null;
     return Container(
       width: width,
       height: height,
@@ -206,17 +155,9 @@ class _BracketMatchCard extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _TeamRow(
-            name: match.teamAName,
-            score: match.teamAScore,
-            isWinner: resolved && match.winnerName == match.teamAName,
-          ),
+          _TeamRow(name: match.teamAName, score: match.teamAScore, isWinner: match.winnerTeamId == match.teamAId),
           const Divider(height: 6),
-          _TeamRow(
-            name: match.teamBName,
-            score: match.teamBScore,
-            isWinner: resolved && match.winnerName == match.teamBName,
-          ),
+          _TeamRow(name: match.teamBName, score: match.teamBScore, isWinner: match.winnerTeamId == match.teamBId),
         ],
       ),
     );
@@ -252,13 +193,7 @@ class _BracketConnectorPainter extends CustomPainter {
   final double unit;
   final Color color;
 
-  _BracketConnectorPainter({
-    required this.roundCounts,
-    required this.cardWidth,
-    required this.columnGap,
-    required this.unit,
-    required this.color,
-  });
+  _BracketConnectorPainter({required this.roundCounts, required this.cardWidth, required this.columnGap, required this.unit, required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -277,7 +212,6 @@ class _BracketConnectorPainter extends CustomPainter {
 
         final nextY = unit * (1 << (r + 1)) * ((i ~/ 2) + 0.5) + 24;
         if (i.isEven) {
-          // draw the vertical connector once per pair
           final partnerY = unit * (1 << r) * (i + 1 + 0.5) + 24;
           canvas.drawLine(Offset(midX, y), Offset(midX, partnerY), paint);
         }
@@ -290,12 +224,9 @@ class _BracketConnectorPainter extends CustomPainter {
   bool shouldRepaint(covariant _BracketConnectorPainter oldDelegate) => false;
 }
 
-/// Used when match counts don't halve cleanly round-to-round (byes,
-/// irregular admin-created pairings) — no connector lines drawn, since
-/// a wrong line is worse than no line.
 class _FallbackStackedBracket extends StatelessWidget {
   final List<String> roundNames;
-  final List<List<BracketMatchDisplay>> rounds;
+  final List<List<ChampionshipBracketRow>> rounds;
   const _FallbackStackedBracket({required this.roundNames, required this.rounds});
 
   @override
@@ -313,13 +244,9 @@ class _FallbackStackedBracket extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(roundNames.length > r ? roundNames[r] : 'Round ${r + 1}',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(roundNames.length > r ? roundNames[r] : 'Round ${r + 1}', style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  ...rounds[r].map((m) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _BracketMatchCard(match: m, width: 190, height: 64),
-                      )),
+                  ...rounds[r].map((m) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _BracketMatchCard(match: m, width: 190, height: 64))),
                 ],
               ),
             ),

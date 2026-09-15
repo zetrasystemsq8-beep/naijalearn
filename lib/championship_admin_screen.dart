@@ -1,10 +1,5 @@
 // lib/championship_admin_screen.dart
-//
-// Admin dashboard (spec sections 22-23, 29). Every write here goes
-// through the same championship_teams/rounds/matches/question_sets
-// tables the tutor/student screens read — admin just has an RLS policy
-// (championship_is_admin()) granting full access, so no special RPCs
-// are needed for these actions.
+// REPLACES the earlier version entirely.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -59,12 +54,7 @@ class _AdminChampionshipView extends StatelessWidget {
               )
             : null,
         body: provider.selectedSeason == null
-            ? Center(
-                child: FilledButton(
-                  onPressed: () => _showCreateSeasonSheet(context, provider),
-                  child: const Text('Create your first season'),
-                ),
-              )
+            ? Center(child: FilledButton(onPressed: () => _showCreateSeasonSheet(context, provider), child: const Text('Create your first season')))
             : TabBarView(
                 children: [
                   _TeamsTab(provider: provider),
@@ -99,18 +89,13 @@ class _SeasonPicker extends StatelessWidget {
             dropdownColor: Theme.of(context).colorScheme.surface,
             underline: const SizedBox(),
             style: const TextStyle(color: Colors.white),
-            items: provider.seasons
-                .map((s) => DropdownMenuItem(value: s, child: Text('${s.name} (${s.status})')))
-                .toList(),
+            items: provider.seasons.map((s) => DropdownMenuItem(value: s, child: Text('${s.name} (${s.status})'))).toList(),
             onChanged: (s) {
               if (s != null) provider.selectSeason(s);
             },
           ),
         ),
-        IconButton(
-          icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white),
-          onPressed: () => _showCreateSeasonSheet(context, provider),
-        ),
+        IconButton(icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white), onPressed: () => _showCreateSeasonSheet(context, provider)),
         PopupMenuButton<String>(
           onSelected: (status) => provider.setSeasonStatus(status),
           itemBuilder: (_) => const [
@@ -133,9 +118,9 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
   final nameCtrl = TextEditingController();
   final descCtrl = TextEditingController();
   final teamLimitCtrl = TextEditingController(text: '32');
-  final entryFeeCtrl = TextEditingController(text: '0');
   final rosterLimitCtrl = TextEditingController(text: '10');
   final playersPerRoundCtrl = TextEditingController(text: '5');
+  final entryFeeCtrl = TextEditingController(text: '0');
   DateTime? regStart;
   DateTime? regEnd;
   bool submitting = false;
@@ -160,21 +145,13 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: descCtrl,
-                  decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder()),
-                ),
+                TextFormField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Description', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () async {
-                        final d = await showDatePicker(
-                          context: ctx,
-                          firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
-                          initialDate: DateTime.now(),
-                        );
+                        final d = await showDatePicker(context: ctx, firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 365)), initialDate: DateTime.now());
                         if (d != null) setState(() => regStart = d);
                       },
                       child: Text(regStart == null ? 'Registration start' : '${regStart!.year}-${regStart!.month}-${regStart!.day}'),
@@ -184,12 +161,7 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () async {
-                        final d = await showDatePicker(
-                          context: ctx,
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 400)),
-                          initialDate: DateTime.now().add(const Duration(days: 7)),
-                        );
+                        final d = await showDatePicker(context: ctx, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 400)), initialDate: DateTime.now().add(const Duration(days: 7)));
                         if (d != null) setState(() => regEnd = d);
                       },
                       child: Text(regEnd == null ? 'Registration end' : '${regEnd!.year}-${regEnd!.month}-${regEnd!.day}'),
@@ -198,36 +170,14 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                 ]),
                 const SizedBox(height: 10),
                 Row(children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: teamLimitCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Team limit', border: OutlineInputBorder()),
-                    ),
-                  ),
+                  Expanded(child: TextFormField(controller: teamLimitCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Team limit', border: OutlineInputBorder()))),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: rosterLimitCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Roster size', border: OutlineInputBorder()),
-                    ),
-                  ),
+                  Expanded(child: TextFormField(controller: rosterLimitCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Roster size', border: OutlineInputBorder()))),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: playersPerRoundCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Per round', border: OutlineInputBorder()),
-                    ),
-                  ),
+                  Expanded(child: TextFormField(controller: playersPerRoundCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per round', border: OutlineInputBorder()))),
                 ]),
                 const SizedBox(height: 10),
-                TextFormField(
-                  controller: entryFeeCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Entry fee (Cent, 0 for free)', border: OutlineInputBorder()),
-                ),
+                TextFormField(controller: entryFeeCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Entry fee (Cent, 0 for free)', border: OutlineInputBorder())),
                 if (provider.actionError != null) ...[
                   const SizedBox(height: 10),
                   Text(provider.actionError!, style: const TextStyle(color: Colors.red)),
@@ -237,17 +187,17 @@ void _showCreateSeasonSheet(BuildContext context, AdminChampionshipProvider prov
                   onPressed: submitting
                       ? null
                       : () async {
-                          if (!formKey.currentState!.validate() || regStart == null || regEnd == null) return;
+                          if (!formKey.currentState!.validate()) return;
                           setState(() => submitting = true);
                           final ok = await provider.createSeason(
                             name: nameCtrl.text.trim(),
                             description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-                            registrationStart: regStart!,
-                            registrationEnd: regEnd!,
-                            teamLimit: int.tryParse(teamLimitCtrl.text) ?? 32,
+                            registrationStart: regStart,
+                            registrationEnd: regEnd,
+                            teamLimit: int.tryParse(teamLimitCtrl.text),
                             rosterLimit: int.tryParse(rosterLimitCtrl.text) ?? 10,
                             playersPerRound: int.tryParse(playersPerRoundCtrl.text) ?? 5,
-                            entryFeeCent: num.tryParse(entryFeeCtrl.text) ?? 0,
+                            entryFeeCent: int.tryParse(entryFeeCtrl.text) ?? 0,
                           );
                           setState(() => submitting = false);
                           if (ok && ctx.mounted) Navigator.pop(ctx);
@@ -283,23 +233,30 @@ class _TeamsTab extends StatelessWidget {
         return Card(
           child: ListTile(
             title: Text(t.name),
-            subtitle: Text('Status: ${t.status}${t.category != null ? ' • ${t.category}' : ''}'),
+            subtitle: Text('Status: ${t.status}${t.rosterLocked ? ' • roster locked' : ''}${t.category != null ? ' • ${t.category}' : ''}'),
             trailing: PopupMenuButton<String>(
               onSelected: (v) {
                 if (v == 'disqualify') {
-                  _showDisqualifyDialog(context, provider, t);
+                  _showReasonDialog(context, 'Disqualify team', (reason) {
+                    provider.disqualifyTeam(t.id, reason);
+                    _maybeOfferRefund(context, provider, t, 'Disqualification refund: $reason');
+                  });
+                } else if (v == 'reject') {
+                  _showReasonDialog(context, 'Reject team', (reason) => provider.rejectTeam(t.id, reason));
+                } else if (v == 'approve') {
+                  provider.approveTeam(t.id);
+                } else if (v == 'unlock') {
+                  provider.unlockRoster(t.id);
                 } else if (v == 'refund') {
                   _showRefundDialog(context, provider, t);
-                } else {
-                  provider.setTeamStatus(t.id, v);
                 }
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'approved', child: Text('Approve')),
-                PopupMenuItem(value: 'rejected', child: Text('Reject')),
-                PopupMenuItem(value: 'withdrawn', child: Text('Mark withdrawn')),
-                PopupMenuItem(value: 'disqualify', child: Text('Disqualify…')),
-                PopupMenuItem(value: 'refund', child: Text('Refund…')),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'approve', child: Text('Approve')),
+                const PopupMenuItem(value: 'reject', child: Text('Reject…')),
+                const PopupMenuItem(value: 'disqualify', child: Text('Disqualify…')),
+                if (t.rosterLocked) const PopupMenuItem(value: 'unlock', child: Text('Unlock roster')),
+                const PopupMenuItem(value: 'refund', child: Text('Refund…')),
               ],
             ),
           ),
@@ -308,42 +265,43 @@ class _TeamsTab extends StatelessWidget {
     );
   }
 
-  void _showDisqualifyDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipTeam team) {
+  void _showReasonDialog(BuildContext context, String title, void Function(String reason) onConfirm) {
     final ctrl = TextEditingController();
-    bool alsoRefund = false;
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Disqualify team'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Reason')),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: alsoRefund,
-                title: const Text('Also refund entry fee', style: TextStyle(fontSize: 13)),
-                onChanged: (v) => setState(() => alsoRefund = v ?? false),
-              ),
-            ],
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Reason')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              onConfirm(ctrl.text.trim().isEmpty ? 'No reason given' : ctrl.text.trim());
+              Navigator.pop(ctx);
+            },
+            child: const Text('Confirm'),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () async {
-                final reason = ctrl.text.trim().isEmpty ? 'No reason given' : ctrl.text.trim();
-                await provider.disqualifyTeam(team.id, reason);
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (alsoRefund && context.mounted) {
-                  _showRefundDialog(context, provider, team, prefillReason: 'Disqualification refund: $reason');
-                }
-              },
-              child: const Text('Disqualify'),
-            ),
-          ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  void _maybeOfferRefund(BuildContext context, AdminChampionshipProvider provider, ChampionshipTeam team, String prefillReason) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Also refund entry fee?'),
+        content: Text('Refund ${provider.selectedSeason?.entryFeeCent ?? 0} Cent to ${team.name}\'s coach?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('No')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showRefundDialog(context, provider, team, prefillReason: prefillReason);
+            },
+            child: const Text('Yes, refund'),
+          ),
+        ],
       ),
     );
   }
@@ -364,18 +322,10 @@ class _TeamsTab extends StatelessWidget {
             children: [
               Text('Entry fee was $fullFee Cent.', style: const TextStyle(fontSize: 12)),
               const SizedBox(height: 10),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Refund amount (Cent)'),
-              ),
+              TextField(controller: amountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Refund amount (Cent)')),
               const SizedBox(height: 10),
               TextField(controller: reasonCtrl, decoration: const InputDecoration(labelText: 'Reason')),
-              if (provider.actionError != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-                ),
+              if (provider.actionError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12))),
             ],
           ),
           actions: [
@@ -384,14 +334,10 @@ class _TeamsTab extends StatelessWidget {
               onPressed: submitting
                   ? null
                   : () async {
-                      final amount = num.tryParse(amountCtrl.text) ?? 0;
+                      final amount = int.tryParse(amountCtrl.text) ?? 0;
                       if (amount <= 0) return;
                       setState(() => submitting = true);
-                      final ok = await provider.refundTeam(
-                        teamId: team.id,
-                        amountCent: amount,
-                        reason: reasonCtrl.text.trim().isEmpty ? 'No reason given' : reasonCtrl.text.trim(),
-                      );
+                      final ok = await provider.refundTeam(teamId: team.id, amountCent: amount, reason: reasonCtrl.text.trim().isEmpty ? 'No reason given' : reasonCtrl.text.trim());
                       setState(() => submitting = false);
                       if (ok && ctx.mounted) Navigator.pop(ctx);
                     },
@@ -430,17 +376,18 @@ class _RoundsTab extends StatelessWidget {
                         subtitle: Text('${r.status} • opens ${_fmt(r.opensAt)} • closes ${_fmt(r.closesAt)}'),
                         trailing: PopupMenuButton<String>(
                           onSelected: (v) {
-                            if (v == 'reset') {
-                              _showResetRoundDialog(context, provider, r);
+                            if (v == 'close_score') {
+                              _confirmAndCloseRound(context, provider, r);
+                            } else if (v == 'reset') {
+                              _confirmAndResetRound(context, provider, r);
                             } else {
                               provider.setRoundStatus(r.id, v);
                             }
                           },
                           itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'scheduled', child: Text('Set: scheduled')),
-                            PopupMenuItem(value: 'open', child: Text('Open round')),
-                            PopupMenuItem(value: 'closed', child: Text('Close round')),
-                            PopupMenuItem(value: 'cancelled', child: Text('Cancel round')),
+                            PopupMenuItem(value: 'scheduled', child: Text('Set: scheduled (flag only)')),
+                            PopupMenuItem(value: 'open', child: Text('Set: open (flag only)')),
+                            PopupMenuItem(value: 'close_score', child: Text('Close & Score Round')),
                             PopupMenuItem(value: 'reset', child: Text('Reset round (wipes attempts)…')),
                           ],
                         ),
@@ -451,11 +398,7 @@ class _RoundsTab extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.all(12),
-          child: FilledButton.icon(
-            onPressed: () => _showCreateRoundSheet(context, provider),
-            icon: const Icon(Icons.add),
-            label: const Text('New Round'),
-          ),
+          child: FilledButton.icon(onPressed: () => _showCreateRoundSheet(context, provider), icon: const Icon(Icons.add), label: const Text('New Round')),
         ),
       ],
     );
@@ -463,16 +406,33 @@ class _RoundsTab extends StatelessWidget {
 
   String _fmt(DateTime d) => '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
-  void _showResetRoundDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round) {
+  void _confirmAndCloseRound(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Close & Score ${round.name}?'),
+        content: const Text('This scores every match in the round from submitted attempts and sets winners. Anyone still mid-attempt is expired with a score of 0. This does not fully undo.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              final ok = await provider.closeRound(round.id);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (!ok && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.actionError ?? 'Failed')));
+            },
+            child: const Text('Close & Score'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmAndResetRound(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Reset ${round.name}?'),
-        content: const Text(
-          'This permanently deletes every attempt and answer submitted for this round, clears match scores/winners, '
-          'and sets the round back to scheduled. Use this only if you need to change the question set after players '
-          'have already started — there is no undo.',
-        ),
+        content: const Text('Permanently deletes every attempt/answer for this round, clears match scores/winners, and sets it back to scheduled. Use this only to change the question set after players have started. No undo.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
@@ -480,9 +440,7 @@ class _RoundsTab extends StatelessWidget {
             onPressed: () async {
               final ok = await provider.resetRound(round.id);
               if (ctx.mounted) Navigator.pop(ctx);
-              if (!ok && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.actionError ?? 'Reset failed')));
-              }
+              if (!ok && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.actionError ?? 'Failed')));
             },
             child: const Text('Reset Round'),
           ),
@@ -496,7 +454,7 @@ class _RoundsTab extends StatelessWidget {
     final numberCtrl = TextEditingController(text: '${provider.rounds.length + 1}');
     DateTime? opensAt;
     DateTime? closesAt;
-    String? questionSetId;
+    int? questionSetId;
     bool submitting = false;
 
     showModalBottomSheet(
@@ -515,13 +473,14 @@ class _RoundsTab extends StatelessWidget {
                 const SizedBox(height: 10),
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Round name (e.g. Quarterfinal)', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Question set', border: OutlineInputBorder()),
-                  items: provider.questionSets
-                      .map((q) => DropdownMenuItem(value: q.id, child: Text('${q.name} (${q.questionCount}q)')))
-                      .toList(),
-                  onChanged: (v) => questionSetId = v,
-                ),
+                if (provider.questionSets.isEmpty)
+                  const Text('No question sets yet — create one in the Question Sets tab first.', style: TextStyle(fontSize: 12, color: Colors.red))
+                else
+                  DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Question set', border: OutlineInputBorder()),
+                    items: provider.questionSets.map((q) => DropdownMenuItem(value: q.id, child: Text('${q.name} (${q.questionCount}q)'))).toList(),
+                    onChanged: (v) => questionSetId = v,
+                  ),
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(
@@ -553,14 +512,14 @@ class _RoundsTab extends StatelessWidget {
                   onPressed: submitting
                       ? null
                       : () async {
-                          if (nameCtrl.text.trim().isEmpty || opensAt == null || closesAt == null) return;
+                          if (nameCtrl.text.trim().isEmpty || opensAt == null || closesAt == null || questionSetId == null) return;
                           setState(() => submitting = true);
                           final ok = await provider.createRound(
                             roundNumber: int.tryParse(numberCtrl.text) ?? (provider.rounds.length + 1),
                             name: nameCtrl.text.trim(),
                             opensAt: opensAt!,
                             closesAt: closesAt!,
-                            questionSetId: questionSetId,
+                            questionSetId: questionSetId!,
                           );
                           setState(() => submitting = false);
                           if (ok && ctx.mounted) Navigator.pop(ctx);
@@ -578,12 +537,7 @@ class _RoundsTab extends StatelessWidget {
 }
 
 Future<DateTime?> _pickDateTime(BuildContext context) async {
-  final date = await showDatePicker(
-    context: context,
-    firstDate: DateTime.now().subtract(const Duration(days: 1)),
-    lastDate: DateTime.now().add(const Duration(days: 400)),
-    initialDate: DateTime.now(),
-  );
+  final date = await showDatePicker(context: context, firstDate: DateTime.now().subtract(const Duration(days: 1)), lastDate: DateTime.now().add(const Duration(days: 400)), initialDate: DateTime.now());
   if (date == null || !context.mounted) return null;
   final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
   if (time == null) return null;
@@ -601,29 +555,30 @@ class _MatchesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (provider.rounds.isEmpty) return const Center(child: Text('Create a round first.'));
+    final approvedTeams = provider.teams.where((t) => t.status == 'approved').toList();
+
     return ListView(
       padding: const EdgeInsets.all(12),
       children: provider.rounds.map((r) {
-        final matches = provider.matchesByRound[r.id] ?? [];
+        final matches = provider.bracket.where((b) => b.roundId == r.id).toList();
         return Card(
           child: ExpansionTile(
             title: Text('${r.name} (${matches.length} matches)'),
             children: [
               ...matches.map((m) => ListTile(
                     dense: true,
-                    title: Text('${provider.teamNames[m.teamAId] ?? '?'}  vs  ${provider.teamNames[m.teamBId] ?? '?'}'),
-                    subtitle: Text('Score: ${m.teamAScore} — ${m.teamBScore}  •  ${m.status}'),
-                    trailing: m.status == 'disputed'
-                        ? FilledButton(
-                            onPressed: () => _showResolveDisputeDialog(context, provider, m, r.id),
-                            child: const Text('Resolve'),
-                          )
-                        : null,
+                    title: Text('${m.teamAName}  vs  ${m.teamBName}'),
+                    subtitle: Text(m.scoresVisible ? 'Score: ${m.teamAScore} — ${m.teamBScore} (${m.matchStatus})' : m.matchStatus),
+                    trailing: m.matchStatus == 'disputed'
+                        ? FilledButton(onPressed: () => _showResolveDialog(context, provider, m), child: const Text('Resolve'))
+                        : (m.matchStatus == 'scheduled' || m.matchStatus == 'active')
+                            ? OutlinedButton(onPressed: () => provider.computeMatchResult(m.matchId), child: const Text('Compute'))
+                            : null,
                   )),
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: OutlinedButton.icon(
-                  onPressed: () => _showCreateMatchSheet(context, provider, r),
+                  onPressed: approvedTeams.length < 2 ? null : () => _showCreateMatchSheet(context, provider, r, approvedTeams),
                   icon: const Icon(Icons.add),
                   label: const Text('Add Match'),
                 ),
@@ -635,43 +590,37 @@ class _MatchesTab extends StatelessWidget {
     );
   }
 
-  void _showResolveDisputeDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipMatch match, String roundId) {
-    final nameA = provider.teamNames[match.teamAId] ?? 'Team A';
-    final nameB = provider.teamNames[match.teamBId] ?? 'Team B';
+  void _showResolveDialog(BuildContext context, AdminChampionshipProvider provider, ChampionshipBracketRow match) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Resolve Tied Match'),
-        content: Text(
-          'This match is tied even after both automatic tie-breakers (total correct answers, then average time). '
-          'Pick the winner after your sudden-death round:',
-        ),
+        content: const Text('Tied even after both automatic tie-breakers. Pick the winner after your sudden-death round:'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           OutlinedButton(
             onPressed: () {
-              provider.resolveDisputedMatch(matchId: match.id, winnerTeamId: match.teamAId, roundId: roundId);
+              provider.resolveDisputedMatch(matchId: match.matchId, winnerTeamId: match.teamAId);
               Navigator.pop(ctx);
             },
-            child: Text(nameA),
+            child: Text(match.teamAName),
           ),
           FilledButton(
             onPressed: () {
-              provider.resolveDisputedMatch(matchId: match.id, winnerTeamId: match.teamBId, roundId: roundId);
+              provider.resolveDisputedMatch(matchId: match.matchId, winnerTeamId: match.teamBId);
               Navigator.pop(ctx);
             },
-            child: Text(nameB),
+            child: Text(match.teamBName),
           ),
         ],
       ),
     );
   }
 
-  void _showCreateMatchSheet(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round) {
-    String? teamA;
-    String? teamB;
+  void _showCreateMatchSheet(BuildContext context, AdminChampionshipProvider provider, ChampionshipRound round, List<ChampionshipTeam> approvedTeams) {
+    int? teamA;
+    int? teamB;
     bool submitting = false;
-    final approvedTeams = provider.teams.where((t) => t.status == 'approved').toList();
 
     showModalBottomSheet(
       context: context,
@@ -685,13 +634,13 @@ class _MatchesTab extends StatelessWidget {
             children: [
               Text('New Match — ${round.name}', style: Theme.of(ctx).textTheme.titleMedium),
               const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<int>(
                 decoration: const InputDecoration(labelText: 'Team A', border: OutlineInputBorder()),
                 items: approvedTeams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
                 onChanged: (v) => teamA = v,
               ),
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<int>(
                 decoration: const InputDecoration(labelText: 'Team B', border: OutlineInputBorder()),
                 items: approvedTeams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
                 onChanged: (v) => teamB = v,
@@ -726,165 +675,6 @@ class _MatchesTab extends StatelessWidget {
 // QUESTION SETS TAB
 // ---------------------------------------------------------------------
 
-class _PayoutsTab extends StatelessWidget {
-  final AdminChampionshipProvider provider;
-  const _PayoutsTab({required this.provider});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final approvedTeams = provider.teams.where((t) => t.status == 'approved').toList();
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.3), borderRadius: BorderRadius.circular(16)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Collected entry fees: ${provider.collectedEntryFees} Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text('Finalizing splits this pool between the winning tutor, their roster, and the platform. Nothing is paid out until you process each payout below.', style: TextStyle(fontSize: 12)),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: approvedTeams.isEmpty ? null : () => _showFinalizeDialog(context, provider, approvedTeams),
-                icon: const Icon(Icons.emoji_events_rounded),
-                label: const Text('Finalize Prize for Champion'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (provider.actionError != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(provider.actionError!, style: TextStyle(color: scheme.error)),
-          ),
-        Text('Payouts', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (provider.payouts.isEmpty) const Text('No payouts yet — finalize a prize to generate them.'),
-        ...provider.payouts.map((p) => Card(
-              child: ListTile(
-                title: Text('${p.recipientName ?? p.recipientId} (${p.recipientType})'),
-                subtitle: Text('${p.amountCent} Cent • ${p.status}'),
-                trailing: (p.status == 'pending' || p.status == 'approved')
-                    ? FilledButton(
-                        onPressed: () => provider.processPayout(p.id),
-                        child: const Text('Pay'),
-                      )
-                    : Icon(
-                        p.status == 'paid' ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-                        color: p.status == 'paid' ? Colors.green : scheme.error,
-                      ),
-              ),
-            )),
-      ],
-    );
-  }
-
-  void _showFinalizeDialog(BuildContext context, AdminChampionshipProvider provider, List<ChampionshipTeam> teams) {
-    String? winnerId;
-    int? rosterCount;
-    final tutorCtrl = TextEditingController(text: '20');
-    final playerCtrl = TextEditingController(text: '60');
-    final platformCtrl = TextEditingController(text: '20');
-    bool submitting = false;
-    final pool = provider.collectedEntryFees;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) {
-          final tutorPct = num.tryParse(tutorCtrl.text) ?? 0;
-          final playerPct = num.tryParse(playerCtrl.text) ?? 0;
-          final platformPct = num.tryParse(platformCtrl.text) ?? 0;
-          final tutorAmt = pool * tutorPct / 100;
-          final platformAmt = pool * platformPct / 100;
-          final studentTotal = pool - tutorAmt - platformAmt;
-          final perPlayer = (rosterCount != null && rosterCount! > 0) ? studentTotal / rosterCount! : null;
-          final pctSum = tutorPct + playerPct + platformPct;
-
-          Future<void> onWinnerChanged(String? v) async {
-            winnerId = v;
-            setState(() => rosterCount = null);
-            if (v == null) return;
-            final roster = await ChampionshipService.instance.fetchRoster(v);
-            setState(() => rosterCount = roster.length);
-          }
-
-          return AlertDialog(
-            title: const Text('Finalize Prize'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Collected pool: $pool Cent', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(labelText: 'Champion team'),
-                    items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
-                    onChanged: onWinnerChanged,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(controller: tutorCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tutor %'), onChanged: (_) => setState(() {})),
-                  const SizedBox(height: 8),
-                  TextField(controller: playerCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Players %'), onChanged: (_) => setState(() {})),
-                  const SizedBox(height: 8),
-                  TextField(controller: platformCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Platform %'), onChanged: (_) => setState(() {})),
-                  const SizedBox(height: 4),
-                  Text(
-                    pctSum == 100 ? 'Sums to 100 ✓' : 'Sums to $pctSum — must equal 100',
-                    style: TextStyle(fontSize: 11, color: pctSum == 100 ? Colors.green : Colors.red),
-                  ),
-                  const Divider(height: 20),
-                  Text('Preview — this is exactly what will be paid out, not an estimate:', style: Theme.of(ctx).textTheme.labelSmall),
-                  const SizedBox(height: 6),
-                  Text('Tutor receives: ${tutorAmt.toStringAsFixed(2)} Cent'),
-                  Text(
-                    winnerId == null
-                        ? 'Each player receives: — (pick a team first)'
-                        : rosterCount == null
-                            ? 'Each player receives: loading roster…'
-                            : rosterCount == 0
-                                ? 'Each player receives: — (team has no active roster)'
-                                : 'Each of $rosterCount players receives: ${perPlayer!.toStringAsFixed(2)} Cent',
-                  ),
-                  Text('Platform keeps: ${platformAmt.toStringAsFixed(2)} Cent'),
-                  if (provider.actionError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              FilledButton(
-                onPressed: (submitting || winnerId == null || pctSum != 100)
-                    ? null
-                    : () async {
-                        setState(() => submitting = true);
-                        final ok = await provider.finalizePrize(
-                          winnerTeamId: winnerId!,
-                          tutorPct: tutorPct,
-                          playerPct: playerPct,
-                          platformPct: platformPct,
-                        );
-                        setState(() => submitting = false);
-                        if (ok && ctx.mounted) Navigator.pop(ctx);
-                      },
-                child: submitting ? const CircularProgressIndicator() : const Text('Finalize'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
 class _QuestionSetsTab extends StatelessWidget {
   final AdminChampionshipProvider provider;
   const _QuestionSetsTab({required this.provider});
@@ -913,7 +703,7 @@ class _QuestionSetsTab extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.all(12),
           child: FilledButton.icon(
-            onPressed: () => _showCreateQuestionSetSheet(context, provider),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _QuestionSetBuilderScreen(provider: provider))),
             icon: const Icon(Icons.add),
             label: const Text('New Question Set'),
           ),
@@ -921,14 +711,8 @@ class _QuestionSetsTab extends StatelessWidget {
       ],
     );
   }
-
-  void _showCreateQuestionSetSheet(BuildContext context, AdminChampionshipProvider provider) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => _QuestionSetBuilderScreen(provider: provider)));
-  }
 }
 
-/// Full-screen builder rather than a bottom sheet — picking dozens of
-/// questions needs real scroll space, not a cramped sheet.
 class _QuestionSetBuilderScreen extends StatefulWidget {
   final AdminChampionshipProvider provider;
   const _QuestionSetBuilderScreen({required this.provider});
@@ -991,11 +775,7 @@ class _QuestionSetBuilderScreenState extends State<_QuestionSetBuilderScreen> {
           children: [
             TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Set name', border: OutlineInputBorder())),
             const SizedBox(height: 10),
-            TextField(
-              controller: _durationCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Duration (seconds)', border: OutlineInputBorder()),
-            ),
+            TextField(controller: _durationCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Duration (seconds)', border: OutlineInputBorder())),
             const SizedBox(height: 10),
             _loadingSubjects
                 ? const LinearProgressIndicator()
@@ -1024,8 +804,7 @@ class _QuestionSetBuilderScreenState extends State<_QuestionSetBuilderScreen> {
                       },
                     ),
             ),
-            if (widget.provider.actionError != null)
-              Text(widget.provider.actionError!, style: const TextStyle(color: Colors.red)),
+            if (widget.provider.actionError != null) Text(widget.provider.actionError!, style: const TextStyle(color: Colors.red)),
             FilledButton(
               onPressed: _submitting || _selected.isEmpty || _subject == null
                   ? null
@@ -1040,12 +819,140 @@ class _QuestionSetBuilderScreenState extends State<_QuestionSetBuilderScreen> {
                       setState(() => _submitting = false);
                       if (ok && mounted) Navigator.pop(context);
                     },
-              child: _submitting
-                  ? const CircularProgressIndicator()
-                  : Text('Create Set (${_selected.length} questions)'),
+              child: _submitting ? const CircularProgressIndicator() : Text('Create Set (${_selected.length} questions)'),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------
+// PAYOUTS TAB
+// ---------------------------------------------------------------------
+
+class _PayoutsTab extends StatelessWidget {
+  final AdminChampionshipProvider provider;
+  const _PayoutsTab({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final approvedTeams = provider.teams.where((t) => t.status == 'approved').toList();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: scheme.primaryContainer.withOpacity(0.3), borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('This schema requires you to type the prize pool manually — it is not auto-summed from payments.', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: approvedTeams.isEmpty ? null : () => _showFinalizeDialog(context, provider, approvedTeams),
+                icon: const Icon(Icons.emoji_events_rounded),
+                label: const Text('Finalize Prize for Champion'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (provider.actionError != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(provider.actionError!, style: TextStyle(color: scheme.error))),
+        Text('Payouts', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (provider.payouts.isEmpty) const Text('No payouts yet — finalize a prize to generate them.'),
+        ...provider.payouts.map((p) => Card(
+              child: ListTile(
+                title: Text('${p.recipientUserId.substring(0, 8)}… (${p.recipientType})'),
+                subtitle: Text('${p.amountCent} Cent • ${p.status}'),
+                trailing: (p.status == 'pending' || p.status == 'approved')
+                    ? FilledButton(onPressed: () => provider.processPayout(p.id), child: const Text('Pay'))
+                    : Icon(p.status == 'paid' ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: p.status == 'paid' ? Colors.green : scheme.error),
+              ),
+            )),
+      ],
+    );
+  }
+
+  void _showFinalizeDialog(BuildContext context, AdminChampionshipProvider provider, List<ChampionshipTeam> teams) {
+    int? winnerId;
+    final poolCtrl = TextEditingController(text: '0');
+    final tutorCtrl = TextEditingController(text: '20');
+    final playerCtrl = TextEditingController(text: '60');
+    final platformCtrl = TextEditingController(text: '20');
+    bool submitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          final pool = int.tryParse(poolCtrl.text) ?? 0;
+          final tutorPct = num.tryParse(tutorCtrl.text) ?? 0;
+          final playerPct = num.tryParse(playerCtrl.text) ?? 0;
+          final platformPct = num.tryParse(platformCtrl.text) ?? 0;
+          final pctSum = tutorPct + playerPct + platformPct;
+          final tutorAmt = (pool * tutorPct / 100).round();
+          final platformAmt = (pool * platformPct / 100).round();
+          final studentTotal = pool - tutorAmt - platformAmt;
+
+          return AlertDialog(
+            title: const Text('Finalize Prize'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(labelText: 'Champion team'),
+                    items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
+                    onChanged: (v) => setState(() => winnerId = v),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(controller: poolCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Prize pool (Cent)'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 10),
+                  TextField(controller: tutorCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tutor %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 8),
+                  TextField(controller: playerCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Players %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 8),
+                  TextField(controller: platformCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Platform %'), onChanged: (_) => setState(() {})),
+                  const SizedBox(height: 4),
+                  Text(pctSum == 100 ? 'Sums to 100 ✓' : 'Sums to $pctSum — must equal 100', style: TextStyle(fontSize: 11, color: pctSum == 100 ? Colors.green : Colors.red)),
+                  const Divider(height: 20),
+                  Text('Tutor receives: $tutorAmt Cent'),
+                  Text('Players share: $studentTotal Cent total'),
+                  Text('Platform keeps: $platformAmt Cent'),
+                  if (provider.actionError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(provider.actionError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: (submitting || winnerId == null || pctSum != 100 || pool <= 0)
+                    ? null
+                    : () async {
+                        setState(() => submitting = true);
+                        final ok = await provider.finalizePrize(
+                          winnerTeamId: winnerId!,
+                          prizePoolCent: pool,
+                          platformPct: platformPct,
+                          tutorPct: tutorPct,
+                          studentPct: playerPct,
+                        );
+                        setState(() => submitting = false);
+                        if (ok && ctx.mounted) Navigator.pop(ctx);
+                      },
+                child: submitting ? const CircularProgressIndicator() : const Text('Finalize'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -1,9 +1,7 @@
 // lib/championship_entry_screen.dart
-//
-// Single entry point for "Academic Championship" in the nav — decides
-// whether to show the tutor dashboard or the student view based on
-// whether the signed-in user is an approved tutor, so the app doesn't
-// need two separate menu entries or ask the user which role they are.
+// Unchanged from before — only depends on isCurrentUserApprovedTutor(),
+// which still works the same way against tutor_profiles regardless of
+// the championship schema rebuild.
 
 import 'package:flutter/material.dart';
 import 'championship_service.dart';

@@ -1,4 +1,6 @@
 // lib/championship_admin_provider.dart
+// REPLACES the earlier version — every write goes through an admin_*
+// RPC now, none are direct table writes (RLS doesn't allow any).
 
 import 'package:flutter/foundation.dart';
 import 'championship_models.dart';
@@ -18,10 +20,9 @@ class AdminChampionshipProvider extends ChangeNotifier {
   List<ChampionshipTeam> teams = [];
   List<ChampionshipRound> rounds = [];
   List<ChampionshipQuestionSet> questionSets = [];
-  Map<String, List<ChampionshipMatch>> matchesByRound = {};
-  Map<String, String> teamNames = {}; // teamId -> name, for match display
+  List<ChampionshipBracketRow> bracket = [];
+  List<ChampionshipPrize> prizes = [];
   List<ChampionshipPayout> payouts = [];
-  num collectedEntryFees = 0;
 
   Future<void> load() async {
     loading = true;
@@ -61,28 +62,26 @@ class AdminChampionshipProvider extends ChangeNotifier {
     teams = await _service.fetchTeamsForSeason(id);
     rounds = await _service.fetchRounds(id);
     questionSets = await _service.fetchQuestionSetsForSeason(id);
-    teamNames = await _service.fetchTeamNamesBySeason(id);
-    matchesByRound = {};
-    for (final r in rounds) {
-      matchesByRound[r.id] = await _service.fetchRawMatchesForRound(r.id);
-    }
+    bracket = await _service.fetchBracket(id);
+    prizes = await _service.fetchPrizesForSeason(id);
     payouts = await _service.fetchPayoutsForSeason(id);
-    collectedEntryFees = await _service.fetchCollectedEntryFees(id);
   }
+
+  // ---------------- Seasons ----------------
 
   Future<bool> createSeason({
     required String name,
     String? description,
-    required DateTime registrationStart,
-    required DateTime registrationEnd,
-    int teamLimit = 32,
+    DateTime? registrationStart,
+    DateTime? registrationEnd,
+    int? teamLimit,
     int rosterLimit = 10,
     int playersPerRound = 5,
-    num entryFeeCent = 0,
+    int entryFeeCent = 0,
   }) async {
     actionError = null;
     try {
-      final s = await _service.createSeason(
+      final id = await _service.adminCreateSeason(
         name: name,
         description: description,
         registrationStart: registrationStart,
@@ -93,7 +92,7 @@ class AdminChampionshipProvider extends ChangeNotifier {
         entryFeeCent: entryFeeCent,
       );
       seasons = await _service.fetchAllSeasons();
-      selectedSeason = s;
+      selectedSeason = seasons.firstWhere((s) => s.id == id);
       await _loadSeasonDetail();
       notifyListeners();
       return true;
@@ -107,7 +106,7 @@ class AdminChampionshipProvider extends ChangeNotifier {
   Future<void> setSeasonStatus(String status) async {
     if (selectedSeason == null) return;
     try {
-      await _service.updateSeasonStatus(selectedSeason!.id, status);
+      await _service.adminUpdateSeasonStatus(selectedSeason!.id, status);
       seasons = await _service.fetchAllSeasons();
       selectedSeason = seasons.firstWhere((s) => s.id == selectedSeason!.id);
     } catch (e) {
@@ -116,31 +115,43 @@ class AdminChampionshipProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setTeamStatus(String teamId, String status) async {
+  // ---------------- Teams ----------------
+
+  Future<void> approveTeam(int teamId) async {
     try {
-      await _service.updateTeamStatus(teamId, status);
+      await _service.adminApproveTeam(teamId);
       teams = await _service.fetchTeamsForSeason(selectedSeason!.id);
     } catch (e) {
-      actionError = 'Could not update team: $e';
+      actionError = 'Could not approve team: $e';
     }
     notifyListeners();
   }
 
-  Future<void> disqualifyTeam(String teamId, String reason) async {
+  Future<void> rejectTeam(int teamId, String reason) async {
     try {
-      await _service.disqualifyTeam(teamId: teamId, reason: reason);
+      await _service.adminRejectTeam(teamId, reason);
       teams = await _service.fetchTeamsForSeason(selectedSeason!.id);
+    } catch (e) {
+      actionError = 'Could not reject team: $e';
+    }
+    notifyListeners();
+  }
+
+  Future<void> disqualifyTeam(int teamId, String reason) async {
+    try {
+      await _service.adminDisqualifyTeam(teamId, reason);
+      teams = await _service.fetchTeamsForSeason(selectedSeason!.id);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
     } catch (e) {
       actionError = 'Could not disqualify team: $e';
     }
     notifyListeners();
   }
 
-  Future<bool> refundTeam({required String teamId, required num amountCent, required String reason}) async {
+  Future<bool> refundTeam({required int teamId, required int amountCent, required String reason}) async {
     actionError = null;
     try {
-      await _service.refundTeam(teamId: teamId, amountCent: amountCent, reason: reason);
-      collectedEntryFees = await _service.fetchCollectedEntryFees(selectedSeason!.id);
+      await _service.adminRefundTeam(teamId: teamId, amountCent: amountCent, reason: reason);
       notifyListeners();
       return true;
     } catch (e) {
@@ -150,31 +161,55 @@ class AdminChampionshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> resetRound(String roundId) async {
+  Future<void> unlockRoster(int teamId) async {
+    try {
+      await _service.adminUnlockRoster(teamId);
+      teams = await _service.fetchTeamsForSeason(selectedSeason!.id);
+    } catch (e) {
+      actionError = 'Could not unlock roster: $e';
+    }
+    notifyListeners();
+  }
+
+  // ---------------- Question sets ----------------
+
+  Future<bool> createQuestionSet({
+    required String name,
+    required String subject,
+    required int durationSeconds,
+    required List<String> questionIds,
+  }) async {
     actionError = null;
     try {
-      await _service.resetRound(roundId);
-      rounds = await _service.fetchRounds(selectedSeason!.id);
-      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
+      await _service.adminCreateQuestionSet(
+        seasonId: selectedSeason!.id,
+        name: name,
+        subject: subject,
+        durationSeconds: durationSeconds,
+        questionIds: questionIds,
+      );
+      questionSets = await _service.fetchQuestionSetsForSeason(selectedSeason!.id);
       notifyListeners();
       return true;
     } catch (e) {
-      actionError = 'Could not reset round: $e';
+      actionError = 'Could not create question set: $e';
       notifyListeners();
       return false;
     }
   }
+
+  // ---------------- Rounds ----------------
 
   Future<bool> createRound({
     required int roundNumber,
     required String name,
     required DateTime opensAt,
     required DateTime closesAt,
-    String? questionSetId,
+    required int questionSetId,
   }) async {
     actionError = null;
     try {
-      await _service.createRound(
+      await _service.adminCreateRound(
         seasonId: selectedSeason!.id,
         roundNumber: roundNumber,
         name: name,
@@ -192,37 +227,55 @@ class AdminChampionshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> setRoundStatus(String roundId, String status) async {
+  Future<void> setRoundStatus(int roundId, String status) async {
     actionError = null;
     try {
-      if (status == 'closed') {
-        // Actually scores every match in the round — not just a flag flip.
-        await _service.closeRound(roundId);
-      } else {
-        await _service.updateRoundStatus(roundId, status);
-      }
+      await _service.adminSetRoundStatus(roundId, status);
       rounds = await _service.fetchRounds(selectedSeason!.id);
-      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
     } catch (e) {
       actionError = 'Could not update round: $e';
     }
     notifyListeners();
   }
 
-  Future<bool> createMatch({
-    required String roundId,
-    required String teamAId,
-    required String teamBId,
-  }) async {
+  /// Scores every match in the round and closes it.
+  Future<bool> closeRound(int roundId) async {
     actionError = null;
     try {
-      await _service.createMatch(
-        seasonId: selectedSeason!.id,
-        roundId: roundId,
-        teamAId: teamAId,
-        teamBId: teamBId,
-      );
-      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
+      await _service.adminCloseRound(roundId);
+      rounds = await _service.fetchRounds(selectedSeason!.id);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      actionError = 'Could not close round: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> resetRound(int roundId) async {
+    actionError = null;
+    try {
+      await _service.adminResetRound(roundId);
+      rounds = await _service.fetchRounds(selectedSeason!.id);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      actionError = 'Could not reset round: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ---------------- Matches ----------------
+
+  Future<bool> createMatch({required int roundId, required int teamAId, required int teamBId}) async {
+    actionError = null;
+    try {
+      await _service.adminCreateMatch(roundId: roundId, teamAId: teamAId, teamBId: teamBId);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
       notifyListeners();
       return true;
     } catch (e) {
@@ -232,62 +285,50 @@ class AdminChampionshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> createQuestionSet({
-    required String name,
-    required String subject,
-    required int durationSeconds,
-    String? difficulty,
-    required List<String> questionIds,
-  }) async {
-    actionError = null;
+  /// Per-match manual score compute — adminCloseRound already does this
+  /// for every match in a round; this is for recomputing a single one
+  /// without closing the whole round again.
+  Future<void> computeMatchResult(int matchId) async {
     try {
-      await _service.createQuestionSet(
-        seasonId: selectedSeason!.id,
-        name: name,
-        subject: subject,
-        durationSeconds: durationSeconds,
-        difficulty: difficulty,
-        questionIds: questionIds,
-      );
-      questionSets = await _service.fetchQuestionSetsForSeason(selectedSeason!.id);
-      notifyListeners();
-      return true;
+      await _service.adminComputeMatchResult(matchId);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
     } catch (e) {
-      actionError = 'Could not create question set: $e';
-      notifyListeners();
-      return false;
+      actionError = 'Could not compute result: $e';
     }
+    notifyListeners();
   }
 
-  Future<void> refresh() => load();
-
-  Future<void> resolveDisputedMatch({required String matchId, required String winnerTeamId, required String roundId}) async {
-    actionError = null;
+  Future<void> resolveDisputedMatch({required int matchId, required int winnerTeamId}) async {
     try {
-      await _service.setMatchWinner(matchId: matchId, winnerTeamId: winnerTeamId);
-      matchesByRound[roundId] = await _service.fetchRawMatchesForRound(roundId);
-      notifyListeners();
+      await _service.adminSetMatchWinner(matchId: matchId, winnerTeamId: winnerTeamId);
+      bracket = await _service.fetchBracket(selectedSeason!.id);
     } catch (e) {
       actionError = 'Could not resolve match: $e';
-      notifyListeners();
     }
+    notifyListeners();
   }
 
+  // ---------------- Prizes & payouts ----------------
+
   Future<bool> finalizePrize({
-    required String winnerTeamId,
-    required num tutorPct,
-    required num playerPct,
+    required int winnerTeamId,
+    required int prizePoolCent,
     required num platformPct,
+    required num tutorPct,
+    required num studentPct,
   }) async {
     actionError = null;
     try {
-      await _service.finalizePrize(
+      final id = await _service.adminFinalizePrize(
         seasonId: selectedSeason!.id,
         winnerTeamId: winnerTeamId,
-        tutorPct: tutorPct,
-        playerPct: playerPct,
+        prizePoolCent: prizePoolCent,
         platformPct: platformPct,
+        tutorPct: tutorPct,
+        studentPct: studentPct,
       );
+      await _service.adminCreatePayoutsForPrize(id);
+      prizes = await _service.fetchPrizesForSeason(selectedSeason!.id);
       payouts = await _service.fetchPayoutsForSeason(selectedSeason!.id);
       notifyListeners();
       return true;
@@ -298,13 +339,25 @@ class AdminChampionshipProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> processPayout(String payoutId) async {
+  Future<void> processPayout(int payoutId) async {
     try {
-      await _service.processPayout(payoutId);
+      await _service.adminProcessPayout(payoutId);
       payouts = await _service.fetchPayoutsForSeason(selectedSeason!.id);
     } catch (e) {
       actionError = 'Could not process payout: $e';
     }
     notifyListeners();
   }
+
+  Future<void> setPayoutStatus(int payoutId, String status) async {
+    try {
+      await _service.adminSetPayoutStatus(payoutId, status);
+      payouts = await _service.fetchPayoutsForSeason(selectedSeason!.id);
+    } catch (e) {
+      actionError = 'Could not update payout: $e';
+    }
+    notifyListeners();
+  }
+
+  Future<void> refresh() => load();
 }

@@ -1,133 +1,146 @@
 // lib/championship_models.dart
 //
-// Plain data models for the NaijaLearn Academic Championship, mirroring
-// the championship_* tables. Follows the same fromMap/toJson pattern as
-// ZetraProfile in main.dart.
+// REPLACES the earlier version entirely — matches the clean-rebuild SQL
+// (bigint IDs throughout championship_*, Cent not kobo, no classroom
+// link on teams). Not additive with the old models; this is the schema now.
 
 class ChampionshipSeason {
-  final String id;
+  final int id;
   final String name;
   final String? description;
-  final String status; // draft | registration_open | registration_closed | in_progress | completed | cancelled
-  final DateTime registrationStart;
-  final DateTime registrationEnd;
+  final String status;
+  final DateTime? registrationStart;
+  final DateTime? registrationEnd;
   final DateTime? startAt;
   final DateTime? endAt;
-  final int teamLimit;
+  final int? teamLimit;
   final int rosterLimit;
   final int playersPerRound;
-  final num entryFeeCent;
+  final int entryFeeCent;
 
   ChampionshipSeason({
     required this.id,
     required this.name,
     this.description,
     required this.status,
-    required this.registrationStart,
-    required this.registrationEnd,
+    this.registrationStart,
+    this.registrationEnd,
     this.startAt,
     this.endAt,
-    required this.teamLimit,
+    this.teamLimit,
     required this.rosterLimit,
     required this.playersPerRound,
     required this.entryFeeCent,
   });
 
   factory ChampionshipSeason.fromMap(Map<String, dynamic> map) => ChampionshipSeason(
-        id: map['id'] as String,
+        id: map['id'] as int,
         name: map['name'] as String,
         description: map['description'] as String?,
         status: map['status'] as String,
-        registrationStart: DateTime.parse(map['registration_start'] as String),
-        registrationEnd: DateTime.parse(map['registration_end'] as String),
+        registrationStart: map['registration_start'] == null ? null : DateTime.parse(map['registration_start'] as String),
+        registrationEnd: map['registration_end'] == null ? null : DateTime.parse(map['registration_end'] as String),
         startAt: map['start_at'] == null ? null : DateTime.parse(map['start_at'] as String),
         endAt: map['end_at'] == null ? null : DateTime.parse(map['end_at'] as String),
-        teamLimit: map['team_limit'] as int,
+        teamLimit: map['team_limit'] as int?,
         rosterLimit: map['roster_limit'] as int,
         playersPerRound: map['players_per_round'] as int,
-        entryFeeCent: map['entry_fee_cent'] as num,
+        entryFeeCent: map['entry_fee_cent'] as int,
       );
 }
 
 class ChampionshipTeam {
-  final String id;
-  final String seasonId;
-  final String tutorId;
-  final int classroomId;
+  final int id;
+  final int seasonId;
+  final int tutorId; // tutor_profiles.id, NOT the tutor's auth uid
+  final int? classroomId;
   final String name;
   final String? logoUrl;
   final String? description;
   final String? category;
-  final String status; // pending | approved | rejected | disqualified | withdrawn
+  final String status; // pending | approved | rejected | disqualified
+  final bool rosterLocked;
   final String? disqualifiedReason;
 
   ChampionshipTeam({
     required this.id,
     required this.seasonId,
     required this.tutorId,
-    required this.classroomId,
+    this.classroomId,
     required this.name,
     this.logoUrl,
     this.description,
     this.category,
     required this.status,
+    required this.rosterLocked,
     this.disqualifiedReason,
   });
 
   factory ChampionshipTeam.fromMap(Map<String, dynamic> map) => ChampionshipTeam(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        tutorId: map['tutor_id'] as String,
-        classroomId: map['classroom_id'] as int,
+        id: map['id'] as int,
+        seasonId: map['season_id'] as int,
+        tutorId: map['tutor_id'] as int,
+        classroomId: map['classroom_id'] as int?,
         name: map['name'] as String,
         logoUrl: map['logo_url'] as String?,
         description: map['description'] as String?,
         category: map['category'] as String?,
         status: map['status'] as String,
+        rosterLocked: map['roster_locked'] as bool? ?? false,
         disqualifiedReason: map['disqualified_reason'] as String?,
       );
 }
 
 class ChampionshipPlayer {
-  final String id;
-  final String seasonId;
-  final String teamId;
-  final String studentId;
-  final String status; // active | removed | disqualified
-  // Populated via a joined `profiles` select in the service layer, not a raw column.
-  final String? studentName;
-  final String? studentAvatarUrl;
+  final String studentId; // uuid
+  final String username;
+  final String status; // active | removed
 
-  ChampionshipPlayer({
-    required this.id,
-    required this.seasonId,
-    required this.teamId,
-    required this.studentId,
-    required this.status,
-    this.studentName,
-    this.studentAvatarUrl,
-  });
+  ChampionshipPlayer({required this.studentId, required this.username, required this.status});
 
   factory ChampionshipPlayer.fromMap(Map<String, dynamic> map) => ChampionshipPlayer(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        teamId: map['team_id'] as String,
         studentId: map['student_id'] as String,
+        username: map['username'] as String,
         status: map['status'] as String,
-        studentName: map['profiles']?['username'] as String?,
-        studentAvatarUrl: map['profiles']?['avatar_url'] as String?,
+      );
+}
+
+class ChampionshipQuestionSet {
+  final int id;
+  final int seasonId;
+  final String name;
+  final String subject;
+  final int durationSeconds;
+  final int questionCount;
+
+  ChampionshipQuestionSet({
+    required this.id,
+    required this.seasonId,
+    required this.name,
+    required this.subject,
+    required this.durationSeconds,
+    required this.questionCount,
+  });
+
+  factory ChampionshipQuestionSet.fromMap(Map<String, dynamic> map) => ChampionshipQuestionSet(
+        id: map['id'] as int,
+        seasonId: map['season_id'] as int,
+        name: map['name'] as String,
+        subject: map['subject'] as String,
+        durationSeconds: map['duration_seconds'] as int,
+        questionCount: map['question_count'] as int,
       );
 }
 
 class ChampionshipRound {
-  final String id;
-  final String seasonId;
+  final int id;
+  final int seasonId;
   final int roundNumber;
   final String name;
-  final String status; // scheduled | open | closed | cancelled
+  final String status; // scheduled | open | closed (informational — actual gating is time-based, see opensAt/closesAt)
   final DateTime opensAt;
   final DateTime closesAt;
-  final String? questionSetId;
+  final int? questionSetId;
 
   ChampionshipRound({
     required this.id,
@@ -141,105 +154,87 @@ class ChampionshipRound {
   });
 
   factory ChampionshipRound.fromMap(Map<String, dynamic> map) => ChampionshipRound(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
+        id: map['id'] as int,
+        seasonId: map['season_id'] as int,
         roundNumber: map['round_number'] as int,
         name: map['name'] as String,
         status: map['status'] as String,
         opensAt: DateTime.parse(map['opens_at'] as String),
         closesAt: DateTime.parse(map['closes_at'] as String),
-        questionSetId: map['question_set_id'] as String?,
+        questionSetId: map['question_set_id'] as int?,
       );
+
+  bool get isWithinWindow {
+    final now = DateTime.now().toUtc();
+    return now.isAfter(opensAt.toUtc()) && now.isBefore(closesAt.toUtc());
+  }
+
+  bool get hasOpened => DateTime.now().toUtc().isAfter(opensAt.toUtc());
 }
 
-class ChampionshipMatch {
-  final String id;
-  final String seasonId;
-  final String roundId;
-  final String teamAId;
-  final String teamBId;
-  final num? teamAScore; // null while round is still open (hidden by the public view)
+/// One row of get_championship_bracket() — the single source of truth
+/// for round+match+team-name+score data across student/tutor/admin/bracket
+/// views, since this schema has no separate score-hiding view; the RPC
+/// itself nulls team_a_score/team_b_score unless match_status = 'completed'.
+class ChampionshipBracketRow {
+  final int roundId;
+  final int roundNumber;
+  final String roundName;
+  final String roundStatus;
+  final int matchId;
+  final int teamAId;
+  final String teamAName;
+  final int teamBId;
+  final String teamBName;
+  final num? teamAScore;
   final num? teamBScore;
-  final String? winnerTeamId;
-  final String status; // scheduled | in_progress | completed | disputed | cancelled
+  final int? winnerTeamId;
+  final String matchStatus; // scheduled | active | completed | disputed
 
-  ChampionshipMatch({
-    required this.id,
-    required this.seasonId,
+  ChampionshipBracketRow({
     required this.roundId,
+    required this.roundNumber,
+    required this.roundName,
+    required this.roundStatus,
+    required this.matchId,
     required this.teamAId,
+    required this.teamAName,
     required this.teamBId,
+    required this.teamBName,
     this.teamAScore,
     this.teamBScore,
     this.winnerTeamId,
-    required this.status,
+    required this.matchStatus,
   });
 
-  factory ChampionshipMatch.fromMap(Map<String, dynamic> map) => ChampionshipMatch(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        roundId: map['round_id'] as String,
-        teamAId: map['team_a_id'] as String,
-        teamBId: map['team_b_id'] as String,
+  factory ChampionshipBracketRow.fromMap(Map<String, dynamic> map) => ChampionshipBracketRow(
+        roundId: map['round_id'] as int,
+        roundNumber: map['round_number'] as int,
+        roundName: map['round_name'] as String,
+        roundStatus: map['round_status'] as String,
+        matchId: map['match_id'] as int,
+        teamAId: map['team_a_id'] as int,
+        teamAName: map['team_a_name'] as String,
+        teamBId: map['team_b_id'] as int,
+        teamBName: map['team_b_name'] as String,
         teamAScore: map['team_a_score'] as num?,
         teamBScore: map['team_b_score'] as num?,
-        winnerTeamId: map['winner_team_id'] as String?,
-        status: map['status'] as String,
+        winnerTeamId: map['winner_team_id'] as int?,
+        matchStatus: map['match_status'] as String,
       );
 
+  bool involvesTeam(int teamId) => teamAId == teamId || teamBId == teamId;
   bool get scoresVisible => teamAScore != null && teamBScore != null;
 }
 
-class ChampionshipAttempt {
-  final String id;
-  final String matchId;
-  final String teamId;
-  final String studentId;
-  final String questionSetId;
-  final DateTime? startedAt;
-  final DateTime? submittedAt;
-  final num score;
-  final int correctCount;
-  final String status; // not_started | in_progress | submitted | forfeited | flagged
-  final DateTime? serverDeadline;
-
-  ChampionshipAttempt({
-    required this.id,
-    required this.matchId,
-    required this.teamId,
-    required this.studentId,
-    required this.questionSetId,
-    this.startedAt,
-    this.submittedAt,
-    required this.score,
-    required this.correctCount,
-    required this.status,
-    this.serverDeadline,
-  });
-
-  factory ChampionshipAttempt.fromMap(Map<String, dynamic> map) => ChampionshipAttempt(
-        id: map['id'] as String,
-        matchId: map['match_id'] as String,
-        teamId: map['team_id'] as String,
-        studentId: map['student_id'] as String,
-        questionSetId: map['question_set_id'] as String,
-        startedAt: map['started_at'] == null ? null : DateTime.parse(map['started_at'] as String),
-        submittedAt: map['submitted_at'] == null ? null : DateTime.parse(map['submitted_at'] as String),
-        score: map['score'] as num,
-        correctCount: map['correct_count'] as int,
-        status: map['status'] as String,
-        serverDeadline: map['server_deadline'] == null ? null : DateTime.parse(map['server_deadline'] as String),
-      );
-}
-
 class ChampionshipPrize {
-  final String id;
-  final String seasonId;
-  final String winnerTeamId;
-  final num prizePoolCent;
-  final num platformAmountCent;
-  final num tutorAmountCent;
-  final num studentAmountCent;
+  final int id;
+  final int seasonId;
+  final int winnerTeamId;
+  final int prizePoolCent;
+  final int platformAmountCent;
+  final int tutorAmountCent;
+  final int studentAmountCent;
   final String status;
 
   ChampionshipPrize({
@@ -254,30 +249,30 @@ class ChampionshipPrize {
   });
 
   factory ChampionshipPrize.fromMap(Map<String, dynamic> map) => ChampionshipPrize(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        winnerTeamId: map['winner_team_id'] as String,
-        prizePoolCent: map['prize_pool_cent'] as num,
-        platformAmountCent: map['platform_amount_cent'] as num,
-        tutorAmountCent: map['tutor_amount_cent'] as num,
-        studentAmountCent: map['student_amount_cent'] as num,
+        id: map['id'] as int,
+        seasonId: map['season_id'] as int,
+        winnerTeamId: map['winner_team_id'] as int,
+        prizePoolCent: map['prize_pool_cent'] as int,
+        platformAmountCent: map['platform_amount_cent'] as int,
+        tutorAmountCent: map['tutor_amount_cent'] as int,
+        studentAmountCent: map['student_amount_cent'] as int,
         status: map['status'] as String,
       );
 }
 
 class ChampionshipPayout {
-  final String id;
-  final String seasonId;
-  final String recipientId;
+  final int id;
+  final int seasonId;
+  final String recipientUserId; // uuid
   final String recipientType; // tutor | student | platform
-  final num amountCent;
-  final String status; // pending | approved | processing | paid | failed | cancelled
-  final String? recipientName; // populated via joined profiles select
+  final int amountCent;
+  final String status;
+  final String? recipientName; // populated via a separate profiles lookup if needed
 
   ChampionshipPayout({
     required this.id,
     required this.seasonId,
-    required this.recipientId,
+    required this.recipientUserId,
     required this.recipientType,
     required this.amountCent,
     required this.status,
@@ -285,58 +280,51 @@ class ChampionshipPayout {
   });
 
   factory ChampionshipPayout.fromMap(Map<String, dynamic> map) => ChampionshipPayout(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        recipientId: map['recipient_id'] as String,
+        id: map['id'] as int,
+        seasonId: map['season_id'] as int,
+        recipientUserId: map['recipient_user_id'] as String,
         recipientType: map['recipient_type'] as String,
-        amountCent: map['amount_cent'] as num,
+        amountCent: map['amount_cent'] as int,
         status: map['status'] as String,
         recipientName: map['profiles']?['username'] as String?,
       );
 }
 
-class ChampionshipQuestionSet {
-  final String id;
-  final String seasonId;
-  final String name;
-  final String subject;
+/// Client-side representation of an attempt in progress. student_start_attempt
+/// only returns started_at/duration_seconds/server_deadline (not a full row),
+/// so this is built from that response, not fetched from the table directly
+/// (RLS on championship_attempts only allows a student to see their own row
+/// anyway, which this matches).
+class ChampionshipAttemptState {
+  final DateTime startedAt;
   final int durationSeconds;
-  final int questionCount;
-  final String? difficulty;
+  final DateTime serverDeadline;
 
-  ChampionshipQuestionSet({
-    required this.id,
-    required this.seasonId,
-    required this.name,
-    required this.subject,
+  ChampionshipAttemptState({
+    required this.startedAt,
     required this.durationSeconds,
-    required this.questionCount,
-    this.difficulty,
+    required this.serverDeadline,
   });
 
-  factory ChampionshipQuestionSet.fromMap(Map<String, dynamic> map) => ChampionshipQuestionSet(
-        id: map['id'] as String,
-        seasonId: map['season_id'] as String,
-        name: map['name'] as String,
-        subject: map['subject'] as String,
+  factory ChampionshipAttemptState.fromMap(Map<String, dynamic> map) => ChampionshipAttemptState(
+        startedAt: DateTime.parse(map['started_at'] as String),
         durationSeconds: map['duration_seconds'] as int,
-        questionCount: map['question_count'] as int,
-        difficulty: map['difficulty'] as String?,
+        serverDeadline: DateTime.parse(map['server_deadline'] as String),
       );
 }
 
-/// A single tournament question, shaped for the quiz UI. Only ever
-/// fetched via ChampionshipService.fetchAttemptQuestions(), which goes
-/// through the server-side path — never a direct `questions` table
-/// select, since RLS deliberately blocks that for championship items.
+/// A single tournament question as delivered by student_get_match_questions
+/// — never includes correct_index.
 class ChampionshipQuizQuestion {
-  final String id;
+  final String id; // questions.id is text
+  final String subject;
   final String questionText;
   final List<String> options;
   final int order;
 
   ChampionshipQuizQuestion({
     required this.id,
+    required this.subject,
     required this.questionText,
     required this.options,
     required this.order,
@@ -344,6 +332,7 @@ class ChampionshipQuizQuestion {
 
   factory ChampionshipQuizQuestion.fromMap(Map<String, dynamic> map) => ChampionshipQuizQuestion(
         id: map['id'] as String,
+        subject: map['subject'] as String,
         questionText: map['question_text'] as String,
         options: List<String>.from(map['options'] as List),
         order: map['question_order'] as int,
