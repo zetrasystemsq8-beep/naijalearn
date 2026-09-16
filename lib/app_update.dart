@@ -203,13 +203,17 @@ class ForceUpdateScreen extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
-                // Explanation for users who don't have Zetra Store yet —
-                // stops them from feeling lost or confused by the button.
+                // Warning for users about Android's Play Protect block screen —
+                // since this APK isn't from the Play Store, Android shows a
+                // scary-looking "blocked" warning, and the real "Install
+                // anyway" option is buried behind an extra tap most people
+                // miss, then give up thinking the app is broken.
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
+                    color: Colors.amber.withOpacity(0.12),
+                    border: Border.all(color: Colors.amber.withOpacity(0.4)),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
@@ -217,17 +221,18 @@ class ForceUpdateScreen extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.info_outline_rounded, size: 18, color: scheme.primary),
+                          Icon(Icons.shield_outlined, size: 18, color: Colors.amber.shade800),
                           const SizedBox(width: 8),
-                          const Text('New here?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('Before you tap Download',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.amber.shade900)),
                         ],
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        'All Zetra apps — including NaijaLearn — are now downloaded and updated through Zetra Store. '
-                        'If you don\'t have Zetra Store installed yet, tap the button below to get it first. '
-                        'Once it\'s installed, open it and download NaijaLearn from there.',
-                        style: TextStyle(fontSize: 12.5, height: 1.4),
+                      Text(
+                        'Android may show a "blocked" or "unsafe app" warning because this update isn\'t from the Play Store — that\'s expected. '
+                        'When you see it, tap "More details" (or the "..." menu), then "Install anyway". '
+                        'This is safe — NaijaLearn is only ever distributed here.',
+                        style: TextStyle(fontSize: 12.5, height: 1.4, color: Colors.amber.shade900),
                       ),
                     ],
                   ),
