@@ -534,7 +534,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         TextButton(
                           onPressed: _loading ? null : _openZetraIdWebsite,
-                          child: Text("Don't want to download an app? Create your Zetra ID on the web", textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12.5)),
+                          child: Text("Don't want to download ZetraMail? Create your Zetra ID on the web", textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5)),
                         ),
                       ],
                     ),
@@ -1504,45 +1504,54 @@ class _ProfileTab extends StatelessWidget {
               _MenuSectionItem(icon: Icons.account_balance_wallet_rounded, iconColor: Colors.green, label: 'My Wallet', subtitle: 'View your NaijaLearn balance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WalletDisplayScreen()))),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 8),
-            child: Text('SETTINGS', style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold, color: scheme.onSurfaceVariant, letterSpacing: 0.3)),
-          ),
-          Container(
-            margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
-            child: SwitchListTile(secondary: Icon(provider.darkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded), title: const Text('Dark Mode'), value: provider.darkMode, onChanged: (_) => provider.toggleDarkMode()),
-          ),
           _MenuSection(
             title: 'SUPPORT',
             items: [
               _MenuSectionItem(icon: Icons.support_agent_rounded, iconColor: Colors.blue, label: 'Contact Support', subtitle: 'Reach the team — WhatsApp, phone, or email', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContactSupportScreen()))),
             ],
           ),
-          _MenuSection(
-            title: 'DEVELOPER',
-            items: [
-              _MenuSectionItem(
-                icon: Icons.cloud_upload_rounded,
-                iconColor: Colors.grey,
-                label: 'Migrate Questions',
-                subtitle: 'Run once: pushes all questions to Supabase',
-                onTap: () async {
-                  try {
-                    final client = Supabase.instance.client;
-                    final all = QuestionRepository.getAll();
-                    const batchSize = 200;
-                    for (var i = 0; i < all.length; i += batchSize) {
-                      final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
-                      await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
-                    }
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
-                  } catch (e) {
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
-                  }
-                },
-              ),
-            ],
+          FutureBuilder<Map<String, dynamic>?>(
+            future: () async {
+              try {
+                final client = Supabase.instance.client;
+                final userId = client.auth.currentUser?.id;
+                if (userId == null) return null;
+                final row = await client.from('profiles').select('is_admin').eq('id', userId).maybeSingle();
+                return row as Map<String, dynamic>?;
+              } catch (_) {
+                return null;
+              }
+            }(),
+            builder: (context, snap) {
+              final loaded = snap.connectionState == ConnectionState.done;
+              final isAdmin = loaded && snap.data != null && snap.data!['is_admin'] == true;
+              if (!loaded || !isAdmin) return const SizedBox.shrink();
+              return _MenuSection(
+                title: 'DEVELOPER',
+                items: [
+                  _MenuSectionItem(
+                    icon: Icons.cloud_upload_rounded,
+                    iconColor: Colors.grey,
+                    label: 'Migrate Questions',
+                    subtitle: 'Run once: pushes all questions to Supabase',
+                    onTap: () async {
+                      try {
+                        final client = Supabase.instance.client;
+                        final all = QuestionRepository.getAll();
+                        const batchSize = 200;
+                        for (var i = 0; i < all.length; i += batchSize) {
+                          final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
+                          await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
+                        }
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
+                      } catch (e) {
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
+                      }
+                    },
+                  ),
+                ],
+              );
+            },
           ),
           Material(
             color: scheme.errorContainer.withOpacity(0.5),
