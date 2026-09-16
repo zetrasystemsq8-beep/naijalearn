@@ -1,6 +1,6 @@
 // lib/challenge_feature.dart
 //
-// ⚡ v3 — SOCIAL FRIEND-TO-FRIEND, NOT ANOTHER COMPETITION SYSTEM.
+// ⚡ v4 — SOCIAL FRIEND-TO-FRIEND, NOT ANOTHER COMPETITION SYSTEM.
 //
 // NaijaLearn already has Bot Battle, Connect Baba, World Challenge, and
 // Tutor Competition covering AI, head-to-head, large recurring, and
@@ -10,12 +10,22 @@
 // mode here (that's a deliberate future add, kept separate — see notes
 // at the bottom).
 //
-// Backed by challenges_migration_v2.sql + challenges_migration_v3_patch.sql
-// (adds anti-cheat validation on submit + overtake-alert tracking).
+// Backed by challenges_migration_v2.sql + v3_patch.sql + v4_patch.sql
+// (v3 adds anti-cheat validation + overtake-alert tracking; v4 adds a
+// one-challenge-per-7-days CREATION limit — joining/answering others'
+// challenges is completely unlimited).
+//
+// WHAT'S NEW IN v4:
+//   - Weekly creation limit: one new challenge per user per rolling 7
+//     days, checked BEFORE the subject/count flow so the person sees a
+//     friendly countdown screen instead of an error after answering
+//     questions. Joining/answering stays unlimited on purpose.
 //
 // WHAT'S NEW IN v3:
 //   - Share text leads with the score: "CAN YOU BEAT ME? I scored 8/10"
 //   - Rematch: one tap recreates the same subject/count, no reconfiguring
+//     (NOTE: Rematch also counts as a "create" under the v4 limit — see
+//     wiring notes at the bottom)
 //   - Leaderboard shows a compact "Your Stats" strip (best score, accuracy,
 //     attempts, rank, points behind #1) instead of turning into an
 //     analytics page
@@ -208,6 +218,26 @@ class ChallengeService {
   Future<void> acknowledgeOvertakeAlert(String challengeId) async {
     await _client.rpc('acknowledge_overtake_alert', params: {'p_challenge_id': challengeId});
   }
+
+  /// Whether the current user can create a new challenge right now (limit:
+  /// one per rolling 7 days — joining/answering others' challenges is
+  /// unaffected). Check this BEFORE sending someone through the whole
+  /// subject/count/answer flow.
+  Future<ChallengeCreationStatus> getChallengeCreationStatus() async {
+    final result = await _client.rpc('get_challenge_creation_status');
+    return ChallengeCreationStatus.fromMap(Map<String, dynamic>.from(result as Map));
+  }
+}
+
+class ChallengeCreationStatus {
+  final bool canCreate;
+  final DateTime? nextAvailableAt;
+  ChallengeCreationStatus({required this.canCreate, required this.nextAvailableAt});
+
+  factory ChallengeCreationStatus.fromMap(Map<String, dynamic> map) => ChallengeCreationStatus(
+        canCreate: map['can_create'] as bool? ?? true,
+        nextAvailableAt: map['next_available_at'] != null ? DateTime.tryParse(map['next_available_at'] as String) : null,
+      );
 }
 
 /// =========================================================================
@@ -288,6 +318,8 @@ class ChallengeDeepLinkListener {
 /// SHARED HELPER — start a brand-new challenge for a subject/count and
 /// route the caller through answering it. Used by both "Create" and
 /// "Rematch" so there's exactly one code path for "make a new challenge".
+/// NOTE: since this calls create_challenge, it is subject to the v4
+/// weekly creation limit — including when called from Rematch.
 /// =========================================================================
 
 Future<void> _startNewChallengeFlow(BuildContext context, {required SubjectInfo subject, required int questionCount}) async {
@@ -588,7 +620,9 @@ class _SubjectPillButton extends StatelessWidget {
 /// =========================================================================
 /// CREATE A CHALLENGE — deliberately just two questions asked: subject,
 /// count. No difficulty step (no difficulty data exists yet — see file
-/// header), no other configuration.
+/// header), no other configuration. Checks the weekly creation limit
+/// BEFORE showing the picker, so a blocked user sees a countdown, not a
+/// wasted answer session.
 /// =========================================================================
 
 class CreateChallengeScreen extends StatefulWidget {
@@ -603,7 +637,34 @@ class _CreateChallengeScreenState extends State<CreateChallengeScreen> {
   int _questionCount = 5;
   bool _creating = false;
 
+  bool _statusLoading = true;
+  ChallengeCreationStatus? _status;
+
   static const List<int> _counts = [5, 10, 15];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatus();
+  }
+
+  Future<void> _loadStatus() async {
+    try {
+      final status = await ChallengeService.instance.getChallengeCreationStatus();
+      if (mounted) setState(() {
+        _status = status;
+        _statusLoading = false;
+      });
+    } catch (e) {
+      // Fail open on the check itself — if the status call breaks, don't
+      // block a legitimate creation just because we couldn't ask first.
+      // The server-side limit in create_challenge is still the real gate.
+      if (mounted) setState(() {
+        _status = ChallengeCreationStatus(canCreate: true, nextAvailableAt: null);
+        _statusLoading = false;
+      });
+    }
+  }
 
   Future<void> _create() async {
     final subject = _selectedSubject;
@@ -613,8 +674,77 @@ class _CreateChallengeScreenState extends State<CreateChallengeScreen> {
     if (mounted) setState(() => _creating = false);
   }
 
+  String _formatCountdown(DateTime nextAvailableAt) {
+    final remaining = nextAvailableAt.difference(DateTime.now());
+    if (remaining.isNegative) return 'now';
+    final days = remaining.inDays;
+    final hours = remaining.inHours % 24;
+    if (days > 0) return '$days day${days == 1 ? '' : 's'}, $hours hr${hours == 1 ? '' : 's'}';
+    final minutes = remaining.inMinutes % 60;
+    return '$hours hr${hours == 1 ? '' : 's'}, $minutes min';
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_statusLoading) {
+      return Scaffold(
+        backgroundColor: _ChallengeTheme.bg,
+        appBar: _ChallengeTheme.appBar('Challenge a Friend'),
+        body: const Center(child: CircularProgressIndicator(color: _ChallengeTheme.cyan)),
+      );
+    }
+
+    if (_status != null && !_status!.canCreate) {
+      final nextAt = _status!.nextAvailableAt;
+      return Scaffold(
+        backgroundColor: _ChallengeTheme.bg,
+        appBar: _ChallengeTheme.appBar('Challenge a Friend'),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: _ChallengeTheme.glassCard(),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.hourglass_top_rounded, color: _ChallengeTheme.cyan, size: 40),
+                      const SizedBox(height: 16),
+                      const Text('One challenge a week', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+                      const SizedBox(height: 10),
+                      Text(
+                        "You've already created a challenge this week. You can make a new one in ${nextAt != null ? _formatCountdown(nextAt) : 'a few days'}.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13.5, height: 1.4),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Good news: you can still join and answer as many friends\' challenges as you like in the meantime.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12, height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Back', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: _ChallengeTheme.bg,
       appBar: _ChallengeTheme.appBar('Challenge a Friend'),
@@ -1506,7 +1636,7 @@ class _StatusPill extends StatelessWidget {
 }
 
 /// =========================================================================
-/// WIRING NOTES (unchanged from earlier setup):
+/// WIRING NOTES:
 /// =========================================================================
 ///
 /// 1. pubspec.yaml: app_links: ^6.3.2
@@ -1515,10 +1645,8 @@ class _StatusPill extends StatelessWidget {
 ///    import 'challenge_feature.dart' — already in place.
 /// 4. Community tab entry point already points at ChallengesHubScreen —
 ///    no change needed there.
-/// 5. NEW SQL: run challenges_migration_v3_patch.sql after v2. It adds
-///    anti-cheat validation to submit_challenge_attempt and the
-///    was_notified_of_overtake tracking that powers the hub's alert
-///    banner.
+/// 5. SQL: run v2, then v3_patch, then v4_patch in that order.
+///    v4_patch adds the weekly creation limit + get_challenge_creation_status.
 ///
 /// DELIBERATELY DEFERRED (see file header for why):
 ///   - Difficulty selector in create flow
@@ -1526,3 +1654,11 @@ class _StatusPill extends StatelessWidget {
 ///     hub open)
 ///   - Cent Challenge (paid mode) — build as a SEPARATE screen/flow when
 ///     ready, don't fold it into this one
+///
+/// STILL OUTSTANDING — needs your input, not code I can write blind:
+///   - Zetra Store → direct download redirect for people without the app.
+///     That logic lives on the landing page (kChallengeLandingPageBaseUrl
+///     above) or possibly in the app's kZetraIdRegisterUrl flow in
+///     main.dart — I haven't seen either file's actual code, so I can't
+///     edit the redirect yet. Paste the landing page source, or just give
+///     me the direct download URL you want people sent to instead.
