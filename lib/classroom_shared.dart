@@ -13,6 +13,8 @@
 // real source — every screen that calls it will pick up the change
 // automatically.
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 /// Exam/category tag for a classroom — fixed set per the final decisions
 /// doc. Deliberately NOT the same list as subjects.
 const List<String> kExamCategories = ['JAMB', 'WAEC', 'NECO', 'General/Other'];
@@ -67,4 +69,22 @@ bool isNewClassroom(DateTime createdAt) => DateTime.now().difference(createdAt).
 bool isPopularClassroom(int studentCount, int capacity) {
   if (studentCount < 5) return false; // avoid calling a 1-student class "popular"
   return capacity > 0 && (studentCount / capacity) >= 0.5;
+}
+
+// ---------------------------------------------------------------------------
+// Display names — never show a raw UUID to a tutor or in chat. profiles
+// has a `username` column (see ZetraProfile in main.dart); this batches
+// the lookup so a screen with N students makes 1 query, not N.
+// ---------------------------------------------------------------------------
+Future<Map<String, String>> loadUsernames(List<String> userIds) async {
+  if (userIds.isEmpty) return {};
+  try {
+    final rows = await Supabase.instance.client
+        .from('profiles')
+        .select('id, username')
+        .inFilter('id', userIds.toSet().toList());
+    return {for (final r in (rows as List)) r['id'] as String: (r['username'] as String?)?.trim().isNotEmpty == true ? r['username'] as String : 'Student'};
+  } catch (_) {
+    return {for (final id in userIds) id: 'Student'};
+  }
 }

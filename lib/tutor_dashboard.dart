@@ -11,7 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'classroom_chat_widget.dart';
-import 'classroom_shared.dart' show formatCpCent;
+import 'classroom_shared.dart' show formatCpCent, loadUsernames;
 
 class TutorDashboardScreen extends StatefulWidget {
   final int classroomId;
@@ -97,11 +97,74 @@ class _OverviewTabState extends State<_OverviewTab> {
   int _pendingCent = 0;
   int _availableCent = 0;
   int _paidCent = 0;
+  Map<String, dynamic>? _latestAppeal;
+  bool _submittingAppeal = false;
 
   @override
   void initState() {
     super.initState();
     _loadRevenue();
+    _loadAppealStatus();
+  }
+
+  Future<void> _loadAppealStatus() async {
+    if (widget.classroom['status'] != 'suspended') return;
+    try {
+      final row = await _client
+          .from('classroom_suspension_appeals')
+          .select()
+          .eq('classroom_id', widget.classroom['id'])
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (mounted) setState(() => _latestAppeal = row);
+    } catch (_) {
+      // Non-fatal.
+    }
+  }
+
+  Future<void> _submitAppeal() async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Appeal Suspension'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Explain why this classroom should be reactivated. An admin will review your appeal.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              decoration: const InputDecoration(hintText: 'Your explanation...', border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Submit Appeal')),
+        ],
+      ),
+    );
+    if (reason == null || reason.isEmpty) return;
+
+    setState(() => _submittingAppeal = true);
+    try {
+      await _client.rpc('tutor_submit_appeal', params: {
+        'p_classroom_id': widget.classroom['id'],
+        'p_reason': reason,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appeal submitted.'), backgroundColor: Colors.green));
+        await _loadAppealStatus();
+      }
+    } on PostgrestException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _submittingAppeal = false);
+    }
   }
 
   Future<void> _loadRevenue() async {
@@ -157,6 +220,10 @@ class _OverviewTabState extends State<_OverviewTab> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (c['status'] == 'suspended') ...[
+            _buildSuspensionBanner(context),
+            const SizedBox(height: 16),
+          ],
           Row(
             children: [
               Expanded(child: _StatCard(label: 'Students', value: '${c['student_count']}/${c['capacity']}')),
@@ -183,6 +250,74 @@ class _OverviewTabState extends State<_OverviewTab> {
                   _RevenueRow('Paid out', _paidCent),
                 ],
               ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuspensionBanner(BuildContext context) {
+    final appealStatus = _latestAppeal?['status'] as String?;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        border: Border.all(color: Colors.red.withOpacity(0.35), width: 1.4),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.block_rounded, color: Colors.red),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Classroom Suspended', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red))),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Students cannot join while this classroom is suspended. Existing students keep whatever access your moderation policy allows.',
+            style: TextStyle(fontSize: 12.5),
+          ),
+          const SizedBox(height: 12),
+          if (appealStatus == 'pending')
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: Colors.amber.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+              child: const Row(
+                children: [
+                  Icon(Icons.hourglass_top_rounded, size: 16, color: Colors.amber),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Your appeal is under review.', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600))),
+                ],
+              ),
+            )
+          else if (appealStatus == 'rejected')
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+                  child: Text(
+                    'Your last appeal was not approved.'
+                    '${(_latestAppeal?['admin_response'] as String?)?.isNotEmpty == true ? ' Admin note: ${_latestAppeal!['admin_response']}' : ''}',
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(onPressed: _submittingAppeal ? null : _submitAppeal, child: const Text('Submit a new appeal')),
+              ],
+            )
+          else
+            FilledButton.icon(
+              onPressed: _submittingAppeal ? null : _submitAppeal,
+              icon: _submittingAppeal
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.gavel_rounded),
+              label: const Text('Appeal Suspension'),
             ),
         ],
       ),
@@ -252,6 +387,7 @@ class _StudentsTab extends StatefulWidget {
 class _StudentsTabState extends State<_StudentsTab> {
   final _client = Supabase.instance.client;
   List<Map<String, dynamic>> _students = [];
+  Map<String, String> _usernames = {};
   bool _loading = true;
 
   @override
@@ -269,7 +405,12 @@ class _StudentsTabState extends State<_StudentsTab> {
           .eq('classroom_id', widget.classroomId)
           .eq('status', 'active')
           .order('joined_at', ascending: false);
-      setState(() => _students = List<Map<String, dynamic>>.from(rows));
+      final students = List<Map<String, dynamic>>.from(rows);
+      final usernames = await loadUsernames(students.map((s) => s['student_id'] as String).toList());
+      setState(() {
+        _students = students;
+        _usernames = usernames;
+      });
     } catch (_) {
       // Non-fatal.
     } finally {
@@ -312,18 +453,20 @@ class _StudentsTabState extends State<_StudentsTab> {
         itemBuilder: (context, index) {
           final s = _students[index];
           final expiresAt = s['expires_at'] as String?;
+          final studentId = s['student_id'] as String;
+          final name = _usernames[studentId] ?? 'Student';
           return Card(
             margin: const EdgeInsets.only(bottom: 10),
             child: ListTile(
               leading: const CircleAvatar(child: Icon(Icons.person_outline_rounded)),
-              title: Text(s['student_id'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+              title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(
                 'Joined ${DateFormat('MMM d, yyyy').format(DateTime.parse(s['joined_at']))}'
                 '${expiresAt != null ? ' · Expires ${DateFormat('MMM d, yyyy').format(DateTime.parse(expiresAt))}' : ''}',
               ),
               trailing: IconButton(
                 icon: const Icon(Icons.person_remove_outlined, color: Colors.red),
-                onPressed: () => _remove(s['student_id'] as String),
+                onPressed: () => _remove(studentId),
               ),
             ),
           );
@@ -576,9 +719,11 @@ class _AssignmentsTabState extends State<_AssignmentsTab> {
 
   Future<void> _viewSubmissions(int assignmentId, String assignmentTitle) async {
     List<Map<String, dynamic>> submissions = [];
+    Map<String, String> usernames = {};
     try {
       final rows = await _client.from('classroom_assignment_submissions').select().eq('assignment_id', assignmentId);
       submissions = List<Map<String, dynamic>>.from(rows);
+      usernames = await loadUsernames(submissions.map((s) => s['student_id'] as String).toList());
     } catch (_) {
       // Show empty on failure.
     }
@@ -606,6 +751,7 @@ class _AssignmentsTabState extends State<_AssignmentsTab> {
                         itemBuilder: (context, index) {
                           final s = submissions[index];
                           final scoreController = TextEditingController(text: s['score']?.toString() ?? '');
+                          final studentName = usernames[s['student_id']] ?? 'Student';
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             child: Padding(
@@ -613,7 +759,7 @@ class _AssignmentsTabState extends State<_AssignmentsTab> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(s['student_id'] as String, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+                                  Text(studentName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   const SizedBox(height: 6),
                                   Text(s['content'] as String? ?? ''),
                                   const SizedBox(height: 8),

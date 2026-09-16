@@ -21,7 +21,7 @@ class _AdminClassroomModerationScreenState extends State<AdminClassroomModeratio
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -35,9 +35,9 @@ class _AdminClassroomModerationScreenState extends State<AdminClassroomModeratio
     return Scaffold(
       appBar: AppBar(
         title: const Text('Classroom moderation'),
-        bottom: TabBar(controller: _tabController, tabs: const [Tab(text: 'Classrooms'), Tab(text: 'Reports')]),
+        bottom: TabBar(controller: _tabController, tabs: const [Tab(text: 'Classrooms'), Tab(text: 'Reports'), Tab(text: 'Appeals')]),
       ),
-      body: TabBarView(controller: _tabController, children: const [_ClassroomsTab(), _ReportsTab()]),
+      body: TabBarView(controller: _tabController, children: const [_ClassroomsTab(), _ReportsTab(), _AppealsTab()]),
     );
   }
 }
@@ -277,6 +277,142 @@ class _ReportsTabState extends State<_ReportsTab> {
                       OutlinedButton(onPressed: () => _review(r['id'] as int, 'dismissed'), child: const Text('Dismiss')),
                       const SizedBox(width: 8),
                       FilledButton(onPressed: () => _review(r['id'] as int, 'reviewed'), child: const Text('Mark reviewed')),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AppealsTab extends StatefulWidget {
+  const _AppealsTab();
+
+  @override
+  State<_AppealsTab> createState() => _AppealsTabState();
+}
+
+class _AppealsTabState extends State<_AppealsTab> {
+  final _client = Supabase.instance.client;
+  List<Map<String, dynamic>> _appeals = [];
+  Map<int, Map<String, dynamic>> _classroomsById = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final rows = await _client
+          .from('classroom_suspension_appeals')
+          .select()
+          .eq('status', 'pending')
+          .order('created_at', ascending: true);
+      final appeals = List<Map<String, dynamic>>.from(rows);
+
+      if (appeals.isNotEmpty) {
+        final classroomIds = appeals.map((a) => a['classroom_id'] as int).toSet().toList();
+        final classrooms = await _client.from('classrooms').select('id, name').inFilter('id', classroomIds);
+        _classroomsById = {for (final c in (classrooms as List)) c['id'] as int: c};
+      }
+
+      setState(() => _appeals = appeals);
+    } catch (_) {
+      // Non-fatal.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _review(int appealId, String decision) async {
+    final responseController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(decision == 'approve' ? 'Approve appeal & reactivate classroom' : 'Reject appeal'),
+        content: TextField(
+          controller: responseController,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'Optional note to the tutor', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: decision == 'approve' ? Colors.green : Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(decision == 'approve' ? 'Approve' : 'Reject'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _client.rpc('admin_review_appeal', params: {
+        'p_appeal_id': appealId,
+        'p_decision': decision,
+        'p_admin_response': responseController.text.trim().isEmpty ? null : responseController.text.trim(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(decision == 'approve' ? 'Appeal approved — classroom reactivated.' : 'Appeal rejected.')),
+        );
+      }
+      _load();
+    } on PostgrestException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_appeals.isEmpty) return const Center(child: Text('No pending appeals'));
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _appeals.length,
+        itemBuilder: (context, index) {
+          final appeal = _appeals[index];
+          final classroom = _classroomsById[appeal['classroom_id']];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(classroom?['name'] as String? ?? 'Classroom #${appeal['classroom_id']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(appeal['reason'] as String),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: Colors.green),
+                          onPressed: () => _review(appeal['id'] as int, 'approve'),
+                          child: const Text('Approve'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonal(
+                          style: FilledButton.styleFrom(backgroundColor: Colors.red.withOpacity(0.1), foregroundColor: Colors.red),
+                          onPressed: () => _review(appeal['id'] as int, 'reject'),
+                          child: const Text('Reject'),
+                        ),
+                      ),
                     ],
                   ),
                 ],

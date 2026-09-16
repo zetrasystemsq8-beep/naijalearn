@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'classroom_shared.dart' show loadUsernames;
+
 class ClassroomChatWidget extends StatefulWidget {
   final int classroomId;
   final bool isTutor;
@@ -21,6 +23,7 @@ class _ClassroomChatWidgetState extends State<ClassroomChatWidget> {
   final _client = Supabase.instance.client;
   final _messageController = TextEditingController();
   List<Map<String, dynamic>> _messages = [];
+  Map<String, String> _usernames = {};
   bool _loading = true;
   bool _sending = false;
 
@@ -45,7 +48,12 @@ class _ClassroomChatWidgetState extends State<ClassroomChatWidget> {
           .eq('classroom_id', widget.classroomId)
           .order('created_at', ascending: true)
           .limit(200);
-      setState(() => _messages = List<Map<String, dynamic>>.from(rows));
+      final messages = List<Map<String, dynamic>>.from(rows);
+      final usernames = await loadUsernames(messages.map((m) => m['sender_id'] as String).toList());
+      setState(() {
+        _messages = messages;
+        _usernames = usernames;
+      });
     } catch (_) {
       // Silent — pull to refresh again.
     } finally {
@@ -110,10 +118,19 @@ class _ClassroomChatWidgetState extends State<ClassroomChatWidget> {
                             final msg = _messages[index];
                             final isMe = msg['sender_id'] == myId;
                             final removed = msg['is_removed'] as bool;
+                            final senderName = _usernames[msg['sender_id']] ?? 'Student';
 
                             return Align(
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                              child: Container(
+                              child: Column(
+                                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                children: [
+                                  if (!isMe)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 4, bottom: 2),
+                                      child: Text(senderName, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant)),
+                                    ),
+                                  Container(
                                 margin: const EdgeInsets.symmetric(vertical: 4),
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                 constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
@@ -150,6 +167,8 @@ class _ClassroomChatWidgetState extends State<ClassroomChatWidget> {
                                     ),
                                   ],
                                 ),
+                                  ),
+                                ],
                               ),
                             );
                           },

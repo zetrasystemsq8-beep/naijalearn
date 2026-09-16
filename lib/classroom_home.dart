@@ -246,7 +246,7 @@ class _StudentLessonsTabState extends State<_StudentLessonsTab> {
                 trailing: done
                     ? const Icon(Icons.check_circle_rounded, color: Colors.green)
                     : OutlinedButton(onPressed: () => _markComplete(id), child: const Text('Mark done')),
-                onTap: () => _openLesson(context, lesson),
+                onTap: () => _openLesson(context, index),
               ),
             );
           }),
@@ -255,26 +255,15 @@ class _StudentLessonsTabState extends State<_StudentLessonsTab> {
     );
   }
 
-  void _openLesson(BuildContext context, Map<String, dynamic> lesson) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(lesson['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              const SizedBox(height: 12),
-              if (lesson['content_text'] != null) Text(lesson['content_text'] as String),
-              if (lesson['content_url'] != null) ...[
-                const SizedBox(height: 8),
-                SelectableText(lesson['content_url'] as String, style: const TextStyle(color: Colors.blue)),
-              ],
-            ],
-          ),
+  void _openLesson(BuildContext context, int index) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _LessonReaderScreen(
+          lessons: _lessons,
+          initialIndex: index,
+          completedIds: _completedIds,
+          onMarkComplete: _markComplete,
         ),
       ),
     );
@@ -661,6 +650,163 @@ class _StudentOverviewTabState extends State<_StudentOverviewTab> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full-screen lesson reader. Replaces the old bottom-sheet lesson popup —
+// a real reading screen with Next/Previous, not a modal that eats half
+// the screen from below.
+// ---------------------------------------------------------------------------
+class _LessonReaderScreen extends StatefulWidget {
+  final List<Map<String, dynamic>> lessons;
+  final int initialIndex;
+  final Set<int> completedIds;
+  final Future<void> Function(int lessonId) onMarkComplete;
+
+  const _LessonReaderScreen({
+    required this.lessons,
+    required this.initialIndex,
+    required this.completedIds,
+    required this.onMarkComplete,
+  });
+
+  @override
+  State<_LessonReaderScreen> createState() => _LessonReaderScreenState();
+}
+
+class _LessonReaderScreenState extends State<_LessonReaderScreen> {
+  late int _index;
+  late Set<int> _completed;
+  bool _marking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _completed = Set<int>.from(widget.completedIds);
+  }
+
+  Future<void> _markCurrentComplete() async {
+    final lessonId = widget.lessons[_index]['id'] as int;
+    setState(() => _marking = true);
+    await widget.onMarkComplete(lessonId);
+    if (mounted) {
+      setState(() {
+        _completed.add(lessonId);
+        _marking = false;
+      });
+    }
+  }
+
+  void _goTo(int index) {
+    if (index < 0 || index >= widget.lessons.length) return;
+    setState(() => _index = index);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final lesson = widget.lessons[_index];
+    final lessonId = lesson['id'] as int;
+    final isDone = _completed.contains(lessonId);
+    final contentType = lesson['content_type'] as String;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Lesson ${_index + 1} of ${widget.lessons.length}'),
+      ),
+      body: Column(
+        children: [
+          ClipRRect(
+            child: LinearProgressIndicator(value: (_index + 1) / widget.lessons.length, minHeight: 3),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(lesson['title'] as String, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Chip(label: Text(contentType.toUpperCase()), visualDensity: VisualDensity.compact),
+                  const SizedBox(height: 20),
+                  if (lesson['content_text'] != null)
+                    Text(lesson['content_text'] as String, style: const TextStyle(fontSize: 15.5, height: 1.6)),
+                  if (lesson['content_url'] != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: scheme.surfaceContainerLowest, borderRadius: BorderRadius.circular(12)),
+                      child: Row(
+                        children: [
+                          Icon(contentType == 'video' ? Icons.play_circle_outline_rounded : Icons.link_rounded, color: scheme.primary),
+                          const SizedBox(width: 10),
+                          Expanded(child: SelectableText(lesson['content_url'] as String, style: TextStyle(color: scheme.primary))),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Column(
+                children: [
+                  if (!isDone)
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton.icon(
+                        onPressed: _marking ? null : _markCurrentComplete,
+                        icon: _marking
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.check_rounded),
+                        label: const Text('Mark as complete'),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: double.infinity,
+                      height: 48,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [Icon(Icons.check_circle_rounded, color: Colors.green, size: 18), SizedBox(width: 8), Text('Completed', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600))],
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
+                          icon: const Icon(Icons.chevron_left_rounded),
+                          label: const Text('Previous'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _index < widget.lessons.length - 1 ? () => _goTo(_index + 1) : null,
+                          icon: const Icon(Icons.chevron_right_rounded),
+                          label: const Text('Next'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
