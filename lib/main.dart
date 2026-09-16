@@ -1739,13 +1739,6 @@ class _CommunityTab extends StatelessWidget {
                 subtitle: 'Top students by subject',
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HallOfFameScreen())),
               ),
-              _MenuSectionItem(
-                icon: Icons.groups_2_rounded,
-                iconColor: Colors.green,
-                label: 'Study Squads',
-                subtitle: 'Study together, chat, battle other squads',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SquadEntryScreen())),
-              ),
             ],
           ),
         ],
