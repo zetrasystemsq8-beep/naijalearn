@@ -127,3 +127,12 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish APK to GitHub Release (this is what students actually download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: NaijaLearn Latest Build
+          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
