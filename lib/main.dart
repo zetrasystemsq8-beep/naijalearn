@@ -16,6 +16,15 @@
 // ZetraMail can create one via the shared Zetra ID website instead
 // (see kZetraIdRegisterUrl below), linked from LoginScreen.
 //
+// NEW-USER ONBOARDING: NewUserInfoScreen is shown before LoginScreen to
+// any signed-out user. It explains: ZetraMail app vs. website version,
+// the password-recovery risk on the website version, fingerprint
+// (app-only) vs. manual Zetra ID + OTP paste-back (website version),
+// and the referral/tutor code step. This is presentation-only — it
+// does not change AuthService or any backend behavior. If skipped,
+// users can get lost mid-signup, so it carries an "Attention" banner
+// and a "Need help?" link into the existing Contact Support screen.
+//
 // SECURITY LOGGING: AuthService.login() makes a best-effort call to
 // the shared `log_login_attempt` RPC. The exact parameter signature
 // hasn't been confirmed with the platform maintainer yet — wrapped so
@@ -296,6 +305,288 @@ Future<void> routeAfterFullyVerifiedLogin(BuildContext context, ZetraProfile pro
   }
 }
 
+/// ============================================================
+/// NEW-USER "READ FIRST" GUIDE
+/// ============================================================
+///
+/// Shown before LoginScreen for every signed-out user. Explains the
+/// two ways to get a ZetraMail account (app vs. website), the
+/// consequences of each choice, and the referral/tutor-code step
+/// that follows sign-in. Purely informational — no auth logic lives
+/// here, and nothing on this screen touches AuthService.
+class NewUserInfoScreen extends StatelessWidget {
+  const NewUserInfoScreen({super.key});
+
+  static const String _whatsappNumber = '2348065425732';
+  static const String _whatsappDisplay = '0806 542 5732';
+
+  Future<void> _openZetraIdWebsite(BuildContext context) async {
+    final uri = Uri.parse(kZetraIdRegisterUrl);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
+    }
+  }
+
+  Future<void> _openWhatsapp(BuildContext context) async {
+    final uri = Uri.parse('https://wa.me/$_whatsappNumber');
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp. Please try again.')));
+    }
+  }
+
+  void _goToLogin(BuildContext context) {
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Before You Start')),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Attention banner
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: Colors.amber.shade700, width: 1.6),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 26),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('⚠️ Attention — Read This First', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 15)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "If you skip this, you may get lost during sign-up. It only takes a minute — please read every step below.",
+                                  style: TextStyle(color: Colors.amber.shade900, fontSize: 12.5, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    _StepCard(
+                      number: '1',
+                      icon: Icons.download_rounded,
+                      iconColor: Colors.indigo,
+                      title: 'Download the ZetraMail App',
+                      body: "NaijaLearn requires a ZetraMail account to sign in. New users must download the ZetraMail app first — this is where you create your account and receive your login codes.",
+                    ),
+
+                    _StepCard(
+                      number: '2',
+                      icon: Icons.language_rounded,
+                      iconColor: Colors.teal,
+                      title: 'No app? Use the website version',
+                      body: "If you can't download the app, you can create your ZetraMail account on the website instead. Your Gmail will NOT work — only a ZetraMail account works.",
+                    ),
+
+                    _StepCard(
+                      number: '3',
+                      icon: Icons.info_outline_rounded,
+                      iconColor: Colors.blueGrey,
+                      title: 'The website version is basic',
+                      body: "The website version does not have fingerprint sign-in or password changing. If you use the website version, be very careful with your password — if you forget it, it is gone for good. Users on the app version may still be able to recover access.",
+                    ),
+
+                    _StepCard(
+                      number: '4',
+                      icon: Icons.fingerprint_rounded,
+                      iconColor: Colors.deepPurple,
+                      title: 'Fingerprint (app) vs. manual Zetra ID (website)',
+                      body: "If you're on the app, you can set up fingerprint sign-in — fast and secure.\n\n"
+                          "If you're on the website, fingerprint sign-in won't work. Instead:\n"
+                          "  • Open ZetraMail and find your Zetra ID (shown after you create your account).\n"
+                          "  • Come back here and paste your Zetra ID.\n"
+                          "  • Add your password to confirm it's really you.\n"
+                          "  • We'll send an OTP to your ZetraMail — go back, tap it, and it will copy automatically.\n"
+                          "  • Come back here and paste it. Don't worry — the app won't reload or lose your place.",
+                    ),
+
+                    _StepCard(
+                      number: '5',
+                      icon: Icons.card_giftcard_rounded,
+                      iconColor: Colors.green,
+                      title: 'Referral or Tutor Code',
+                      body: "Next, you'll be asked for a referral code or a tutor reference code. If you don't have one, just tap Direct to continue.",
+                    ),
+
+                    _StepCard(
+                      number: '6',
+                      icon: Icons.check_circle_outline_rounded,
+                      iconColor: Colors.orange,
+                      title: "That's all!",
+                      body: "Once that's done, you're in. You can head to the login screen now.",
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Demarcated website button — clearly set apart from the rest
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.tertiary, scheme.primary]),
+                        boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 6))],
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(color: scheme.surface, borderRadius: BorderRadius.circular(17)),
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(17),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(17),
+                            onTap: () => _openZetraIdWebsite(context),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(12)),
+                                    child: Icon(Icons.open_in_new_rounded, color: scheme.onPrimaryContainer),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('No ZetraMail app? Create your Zetra ID on the web', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: scheme.primary)),
+                                        const SizedBox(height: 2),
+                                        Text('Opens the official Zetra ID website', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.chevron_right_rounded, color: scheme.primary),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // Need help tile
+                    Material(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _openWhatsapp(context),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            children: [
+                              Icon(Icons.support_agent_rounded, color: scheme.primary),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Ran into an issue?', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                                    Text('Chat with the dev on WhatsApp — $_whatsappDisplay', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: FilledButton.icon(
+                  onPressed: () => _goToLogin(context),
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text("I've Read This — Continue", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StepCard extends StatelessWidget {
+  final String number;
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String body;
+  const _StepCard({required this.number, required this.icon, required this.iconColor, required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: iconColor.withOpacity(0.15), shape: BoxShape.circle),
+            child: Text(number, style: TextStyle(fontWeight: FontWeight.bold, color: iconColor)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, size: 18, color: iconColor),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5))),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(body, style: const TextStyle(fontSize: 12.5, height: 1.5)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override
@@ -379,6 +670,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _openNewUserInfo() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewUserInfoScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -402,9 +697,20 @@ class _LoginScreenState extends State<LoginScreen> {
               key: _formKey,
               child: Column(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _loading ? null : _openNewUserInfo,
+                        icon: const Icon(Icons.help_outline_rounded, size: 18, color: Colors.white),
+                        label: const Text('New here? Read this first', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ),
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 12),
+                      padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -527,14 +833,46 @@ class _LoginScreenState extends State<LoginScreen> {
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.75)),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 14),
                         TextButton(
                           onPressed: _loading ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GuestHomeScreen())),
                           child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
                         ),
-                        TextButton(
-                          onPressed: _loading ? null : _openZetraIdWebsite,
-                          child: Text("Don't want to download ZetraMail? Create your Zetra ID on the web", textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5)),
+                        const SizedBox(height: 4),
+                        // Demarcated website button — set apart with a bordered
+                        // "card" treatment so it's clearly noticeable rather
+                        // than reading like a plain text link.
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.95),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: scheme.primary.withOpacity(0.6), width: 1.6),
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: _loading ? null : _openZetraIdWebsite,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.open_in_new_rounded, size: 16, color: scheme.primary),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        "Don't want to download ZetraMail? Create your Zetra ID on the web",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: scheme.primary, fontSize: 12.5, fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -862,13 +1200,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             final profile = await AuthService.instance.loadCurrentProfile();
             destination = HomeScreen(profile: profile);
           } catch (_) {
-            destination = const LoginScreen();
+            destination = const NewUserInfoScreen();
           }
         } else {
           destination = const VerifyOtpScreen();
         }
       } else {
-        destination = const LoginScreen();
+        // Signed-out users see the "read first" guide before LoginScreen.
+        destination = const NewUserInfoScreen();
       }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: destination)));
