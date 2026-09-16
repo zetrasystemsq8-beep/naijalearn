@@ -37,14 +37,21 @@ class _AdminChampionshipView extends StatelessWidget {
       length: 5,
       child: Scaffold(
         appBar: AppBar(
+          backgroundColor: Theme.of(context).colorScheme.primary,
           title: _SeasonPicker(provider: provider),
-          bottom: const TabBar(isScrollable: true, tabs: [
-            Tab(text: 'Teams'),
-            Tab(text: 'Rounds'),
-            Tab(text: 'Matches'),
-            Tab(text: 'Question Sets'),
-            Tab(text: 'Payouts'),
-          ]),
+          bottom: TabBar(
+            isScrollable: true,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            tabs: const [
+              Tab(text: 'Teams'),
+              Tab(text: 'Rounds'),
+              Tab(text: 'Matches'),
+              Tab(text: 'Question Sets'),
+              Tab(text: 'Payouts'),
+            ],
+          ),
         ),
         floatingActionButton: provider.seasons.isEmpty
             ? FloatingActionButton.extended(
@@ -740,13 +747,23 @@ class _QuestionSetBuilderScreenState extends State<_QuestionSetBuilderScreen> {
     _loadSubjects();
   }
 
+  String? _subjectsError;
+
   Future<void> _loadSubjects() async {
-    final subjects = await _service.fetchDistinctSubjects();
-    if (!mounted) return;
-    setState(() {
-      _subjects = subjects;
-      _loadingSubjects = false;
-    });
+    try {
+      final subjects = await _service.fetchDistinctSubjects();
+      if (!mounted) return;
+      setState(() {
+        _subjects = subjects;
+        _loadingSubjects = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _subjectsError = e.toString();
+        _loadingSubjects = false;
+      });
+    }
   }
 
   Future<void> _onSubjectChanged(String? subject) async {
@@ -779,12 +796,35 @@ class _QuestionSetBuilderScreenState extends State<_QuestionSetBuilderScreen> {
             const SizedBox(height: 10),
             _loadingSubjects
                 ? const LinearProgressIndicator()
-                : DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(labelText: 'Subject', border: OutlineInputBorder()),
-                    value: _subject,
-                    items: _subjects.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                    onChanged: _onSubjectChanged,
-                  ),
+                : _subjectsError != null
+                    ? Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
+                        child: Text('Could not load subjects: $_subjectsError', style: const TextStyle(fontSize: 12, color: Colors.red)),
+                      )
+                    : _subjects.isEmpty
+                    ? Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'No subjects found in the question bank — check that your questions table has rows and is readable, then reopen this screen.',
+                                style: TextStyle(fontSize: 12, color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : DropdownButtonFormField<String>(
+                        decoration: const InputDecoration(labelText: 'Subject', border: OutlineInputBorder()),
+                        value: _subject,
+                        items: _subjects.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                        onChanged: _onSubjectChanged,
+                      ),
             const SizedBox(height: 8),
             Text('Selected: ${_selected.length}', style: Theme.of(context).textTheme.bodySmall),
             const Divider(),
