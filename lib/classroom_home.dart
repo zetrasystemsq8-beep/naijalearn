@@ -235,7 +235,9 @@ class _StudentLessonsTabState extends State<_StudentLessonsTab> {
               ],
             ),
           ),
-          ..._lessons.map((lesson) {
+          ..._lessons.asMap().entries.map((entry) {
+            final index = entry.key;
+            final lesson = entry.value;
             final id = lesson['id'] as int;
             final done = _completedIds.contains(id);
             return Card(
