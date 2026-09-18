@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'classroom_detail.dart';
-import 'classroom_shared.dart' show kExamCategories, loadSubjects, formatCpCent, isNewClassroom, isPopularClassroom;
+import 'classroom_shared.dart' show kExamCategories, loadSubjects, formatCpCent, formatStudentCount, isNewClassroom, isPopularClassroom;
 
 class ClassroomDiscoveryTab extends StatefulWidget {
   const ClassroomDiscoveryTab({super.key});
@@ -304,7 +304,7 @@ class _ClassroomCard extends StatelessWidget {
     final subject = classroom['subject'] as String;
     final examCategory = classroom['exam_category'] as String;
     final studentCount = classroom['student_count'] as int;
-    final capacity = classroom['capacity'] as int;
+    final capacity = classroom['capacity'] as int?;
     final isPaid = classroom['is_paid'] as bool;
     final priceCent = classroom['price_cent'] as int;
     final coverUrl = classroom['cover_image_url'] as String?;
@@ -372,7 +372,7 @@ class _ClassroomCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '$studentCount students${durationDays != null ? ' • $durationDays days' : ''}',
+                    '${formatStudentCount(studentCount, capacity)}${durationDays != null ? ' • $durationDays days' : ''}',
                     style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 8),

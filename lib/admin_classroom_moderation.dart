@@ -179,7 +179,7 @@ class _ClassroomsTabState extends State<_ClassroomsTab> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text('${c['student_count']}/${c['capacity']} students · ${c['subject']} · $examCategory'),
+                  Text('${c['student_count']}/${c['capacity'] ?? "Unlimited"} students · ${c['subject']} · $examCategory'),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,

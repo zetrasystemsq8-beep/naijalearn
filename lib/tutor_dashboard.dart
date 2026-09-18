@@ -226,7 +226,7 @@ class _OverviewTabState extends State<_OverviewTab> {
           ],
           Row(
             children: [
-              Expanded(child: _StatCard(label: 'Students', value: '${c['student_count']}/${c['capacity']}')),
+              Expanded(child: _StatCard(label: 'Students', value: '${c['student_count']}/${c['capacity'] ?? "Unlimited"}')),
               const SizedBox(width: 12),
               Expanded(child: _StatCard(label: 'Status', value: (c['status'] as String).toUpperCase())),
             ],

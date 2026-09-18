@@ -34,7 +34,8 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
   final _rulesController = TextEditingController();
   final _introController = TextEditingController();
   final _priceController = TextEditingController();
-  final _capacityController = TextEditingController(text: '50');
+  final _capacityController = TextEditingController(text: '100');
+  bool _hasCapacityLimit = true;
   final _picker = ImagePicker();
 
   String? _subject;
@@ -161,7 +162,7 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
           coverImage: _coverImage,
           isPaid: _isPaid,
           priceCent: _isPaid ? (int.tryParse(_priceController.text) ?? 0) : 0,
-          capacity: int.tryParse(_capacityController.text) ?? 0,
+          capacity: _hasCapacityLimit ? int.tryParse(_capacityController.text) : null,
           durationLabel: _durationLabel,
           creationFeeCent: _creationFeeCent ?? 2000,
         ),
@@ -191,7 +192,7 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
         'p_intro_info': _introController.text.trim(),
         'p_is_paid': _isPaid,
         'p_price_cent': price,
-        'p_capacity': int.parse(_capacityController.text),
+        'p_capacity': _hasCapacityLimit ? int.parse(_capacityController.text) : null,
         'p_duration_days': _durationDays,
       });
 
@@ -363,17 +364,31 @@ class _CreateClassroomScreenState extends State<CreateClassroomScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _capacityController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(labelText: 'Maximum students', border: OutlineInputBorder()),
-                      validator: (v) {
-                        final n = int.tryParse(v ?? '');
-                        if (n == null || n <= 0) return 'Enter a valid capacity';
-                        return null;
-                      },
+                    Text('Class size', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: true, label: Text('Limited')),
+                        ButtonSegment(value: false, label: Text('Unlimited')),
+                      ],
+                      selected: {_hasCapacityLimit},
+                      onSelectionChanged: (s) => setState(() => _hasCapacityLimit = s.first),
                     ),
+                    if (_hasCapacityLimit) ...[
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _capacityController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        decoration: const InputDecoration(labelText: 'Maximum students', border: OutlineInputBorder()),
+                        validator: (v) {
+                          if (!_hasCapacityLimit) return null;
+                          final n = int.tryParse(v ?? '');
+                          if (n == null || n <= 0) return 'Enter a valid capacity';
+                          return null;
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     Text('Duration', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
@@ -470,7 +485,8 @@ class _ClassroomPreview extends StatefulWidget {
   final String name, subject, examCategory, description, introInfo, rules, durationLabel;
   final XFile? coverImage;
   final bool isPaid;
-  final int priceCent, capacity, creationFeeCent;
+  final int priceCent, creationFeeCent;
+  final int? capacity;
 
   const _ClassroomPreview({
     required this.scrollController,
@@ -534,7 +550,7 @@ class _ClassroomPreviewState extends State<_ClassroomPreview> {
               const SizedBox(height: 4),
               Text(widget.subject, style: TextStyle(color: scheme.onSurfaceVariant)),
               const SizedBox(height: 10),
-              Text('0/${widget.capacity} students • ${widget.durationLabel}', style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant)),
+              Text('0/${widget.capacity ?? "∞"} students • ${widget.durationLabel}', style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant)),
               const SizedBox(height: 14),
               Text(
                 widget.isPaid ? formatCpCent(widget.priceCent) : 'Free',

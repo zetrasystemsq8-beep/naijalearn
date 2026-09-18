@@ -65,10 +65,32 @@ String formatCpCent(int totalCent) {
 bool isNewClassroom(DateTime createdAt) => DateTime.now().difference(createdAt).inDays <= 7;
 
 /// A classroom in the top slice of enrollment among what's currently
-/// loaded — computed from real student_count, not a fake number.
-bool isPopularClassroom(int studentCount, int capacity) {
+/// loaded — computed from real student_count, not a fake number. With
+/// unlimited capacity there's no ratio to compute, so a flat headcount
+/// threshold is used instead.
+bool isPopularClassroom(int studentCount, int? capacity) {
   if (studentCount < 5) return false; // avoid calling a 1-student class "popular"
+  if (capacity == null) return studentCount >= 20;
   return capacity > 0 && (studentCount / capacity) >= 0.5;
+}
+
+/// Student-facing enrollment display. A raw "2/50 students" reads as
+/// empty, not popular — showing a small count against a big capacity
+/// actively discourages joining. Below the threshold, describe it as
+/// early activity instead of a fraction; only show the real X/Y once
+/// there's enough real social proof for the fraction to help rather
+/// than hurt. Never fabricates a number — this only changes framing.
+/// capacity null = unlimited, shown as "$count students" with no
+/// denominator at all.
+const int kEnrollmentDisplayThreshold = 5;
+
+String formatStudentCount(int studentCount, int? capacity) {
+  if (studentCount <= 0) return 'Be the first to join';
+  if (studentCount < kEnrollmentDisplayThreshold) {
+    return '$studentCount student${studentCount == 1 ? '' : 's'} learning here';
+  }
+  if (capacity == null) return '$studentCount students';
+  return '$studentCount/$capacity students';
 }
 
 // ---------------------------------------------------------------------------

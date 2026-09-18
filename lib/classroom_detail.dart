@@ -11,7 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_enhancements.dart' show GradientButton;
 import 'buy_cent.dart';
 import 'classroom_home.dart';
-import 'classroom_shared.dart' show formatCpCent;
+import 'classroom_shared.dart' show formatCpCent, formatStudentCount;
 import 'zetra_pay.dart';
 
 class ClassroomDetailScreen extends StatefulWidget {
@@ -244,13 +244,13 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
     final introInfo = c['intro_info'] as String? ?? '';
     final rules = c['rules'] as String? ?? '';
     final studentCount = c['student_count'] as int;
-    final capacity = c['capacity'] as int;
+    final capacity = c['capacity'] as int?;
     final isPaid = c['is_paid'] as bool;
     final priceCent = c['price_cent'] as int;
     final durationDays = c['duration_days'] as int?;
     final coverUrl = c['cover_image_url'] as String?;
     final tutorName = _tutorProfile?['full_name'] as String? ?? 'Tutor';
-    final isFull = studentCount >= capacity;
+    final isFull = capacity != null && studentCount >= capacity;
 
     return Scaffold(
       body: CustomScrollView(
@@ -296,7 +296,7 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
                   spacing: 16,
                   runSpacing: 6,
                   children: [
-                    _StatChip(icon: Icons.people_outline_rounded, label: '$studentCount/$capacity students'),
+                    _StatChip(icon: Icons.people_outline_rounded, label: formatStudentCount(studentCount, capacity)),
                     _StatChip(icon: Icons.timelapse_rounded, label: durationDays != null ? '$durationDays days' : 'Unlimited'),
                   ],
                 ),
