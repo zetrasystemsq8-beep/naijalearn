@@ -967,12 +967,13 @@ class _InviteTab extends StatelessWidget {
     final priceCent = classroom['price_cent'] as int;
     final code = classroom['invite_code'] as String? ?? '';
 
-    return "You've been invited to join a NaijaLearn classroom.\n\n"
-        '$name\n'
-        'Subject: $subject${examCategory != 'General/Other' ? ' • $examCategory' : ''}\n'
-        '${durationDays != null ? 'Duration: $durationDays days\n' : ''}'
-        'Price: ${isPaid ? formatCpCent(priceCent) : 'Free'}\n\n'
-        'Join using this code in NaijaLearn: $code';
+    return '🎓 Join my class on NaijaLearn!\n\n'
+        '"$name"\n'
+        '$subject${examCategory != 'General/Other' ? ' • $examCategory' : ''}'
+        '${durationDays != null ? ' • $durationDays days access' : ''}\n'
+        '${isPaid ? formatCpCent(priceCent) : 'Free to join'}\n\n'
+        'Open NaijaLearn → Classes → tap the code icon next to search, and enter this code:\n'
+        '$code';
   }
 
   void _copy(BuildContext context, String text, String label) {

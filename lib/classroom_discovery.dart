@@ -113,25 +113,83 @@ class _ClassroomDiscoveryTabState extends State<ClassroomDiscoveryTab> {
     });
   }
 
+  Future<void> _enterInviteCode() async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Invite Code'),
+        content: TextField(
+          controller: controller,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(hintText: 'e.g. NLCLASS-7X92K', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Find Class')),
+        ],
+      ),
+    );
+    if (code == null || code.isEmpty) return;
+    await _lookupInviteCode(code);
+  }
+
+  Future<void> _lookupInviteCode(String rawCode) async {
+    final code = rawCode.trim().toUpperCase();
+    try {
+      final row = await _client.from('classrooms').select('id').eq('invite_code', code).maybeSingle();
+      if (!mounted) return;
+      if (row == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No classroom found with that code. Double-check it and try again.")));
+        return;
+      }
+      // Opens the classroom PREVIEW only — the student still has to go
+      // through the normal Join button and Cent-wallet debit from there.
+      // The code never grants access on its own.
+      Navigator.push(context, MaterialPageRoute(builder: (_) => ClassroomDetailScreen(classroomId: row['id'] as int)));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not look up that code right now.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search classes',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _filterActive ? IconButton(icon: const Icon(Icons.close_rounded), onPressed: _clearFilters) : null,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-              isDense: true,
-            ),
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (_) => _runFilter(),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search classes or paste an invite code',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: _filterActive ? IconButton(icon: const Icon(Icons.close_rounded), onPressed: _clearFilters) : null,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (value) {
+                    if (value.trim().toUpperCase().startsWith('NLCLASS-')) {
+                      _lookupInviteCode(value);
+                    } else {
+                      _runFilter();
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                onPressed: _enterInviteCode,
+                icon: const Icon(Icons.qr_code_rounded),
+                tooltip: 'Enter Invite Code',
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 8),
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
