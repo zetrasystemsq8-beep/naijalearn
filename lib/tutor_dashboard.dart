@@ -243,7 +243,13 @@ class _OverviewTabState extends State<_OverviewTab> {
               child: Column(
                 children: [
                   _RevenueRow('Gross revenue', _grossCent),
-                  _RevenueRow('Platform fee (10%)', _platformFeeCent, isDeduction: true),
+                  _RevenueRow(
+                    _platformFeeCent > 0 && _grossCent > 0
+                        ? 'Platform fee (${(_platformFeeCent / _grossCent * 100).round()}%)'
+                        : 'Platform fee',
+                    _platformFeeCent,
+                    isDeduction: true,
+                  ),
                   const Divider(height: 24),
                   _RevenueRow('Pending', _pendingCent),
                   _RevenueRow('Available for payout', _availableCent, highlight: true),
