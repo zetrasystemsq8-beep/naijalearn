@@ -9,10 +9,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'app_enhancements.dart' show GradientHeader, ShinyCard;
-import 'app_theme.dart' show AppColors;
+import 'app_enhancements.dart' show GradientHeader;
 import 'become_tutor.dart';
 import 'classroom_discovery.dart';
+import 'classroom_shared.dart' show isEligibleForTutorCta;
 import 'create_classroom.dart';
 import 'my_classrooms.dart';
 import 'tutor_dashboard.dart';
@@ -147,36 +147,13 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
             ),
           ),
 
-          if (!_loadingTutorStatus && _tutorStatus == null && _tab == _ClassesTab.discover)
+          if (!_loadingTutorStatus && _tutorStatus == null && _tab == _ClassesTab.discover && isEligibleForTutorCta())
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: ShinyCard(
-                tint: AppColors.info,
-                padding: const EdgeInsets.all(16),
-                child: InkWell(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BecomeTutorScreen())),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: AppColors.info.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-                        child: const Icon(Icons.workspace_premium_outlined, color: AppColors.info),
-                      ),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Teach on NaijaLearn', style: TextStyle(fontWeight: FontWeight.w700)),
-                            SizedBox(height: 2),
-                            Text('Create your own paid classroom and earn from your knowledge.', style: TextStyle(fontSize: 12.5)),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.arrow_forward_rounded),
-                    ],
-                  ),
-                ),
+              child: TextButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BecomeTutorScreen())),
+                icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+                label: const Text('Know a subject well? Teach on NaijaLearn'),
               ),
             ),
 

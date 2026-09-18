@@ -88,3 +88,21 @@ Future<Map<String, String>> loadUsernames(List<String> userIds) async {
     return {for (final id in userIds) id: 'Student'};
   }
 }
+
+// ---------------------------------------------------------------------------
+// Become a Tutor visibility gate. Per team decision: no full invite-only
+// (doesn't scale — admin would have to manually find/invite every
+// tutor), and admin review of applications is already the real quality
+// gate. This just stops the CTA looking wide-open to every brand-new
+// signup. Uses the Supabase Auth account-creation timestamp directly —
+// no schema/column needed.
+// ---------------------------------------------------------------------------
+const int kTutorEligibilityMinAccountAgeDays = 7;
+
+bool isEligibleForTutorCta() {
+  final createdAt = Supabase.instance.client.auth.currentUser?.createdAt;
+  if (createdAt == null) return false;
+  final created = DateTime.tryParse(createdAt);
+  if (created == null) return false;
+  return DateTime.now().difference(created).inDays >= kTutorEligibilityMinAccountAgeDays;
+}
