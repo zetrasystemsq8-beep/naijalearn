@@ -31,6 +31,7 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
   _ClassesTab _tab = _ClassesTab.discover;
 
   bool _loadingTutorStatus = true;
+  bool _tutorStatusLoadFailed = false;
   String? _tutorStatus; // null | pending | approved | rejected | suspended
 
   @override
@@ -47,50 +48,80 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
     }
     try {
       final row = await _client.from('tutor_profiles').select('status').eq('user_id', userId).maybeSingle();
-      if (mounted) setState(() => _tutorStatus = row?['status'] as String?);
+      if (mounted) {
+        setState(() {
+          _tutorStatus = row?['status'] as String?;
+          _tutorStatusLoadFailed = false;
+        });
+      }
     } catch (_) {
-      // Non-fatal — CTA just won't show if this fails.
+      // FAIL OPEN, not closed: if we can't verify status, show the
+      // entry point anyway rather than silently hiding it. A real
+      // non-tutor tapping it just gets told so — that's a minor UI
+      // cost, far better than a genuine tutor never seeing the button
+      // at all with no way to know why.
+      if (mounted) setState(() => _tutorStatusLoadFailed = true);
     } finally {
       if (mounted) setState(() => _loadingTutorStatus = false);
     }
   }
 
   Future<void> _openTutorDashboard() async {
+    // Never trust a stale/failed cached status for something this
+    // important — re-check live, right now, before deciding anything.
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    String? liveStatus;
+    try {
+      final row = await _client.from('tutor_profiles').select('status').eq('user_id', userId).maybeSingle();
+      liveStatus = row?['status'] as String?;
+      if (mounted) setState(() => _tutorStatus = liveStatus);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not verify your tutor status — check your connection and try again.')),
+        );
+      }
+      return;
+    }
+
+    if (liveStatus != 'approved') {
+      if (!mounted) return;
+      final message = switch (liveStatus) {
+        'pending' => 'Your tutor application is still under review.',
+        'rejected' => 'Your tutor application was not approved.',
+        'suspended' => 'Your tutor account is currently suspended.',
+        _ => "You're not an approved tutor yet.",
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
+
     try {
       final classrooms = await _client
           .from('classrooms')
           .select('id, name, student_count, capacity')
-          .eq('tutor_id', _client.auth.currentUser!.id)
+          .eq('tutor_id', userId)
           .order('created_at', ascending: false);
 
       final rows = List<Map<String, dynamic>>.from(classrooms);
       if (!mounted) return;
 
-      if (rows.isEmpty) {
-        final created = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClassroomScreen()));
-        if (created != null && mounted) {
-          final classroom = Map<String, dynamic>.from(created as Map);
-          Navigator.push(context, MaterialPageRoute(builder: (_) => TutorDashboardScreen(classroomId: classroom['id'] as int)));
-        }
-        return;
-      }
-
-      if (rows.length == 1) {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => TutorDashboardScreen(classroomId: rows.first['id'] as int)));
-        return;
-      }
-
-      // Multiple classrooms — let the tutor pick which to manage.
+      // Always show the picker — even with zero or one classroom —
+      // so "Create new classroom" is never hidden behind a branch that
+      // skips straight into managing an existing one.
       showModalBottomSheet(
         context: context,
         builder: (context) => SafeArea(
           child: ListView(
             shrinkWrap: true,
             children: [
-              Padding(padding: const EdgeInsets.all(16), child: Text('Your classrooms', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+              if (rows.isNotEmpty)
+                Padding(padding: const EdgeInsets.all(16), child: Text('Your classrooms', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
               ...rows.map((c) => ListTile(
                     title: Text(c['name'] as String),
-                    subtitle: Text('${c['student_count']}/${c['capacity']} students'),
+                    subtitle: Text('${c['student_count']}/${c['capacity'] ?? "Unlimited"} students'),
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(context, MaterialPageRoute(builder: (_) => TutorDashboardScreen(classroomId: c['id'] as int)));
@@ -98,10 +129,14 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
                   )),
               ListTile(
                 leading: const Icon(Icons.add_circle_outline_rounded),
-                title: const Text('Create another classroom'),
-                onTap: () {
+                title: Text(rows.isEmpty ? 'Create your first classroom' : 'Create another classroom'),
+                onTap: () async {
                   Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClassroomScreen()));
+                  final created = await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClassroomScreen()));
+                  if (created != null && mounted) {
+                    final classroom = Map<String, dynamic>.from(created as Map);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => TutorDashboardScreen(classroomId: classroom['id'] as int)));
+                  }
                 },
               ),
             ],
@@ -115,7 +150,7 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isApprovedTutor = _tutorStatus == 'approved';
+    final showTutorDashboardIcon = _tutorStatus == 'approved' || _tutorStatusLoadFailed;
 
     return Scaffold(
       body: Column(
@@ -135,7 +170,7 @@ class _ClassesHomeScreenState extends State<ClassesHomeScreen> {
                     onSelectionChanged: (s) => setState(() => _tab = s.first),
                   ),
                 ),
-                if (isApprovedTutor) ...[
+                if (showTutorDashboardIcon) ...[
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
                     onPressed: _openTutorDashboard,

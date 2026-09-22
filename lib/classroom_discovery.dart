@@ -372,7 +372,7 @@ class _ClassroomCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${formatStudentCount(studentCount, capacity)}${durationDays != null ? ' • $durationDays days' : ''}',
+                    '${formatStudentCount(studentCount, capacity)}${durationDays != null ? ' • $durationDays-day access' : ''}',
                     style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 8),

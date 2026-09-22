@@ -297,7 +297,7 @@ class _ClassroomDetailScreenState extends State<ClassroomDetailScreen> {
                   runSpacing: 6,
                   children: [
                     _StatChip(icon: Icons.people_outline_rounded, label: formatStudentCount(studentCount, capacity)),
-                    _StatChip(icon: Icons.timelapse_rounded, label: durationDays != null ? '$durationDays days' : 'Unlimited'),
+                    _StatChip(icon: Icons.timelapse_rounded, label: durationDays != null ? '$durationDays-day access per student' : 'Unlimited access'),
                   ],
                 ),
 
