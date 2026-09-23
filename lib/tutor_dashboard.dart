@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'classroom_ask.dart';
 import 'classroom_chat_widget.dart';
 import 'classroom_shared.dart' show formatCpCent, loadUsernames;
 
@@ -49,7 +50,7 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
     if (_classroom == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('Classroom not found')));
 
     return DefaultTabController(
-      length: 7,
+      length: 9,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_classroom!['name'] as String, overflow: TextOverflow.ellipsis),
@@ -58,7 +59,9 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
             Tab(text: 'Students'),
             Tab(text: 'Lessons'),
             Tab(text: 'Assignments'),
+            Tab(text: 'Ask'),
             Tab(text: 'Announcements'),
+            Tab(text: 'AI Tools'),
             Tab(text: 'Invite'),
             Tab(text: 'Chat'),
           ]),
@@ -68,7 +71,9 @@ class _TutorDashboardScreenState extends State<TutorDashboardScreen> {
           _StudentsTab(classroomId: widget.classroomId),
           _LessonsTab(classroomId: widget.classroomId),
           _AssignmentsTab(classroomId: widget.classroomId),
+          ClassroomAskWidget(classroomId: widget.classroomId, isTutor: true),
           _AnnouncementsComposeTab(classroomId: widget.classroomId),
+          _AiToolsTab(classroomId: widget.classroomId),
           _InviteTab(classroom: _classroom!),
           ClassroomChatWidget(classroomId: widget.classroomId, isTutor: true),
         ]),
@@ -1029,6 +1034,289 @@ class _InviteTab extends StatelessWidget {
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI Tools — describe-and-generate content, plus the Zetra AI toggle.
+// The actual generation happens server-side (classroom-ai Edge Function,
+// triggered by cron for scheduled tasks and by a DB trigger for Zetra AI
+// question replies) — this tab only creates the request and shows status.
+// ---------------------------------------------------------------------------
+class _AiToolsTab extends StatefulWidget {
+  final int classroomId;
+  const _AiToolsTab({required this.classroomId});
+
+  @override
+  State<_AiToolsTab> createState() => _AiToolsTabState();
+}
+
+class _AiToolsTabState extends State<_AiToolsTab> {
+  final _client = Supabase.instance.client;
+  final _descriptionController = TextEditingController();
+
+  String _taskType = 'lesson';
+  DateTime? _scheduledFor; // null = post immediately
+  bool _submitting = false;
+
+  List<Map<String, dynamic>> _tasks = [];
+  Map<String, dynamic>? _aiSettings;
+  bool _loading = true;
+  bool _togglingZetraAi = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final tasks = await _client
+          .from('classroom_ai_tasks')
+          .select()
+          .eq('classroom_id', widget.classroomId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      final settings = await _client
+          .from('classroom_ai_settings')
+          .select()
+          .eq('classroom_id', widget.classroomId)
+          .maybeSingle();
+      setState(() {
+        _tasks = List<Map<String, dynamic>>.from(tasks);
+        _aiSettings = settings;
+      });
+    } catch (_) {
+      // Non-fatal.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickScheduleTime() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+    if (time == null) return;
+    setState(() => _scheduledFor = DateTime(date.year, date.month, date.day, time.hour, time.minute));
+  }
+
+  Future<void> _submitTask() async {
+    final description = _descriptionController.text.trim();
+    if (description.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Describe what you want the AI to create.')));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Generate with AI'),
+        content: Text('This costs 100 Cent, charged now. The AI will create a $_taskType '
+            '${_scheduledFor != null ? 'and post it on ${DateFormat('MMM d, h:mm a').format(_scheduledFor!)}' : 'and post it immediately'}.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Generate — 100 Cent')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _submitting = true);
+    try {
+      await _client.rpc('tutor_create_ai_task', params: {
+        'p_classroom_id': widget.classroomId,
+        'p_task_type': _taskType,
+        'p_description': description,
+        'p_scheduled_at': _scheduledFor?.toIso8601String(),
+      });
+      _descriptionController.clear();
+      setState(() => _scheduledFor = null);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_scheduledFor == null ? 'Generating now — check back in a moment.' : 'Scheduled.'),
+          backgroundColor: Colors.green,
+        ));
+      }
+      await _load();
+    } on PostgrestException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _toggleZetraAi(bool enable) async {
+    if (enable) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Enable Zetra AI'),
+          content: const Text(
+            'Zetra AI will automatically answer student questions posted in "Ask the Classroom" for this classroom. '
+            'Costs 500 Cent for 30 days, charged now.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enable — 500 Cent')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
+    setState(() => _togglingZetraAi = true);
+    try {
+      await _client.rpc('tutor_toggle_zetra_ai', params: {'p_classroom_id': widget.classroomId, 'p_enabled': enable});
+      await _load();
+    } on PostgrestException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _togglingZetraAi = false);
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'completed':
+        return Colors.green;
+      case 'failed':
+        return Colors.red;
+      case 'processing':
+        return Colors.blue;
+      default:
+        return Colors.amber;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final zetraAiEnabled = _aiSettings?['zetra_ai_enabled'] == true;
+    final zetraAiUntil = _aiSettings?['zetra_ai_enabled_until'] as String?;
+
+    if (_loading) return const Center(child: CircularProgressIndicator());
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('Generate with AI', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(
+            'Describe what you want — e.g. "Teach my students about the cell and post 5 questions to Assignments." Costs 100 Cent per generation.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 14),
+
+          Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(label: const Text('Lesson'), selected: _taskType == 'lesson', onSelected: (_) => setState(() => _taskType = 'lesson')),
+              ChoiceChip(label: const Text('Assignment/Questions'), selected: _taskType == 'assignment', onSelected: (_) => setState(() => _taskType = 'assignment')),
+              ChoiceChip(label: const Text('Announcement'), selected: _taskType == 'announcement', onSelected: (_) => setState(() => _taskType = 'announcement')),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          TextField(
+            controller: _descriptionController,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Teach the students about photosynthesis and post 5 practice questions',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          OutlinedButton.icon(
+            onPressed: _pickScheduleTime,
+            icon: const Icon(Icons.schedule_rounded),
+            label: Text(_scheduledFor == null ? 'Post immediately (tap to schedule instead)' : DateFormat('MMM d, yyyy · h:mm a').format(_scheduledFor!)),
+          ),
+          if (_scheduledFor != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: () => setState(() => _scheduledFor = null), child: const Text('Clear schedule — post now instead')),
+            ),
+
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _submitting ? null : _submitTask,
+            icon: _submitting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.auto_awesome_rounded),
+            label: Text(_submitting ? 'Submitting...' : 'Generate — 100 Cent'),
+          ),
+
+          const Divider(height: 40),
+
+          Text('Zetra AI', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(
+            'Automatically answers student questions in "Ask the Classroom" — a standing AI classroom assistant, not a one-off generation.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: scheme.surfaceContainerLowest, borderRadius: BorderRadius.circular(14)),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded, color: zetraAiEnabled ? scheme.primary : scheme.onSurfaceVariant),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(zetraAiEnabled ? 'Zetra AI is active' : 'Zetra AI is off', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if (zetraAiEnabled && zetraAiUntil != null)
+                        Text('Active until ${DateFormat('MMM d, yyyy').format(DateTime.parse(zetraAiUntil))}', style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+                _togglingZetraAi
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Switch(value: zetraAiEnabled, onChanged: _toggleZetraAi),
+              ],
+            ),
+          ),
+
+          const Divider(height: 40),
+          Text('Recent AI activity', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          if (_tasks.isEmpty)
+            Text('No AI generations yet.', style: TextStyle(color: scheme.onSurfaceVariant))
+          else
+            ..._tasks.map((t) {
+              final status = t['status'] as String;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: Icon(Icons.auto_awesome_rounded, color: _statusColor(status)),
+                  title: Text(t['description'] as String, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('${(t['task_type'] as String).toUpperCase()} · ${DateFormat('MMM d, h:mm a').format(DateTime.parse(t['scheduled_at']))}'
+                      '${status == 'failed' && t['error'] != null ? '\n${t['error']}' : ''}'),
+                  isThreeLine: status == 'failed' && t['error'] != null,
+                  trailing: Chip(label: Text(status), backgroundColor: _statusColor(status).withOpacity(0.15), labelStyle: TextStyle(color: _statusColor(status), fontSize: 11)),
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 }

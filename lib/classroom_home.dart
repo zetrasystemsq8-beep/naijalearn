@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'classroom_ask.dart';
 import 'classroom_chat_widget.dart';
 import 'tutor_dashboard.dart';
 
@@ -103,7 +104,7 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
     }
 
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_classroom!['name'] as String, overflow: TextOverflow.ellipsis),
@@ -111,6 +112,7 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
             Tab(text: 'Overview'),
             Tab(text: 'Lessons'),
             Tab(text: 'Assignments'),
+            Tab(text: 'Ask'),
             Tab(text: 'Announcements'),
             Tab(text: 'Chat'),
           ]),
@@ -119,6 +121,7 @@ class _ClassroomHomeScreenState extends State<ClassroomHomeScreen> {
           _StudentOverviewTab(classroomId: widget.classroomId),
           _StudentLessonsTab(classroomId: widget.classroomId),
           _StudentAssignmentsTab(classroomId: widget.classroomId),
+          ClassroomAskWidget(classroomId: widget.classroomId, isTutor: false),
           _AnnouncementsTab(classroomId: widget.classroomId),
           ClassroomChatWidget(classroomId: widget.classroomId, isTutor: false),
         ]),
@@ -235,9 +238,7 @@ class _StudentLessonsTabState extends State<_StudentLessonsTab> {
               ],
             ),
           ),
-          ..._lessons.asMap().entries.map((entry) {
-            final index = entry.key;
-            final lesson = entry.value;
+          ..._lessons.map((lesson) {
             final id = lesson['id'] as int;
             final done = _completedIds.contains(id);
             return Card(
