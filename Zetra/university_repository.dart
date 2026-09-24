@@ -1,4 +1,4 @@
-import '../models/models.dart';
+import 'models.dart';
 
 /// The UI only talks to this. Later: write SupabaseUniversityRepository
 /// implementing it (RPCs/RLS), and pass it into UniversityHome(repository: ...).

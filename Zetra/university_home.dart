@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../data/university_repository.dart';
-import '../models/models.dart';
-import '../state/university_controller.dart';
+import 'university_repository.dart';
+import 'models.dart';
+import 'university_controller.dart';
 import 'course_screen.dart';
 import 'gpa_screen.dart';
 

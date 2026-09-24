@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/models.dart';
-import '../state/university_controller.dart';
+import 'models.dart';
+import 'university_controller.dart';
 
 class GpaScreen extends StatefulWidget {
   const GpaScreen({super.key, required this.ctrl});
