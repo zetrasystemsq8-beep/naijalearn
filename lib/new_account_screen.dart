@@ -1,3 +1,13 @@
+// lib/new_account_screen.dart
+//
+// In-app Zetra ID signup for NaijaLearn — no website visit required.
+// Uses the same Supabase project, same RPCs, same account system as
+// the existing app and website registration flows.
+
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'main.dart';
+
 
 const List<String> kNaijaLearnNigerianStates = [
   'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
