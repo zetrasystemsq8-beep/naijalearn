@@ -65,6 +65,7 @@ import 'championship_admin_screen.dart';
 import 'classes_home.dart';
 import 'admin_tutor_applications.dart';
 import 'admin_classroom_moderation.dart';
+import 'new_account_screen.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -839,6 +840,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
                         ),
                         const SizedBox(height: 4),
+                        // Primary, highly visible signup button — creates
+                        // a Zetra ID directly in-app, no website needed.
+                        SizedBox(
+                          height: 54,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: scheme.primary,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            onPressed: _loading
+                                ? null
+                                : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewAccountScreen())),
+                            icon: const Icon(Icons.person_add_alt_1_rounded),
+                            label: const Text('Create a New Zetra ID', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         // Demarcated website button — set apart with a bordered
                         // "card" treatment so it's clearly noticeable rather
                         // than reading like a plain text link.
@@ -863,7 +882,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     const SizedBox(width: 8),
                                     Flexible(
                                       child: Text(
-                                        "Don't want to download ZetraMail? Create your Zetra ID on the web",
+                                        "Prefer the website instead? Create your Zetra ID there",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(color: scheme.primary, fontSize: 12.5, fontWeight: FontWeight.w700),
                                       ),
