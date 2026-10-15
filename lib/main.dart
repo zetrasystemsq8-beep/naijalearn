@@ -29,9 +29,16 @@
 // the shared `log_login_attempt` RPC. The exact parameter signature
 // hasn't been confirmed with the platform maintainer yet — wrapped so
 // it can never break login if wrong; confirm and adjust once known.
+//
+// NETWORK SAFETY: every network call in this file has a timeout, and
+// every failure is turned into a plain-English message (no internet /
+// timed out / generic) instead of hanging or silently doing nothing.
+// The splash screen shows a "No internet — Try Again" state instead of
+// freezing when the app is opened offline.
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException, HandshakeException;
 import 'study_plan.dart';
 import 'models.dart';
 export 'models.dart';
@@ -85,14 +92,82 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 const String kZetraIdRegisterUrl = 'https://zetrasystemsq8-beep.github.io/?view=register';
 
-Future<void> main() async {
+// ============================================================
+// NETWORK SAFETY HELPERS
+// ============================================================
+
+/// Default timeout for any normal network call.
+const Duration kNetTimeout = Duration(seconds: 15);
+
+/// Shorter timeout for non-critical calls (flags, admin checks, etc.).
+const Duration kQuickTimeout = Duration(seconds: 8);
+
+const String kOfflineMessage = 'No internet connection. Please check your network and try again.';
+const String kTimeoutMessage = 'The connection timed out. Please check your network and try again.';
+
+/// True if [e] looks like a connectivity problem (offline, DNS failure,
+/// timeout, dropped connection) rather than a real server/logic error.
+bool isNetworkError(Object e) {
+  if (e is SocketException || e is TimeoutException || e is HandshakeException) return true;
+  if (e is AuthRetryableFetchException) return true;
+  final s = e.toString();
+  return s.contains('SocketException') ||
+      s.contains('Failed host lookup') ||
+      s.contains('ClientException') ||
+      s.contains('HandshakeException') ||
+      s.contains('Connection closed') ||
+      s.contains('Connection refused') ||
+      s.contains('Connection reset') ||
+      s.contains('Network is unreachable') ||
+      s.contains('XMLHttpRequest error');
+}
+
+/// Turns ANY error into a ZetraAuthException with a friendly message.
+/// Network problems get the offline/timeout text; everything else uses
+/// [fallback]. ZetraAuthExceptions pass through unchanged.
+ZetraAuthException asAuthError(Object e, String fallback) {
+  if (e is ZetraAuthException) return e;
+  if (e is TimeoutException) return ZetraAuthException(kTimeoutMessage, isNetwork: true);
+  if (isNetworkError(e)) return ZetraAuthException(kOfflineMessage, isNetwork: true);
+  return ZetraAuthException(fallback);
+}
+
+/// Friendly message string for showing in the UI.
+String friendlyError(Object e, {required String fallback}) => asAuthError(e, fallback).message;
+
+/// launchUrl that can never throw — returns false on any failure.
+Future<bool> safeLaunch(Uri uri) async {
+  try {
+    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (e) {
+    debugPrint('[Launch] failed for $uri: $e');
+    return false;
+  }
+}
+
+void main() {
+  // Safety net: any uncaught async error is logged instead of crashing
+  // the app or leaving it stuck.
+  runZonedGuarded(_bootstrap, (error, stack) {
+    debugPrint('[Uncaught] $error');
+  });
+}
+
+Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    debugPrint('[FlutterError] ${details.exceptionAsString()}');
+  };
   await dotenv.load(fileName: '.env');
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
-  await NotificationService.instance.init();
+  try {
+    await NotificationService.instance.init().timeout(kQuickTimeout);
+  } catch (e) {
+    debugPrint('[Startup] NotificationService.init failed or timed out (non-fatal): $e');
+  }
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -109,7 +184,11 @@ Future<void> main() async {
       child: const NaijaLearnApp(),
     ),
   );
-  ChallengeDeepLinkListener.init(navigatorKey);
+  try {
+    ChallengeDeepLinkListener.init(navigatorKey);
+  } catch (e) {
+    debugPrint('[Startup] ChallengeDeepLinkListener.init failed (non-fatal): $e');
+  }
 }
 
 Future<ZetraProfile> signInWithZetraFingerprint() async {
@@ -117,15 +196,17 @@ Future<ZetraProfile> signInWithZetraFingerprint() async {
   final client = Supabase.instance.client;
   AuthResponse response;
   try {
-    response = await client.auth.signInWithPasskey(authenticator);
+    // Generous timeout: the system fingerprint prompt is interactive.
+    response = await client.auth.signInWithPasskey(authenticator).timeout(const Duration(seconds: 90));
   } catch (e) {
+    if (isNetworkError(e)) throw asAuthError(e, kOfflineMessage);
     throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
   }
   if (response.session == null) {
     throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
   }
   try {
-    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true}));
+    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true})).timeout(kQuickTimeout);
   } catch (e) {
     debugPrint('[ZetraAuth] Could not set otp-verified flag after fingerprint sign-in (non-fatal): $e');
   }
@@ -153,7 +234,10 @@ class ZetraProfile {
 
 class ZetraAuthException implements Exception {
   final String message;
-  ZetraAuthException(this.message);
+
+  /// True when the failure was caused by no internet / timeout.
+  final bool isNetwork;
+  ZetraAuthException(this.message, {this.isNetwork = false});
   @override
   String toString() => message;
 }
@@ -171,7 +255,7 @@ class AuthService {
 
   Future<void> _logLoginAttempt({required String identifier, required bool success}) async {
     try {
-      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success});
+      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success}).timeout(kQuickTimeout);
     } catch (e) {
       debugPrint('[ZetraAuth] log_login_attempt failed (non-fatal, signature may need confirming): $e');
     }
@@ -183,10 +267,12 @@ class AuthService {
 
     String? resolvedEmail;
     try {
-      final result = await _client.rpc('resolve_login_email', params: {'p_identifier': normalized});
+      final result = await _client.rpc('resolve_login_email', params: {'p_identifier': normalized}).timeout(kNetTimeout);
       resolvedEmail = result is String ? result : null;
     } on PostgrestException {
       throw ZetraAuthException(invalidCredentialsMessage);
+    } catch (e) {
+      throw asAuthError(e, invalidCredentialsMessage);
     }
 
     if (resolvedEmail == null || resolvedEmail.isEmpty) {
@@ -196,10 +282,15 @@ class AuthService {
 
     AuthResponse response;
     try {
-      response = await _client.auth.signInWithPassword(email: resolvedEmail, password: password);
+      response = await _client.auth.signInWithPassword(email: resolvedEmail, password: password).timeout(kNetTimeout);
+    } on AuthRetryableFetchException {
+      // Network failure reported by the auth client — NOT a wrong password.
+      throw ZetraAuthException(kOfflineMessage, isNetwork: true);
     } on AuthException {
       await _logLoginAttempt(identifier: normalized, success: false);
       throw ZetraAuthException(invalidCredentialsMessage);
+    } catch (e) {
+      throw asAuthError(e, invalidCredentialsMessage);
     }
 
     final user = response.user;
@@ -211,7 +302,7 @@ class AuthService {
     await _logLoginAttempt(identifier: normalized, success: true);
 
     try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false})).timeout(kQuickTimeout);
     } catch (e) {
       debugPrint('[ZetraAuth] Could not reset otp-verified flag (non-fatal): $e');
     }
@@ -219,9 +310,11 @@ class AuthService {
     final profile = await loadCurrentProfile();
 
     try {
-      await _client.rpc('request_otp');
+      await _client.rpc('request_otp').timeout(kNetTimeout);
     } on PostgrestException {
       throw ZetraAuthException('Could not send your verification code. Please try again.');
+    } catch (e) {
+      throw asAuthError(e, 'Could not send your verification code. Please try again.');
     }
 
     return profile;
@@ -232,9 +325,11 @@ class AuthService {
     if (user == null) throw ZetraAuthException('Not signed in.');
     Map<String, dynamic>? row;
     try {
-      row = await _client.from('profiles').select().eq('id', user.id).maybeSingle();
+      row = await _client.from('profiles').select().eq('id', user.id).maybeSingle().timeout(kNetTimeout);
     } on PostgrestException {
       throw ZetraAuthException(profileLoadErrorMessage);
+    } catch (e) {
+      throw asAuthError(e, profileLoadErrorMessage);
     }
     if (row == null) throw ZetraAuthException(profileLoadErrorMessage);
     return ZetraProfile.fromMap(row);
@@ -245,13 +340,15 @@ class AuthService {
     if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
     dynamic result;
     try {
-      result = await _client.rpc('verify_otp', params: {'p_code': code.trim()});
+      result = await _client.rpc('verify_otp', params: {'p_code': code.trim()}).timeout(kNetTimeout);
     } on PostgrestException {
       throw ZetraAuthException(invalidOtpMessage);
+    } catch (e) {
+      throw asAuthError(e, invalidOtpMessage);
     }
     if (result != true) throw ZetraAuthException(invalidOtpMessage);
     try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true}));
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true})).timeout(kQuickTimeout);
     } catch (e) {
       debugPrint('[ZetraAuth] Could not persist otp-verified flag (non-fatal): $e');
     }
@@ -262,17 +359,23 @@ class AuthService {
     final session = _client.auth.currentSession;
     if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
     try {
-      await _client.rpc('request_otp');
+      await _client.rpc('request_otp').timeout(kNetTimeout);
     } on PostgrestException {
       throw ZetraAuthException('Could not resend code. Please try again.');
+    } catch (e) {
+      throw asAuthError(e, 'Could not resend code. Please try again.');
     }
   }
 
   Future<void> signOut() async {
     try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false}));
+      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false})).timeout(kQuickTimeout);
     } catch (_) {}
-    await _client.auth.signOut();
+    try {
+      await _client.auth.signOut().timeout(kQuickTimeout);
+    } catch (e) {
+      debugPrint('[ZetraAuth] signOut did not complete cleanly (non-fatal): $e');
+    }
   }
 }
 
@@ -283,11 +386,24 @@ Future<void> routeAfterFullyVerifiedLogin(BuildContext context, ZetraProfile pro
   // retries. This explicit refresh runs on EVERY successful login
   // (password or fingerprint — both call this same function), so the
   // real balance is always in place before the user reaches the app.
-  await CoinService.instance.refreshForCurrentUser();
+  try {
+    await CoinService.instance.refreshForCurrentUser().timeout(kNetTimeout);
+  } catch (e) {
+    debugPrint('[Login] Coin balance refresh failed or timed out (non-fatal): $e');
+  }
 
-  final attribution = await ReferralService.instance.getMyAttribution();
+  // If the referral check fails or times out we skip the referral screen
+  // rather than block the user from entering the app.
+  dynamic attribution;
+  bool attributionKnown = true;
+  try {
+    attribution = await ReferralService.instance.getMyAttribution().timeout(kNetTimeout);
+  } catch (e) {
+    attributionKnown = false;
+    debugPrint('[Login] Referral attribution check failed or timed out (skipping): $e');
+  }
   if (!context.mounted) return;
-  if (attribution == null) {
+  if (attributionKnown && attribution == null) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ReferralCodeEntryScreen(
@@ -322,16 +438,14 @@ class NewUserInfoScreen extends StatelessWidget {
   static const String _whatsappDisplay = '0806 542 5732';
 
   Future<void> _openZetraIdWebsite(BuildContext context) async {
-    final uri = Uri.parse(kZetraIdRegisterUrl);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final opened = await safeLaunch(Uri.parse(kZetraIdRegisterUrl));
     if (!opened && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
     }
   }
 
   Future<void> _openWhatsapp(BuildContext context) async {
-    final uri = Uri.parse('https://wa.me/$_whatsappNumber');
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final opened = await safeLaunch(Uri.parse('https://wa.me/$_whatsappNumber'));
     if (!opened && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp. Please try again.')));
     }
@@ -637,9 +751,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const VerifyOtpScreen()), (route) => false);
     } on ZetraAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Could not sign in. Please check your connection and try again.');
+      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Could not sign in. Please check your connection and try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -655,17 +769,16 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       await routeAfterFullyVerifiedLogin(context, profile);
     } on ZetraAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
+      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Fingerprint sign-in failed. Please try your ZetraMail and password instead.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _openZetraIdWebsite() async {
-    final uri = Uri.parse(kZetraIdRegisterUrl);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final opened = await safeLaunch(Uri.parse(kZetraIdRegisterUrl));
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
     }
@@ -975,9 +1088,9 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       if (!mounted) return;
       await routeAfterFullyVerifiedLogin(context, profile);
     } on ZetraAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Invalid or expired code. Please try again.');
+      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Invalid or expired code. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -995,9 +1108,9 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingOb
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')));
       _startResendCooldown();
     } on ZetraAuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Could not resend code. Please try again.');
+      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Could not resend code. Please try again.'));
     } finally {
       if (mounted) setState(() => _resending = false);
     }
@@ -1196,6 +1309,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late final Animation<double> _scale;
   static const Duration _splashDuration = Duration(seconds: 5);
 
+  /// True when startup could not finish because of no internet / timeout.
+  bool _offline = false;
+  String _offlineMessage = kOfflineMessage;
+  bool _starting = false;
+
   @override
   void initState() {
     super.initState();
@@ -1203,14 +1321,47 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _fade = CurvedAnimation(parent: _controller, curve: const Interval(0.0, 0.7, curve: Curves.easeIn));
     _scale = Tween<double>(begin: 0.7, end: 1.0).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
-    Timer(_splashDuration, () async {
+    Timer(_splashDuration, _startup);
+  }
+
+  void _goTo(Widget destination) {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: destination)));
+  }
+
+  void _showOffline(String message) {
+    if (!mounted) return;
+    setState(() {
+      _offline = true;
+      _offlineMessage = message;
+    });
+  }
+
+  void _continueAnyway() {
+    _goTo(const HomeScreen(profile: null));
+  }
+
+  /// Runs the startup checks. Every network step has a timeout, and a
+  /// connectivity failure shows the "Try Again" screen instead of hanging.
+  Future<void> _startup() async {
+    if (!mounted || _starting) return;
+    _starting = true;
+    if (_offline) setState(() => _offline = false);
+    try {
+      // 1) Update check — if it fails or times out we simply carry on.
+      dynamic updateResult;
+      try {
+        updateResult = await AppUpdateService.instance.checkForUpdate().timeout(kQuickTimeout);
+      } catch (e) {
+        debugPrint('[Splash] Update check failed or timed out (continuing): $e');
+      }
       if (!mounted) return;
-      final updateResult = await AppUpdateService.instance.checkForUpdate();
-      if (!mounted) return;
-      if (updateResult.mustUpdate) {
+      if (updateResult != null && updateResult.mustUpdate == true) {
         Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: ForceUpdateScreen(result: updateResult))));
         return;
       }
+
+      // 2) Decide where to go.
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       Widget destination;
       if (hasSession) {
@@ -1218,7 +1369,18 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           try {
             final profile = await AuthService.instance.loadCurrentProfile();
             destination = HomeScreen(profile: profile);
-          } catch (_) {
+          } on ZetraAuthException catch (e) {
+            if (e.isNetwork) {
+              // Signed in, but no internet — don't pretend they're logged out.
+              _showOffline(e.message);
+              return;
+            }
+            destination = const NewUserInfoScreen();
+          } catch (e) {
+            if (isNetworkError(e)) {
+              _showOffline(friendlyError(e, fallback: kOfflineMessage));
+              return;
+            }
             destination = const NewUserInfoScreen();
           }
         } else {
@@ -1229,14 +1391,79 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         destination = const NewUserInfoScreen();
       }
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(PageRouteBuilder(transitionDuration: const Duration(milliseconds: 500), pageBuilder: (_, animation, __) => FadeTransition(opacity: animation, child: destination)));
-    });
+      _goTo(destination);
+    } catch (e) {
+      debugPrint('[Splash] Unexpected startup error: $e');
+      if (isNetworkError(e)) {
+        _showOffline(friendlyError(e, fallback: kOfflineMessage));
+      } else {
+        _goTo(const NewUserInfoScreen());
+      }
+    } finally {
+      _starting = false;
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Widget _buildOfflineState() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 64, color: Colors.white),
+          const SizedBox(height: 16),
+          const Text('Can\'t connect', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+          const SizedBox(height: 8),
+          Text(_offlineMessage, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.9), height: 1.4)),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Theme.of(context).colorScheme.primary),
+              onPressed: _startup,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try Again', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _continueAnyway,
+            child: const Text('Continue anyway', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLogoState(ColorScheme scheme) {
+    return FadeTransition(
+      opacity: _fade,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 110,
+              height: 110,
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 8))]),
+              child: Icon(Icons.school_rounded, size: 60, color: scheme.primary),
+            ),
+            const SizedBox(height: 24),
+            const Text('NaijaLearn', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
+            const SizedBox(height: 8),
+            Text('Practice. Prepare. Pass.', style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.9))),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -1247,27 +1474,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.primary, scheme.primaryContainer])),
-        child: Center(
-          child: FadeTransition(
-            opacity: _fade,
-            child: ScaleTransition(
-              scale: _scale,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 110,
-                    height: 110,
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 8))]),
-                    child: Icon(Icons.school_rounded, size: 60, color: scheme.primary),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('NaijaLearn', style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
-                  const SizedBox(height: 8),
-                  Text('Practice. Prepare. Pass.', style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.9))),
-                ],
-              ),
-            ),
+        child: SafeArea(
+          child: Center(
+            child: _offline ? _buildOfflineState() : _buildLogoState(scheme),
           ),
         ),
       ),
@@ -1292,10 +1501,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (profile != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final appProvider = context.read<AppProvider>();
-        appProvider.setUserName(profile.username);
-        appProvider.syncLeaderboardNow();
-        showBadgeAnnouncementIfAny(context, appProvider);
+        try {
+          final appProvider = context.read<AppProvider>();
+          appProvider.setUserName(profile.username);
+          appProvider.syncLeaderboardNow();
+          showBadgeAnnouncementIfAny(context, appProvider);
+        } catch (e) {
+          debugPrint('[Home] Post-login sync failed (non-fatal): $e');
+        }
       });
     }
   }
@@ -1867,7 +2080,7 @@ class _ProfileTab extends StatelessWidget {
                 final client = Supabase.instance.client;
                 final userId = client.auth.currentUser?.id;
                 if (userId == null) return null;
-                final row = await client.from('profiles').select('is_admin').eq('id', userId).maybeSingle();
+                final row = await client.from('profiles').select('is_admin').eq('id', userId).maybeSingle().timeout(kQuickTimeout);
                 return row as Map<String, dynamic>?;
               } catch (_) {
                 return null;
@@ -1892,11 +2105,11 @@ class _ProfileTab extends StatelessWidget {
                         const batchSize = 200;
                         for (var i = 0; i < all.length; i += batchSize) {
                           final batch = all.skip(i).take(batchSize).map((q) => {'id': q.id, 'subject': q.subject, 'question_text': q.questionText, 'options': q.options, 'correct_index': q.correctIndex}).toList();
-                          await client.rpc('admin_upsert_questions', params: {'p_questions': batch});
+                          await client.rpc('admin_upsert_questions', params: {'p_questions': batch}).timeout(const Duration(seconds: 60));
                         }
                         if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Migration complete!')));
                       } catch (e) {
-                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: $e')));
+                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Migration failed: ${friendlyError(e, fallback: '$e')}')));
                       }
                     },
                   ),
@@ -2072,7 +2285,7 @@ class ContactSupportScreen extends StatelessWidget {
   ];
 
   Future<void> _open(BuildContext context, Uri uri) async {
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final opened = await safeLaunch(uri);
     if (!opened && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open that automatically. Please reach out manually.')));
   }
 
@@ -2137,7 +2350,7 @@ class ContactSupportScreen extends StatelessWidget {
                 final client = Supabase.instance.client;
                 final userId = client.auth.currentUser?.id;
                 if (userId == null) return null;
-                final row = await client.from('profiles').select('is_admin').eq('id', userId).maybeSingle();
+                final row = await client.from('profiles').select('is_admin').eq('id', userId).maybeSingle().timeout(kQuickTimeout);
                 return row as Map<String, dynamic>?;
               } catch (_) {
                 return null;
@@ -2576,7 +2789,13 @@ class _ExamScreenState extends State<ExamScreen> {
   }
 
   Future<void> _toggleBookmark(Question question) async {
-    await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject);
+    try {
+      await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject).timeout(kNetTimeout);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e, fallback: 'Could not update bookmark. Please try again.')), duration: const Duration(seconds: 2)));
+      return;
+    }
     if (!mounted) return;
     setState(() {
       if (_bookmarkedIds.contains(question.id)) {
@@ -2612,17 +2831,25 @@ class _ExamScreenState extends State<ExamScreen> {
     final skipped = _statuses.where((s) => s == QuestionStatus.skipped).length;
     final unanswered = _selectedAnswers.where((a) => a == null).length;
     final provider = context.read<AppProvider>();
-    provider.recordAnswer(widget.subject.name, correct, widget.questions.length);
-    provider.addXP(correct * 10);
-    final wrongIds = <String>[];
-    for (int i = 0; i < widget.questions.length; i++) {
-      if (_selectedAnswers[i] == null || _selectedAnswers[i] != widget.questions[i].correctIndex) wrongIds.add(widget.questions[i].id);
+
+    // Result recording is best-effort: if any tracking service fails (for
+    // example because there is no internet), the student must still reach
+    // their results screen.
+    try {
+      provider.recordAnswer(widget.subject.name, correct, widget.questions.length);
+      provider.addXP(correct * 10);
+      final wrongIds = <String>[];
+      for (int i = 0; i < widget.questions.length; i++) {
+        if (_selectedAnswers[i] == null || _selectedAnswers[i] != widget.questions[i].correctIndex) wrongIds.add(widget.questions[i].id);
+      }
+      if (wrongIds.isNotEmpty) MistakeVaultService.instance.recordWrongAnswers(subject: widget.subject.name, questionIds: wrongIds);
+      CertificationService.instance.recordPracticeSession(subject: widget.subject.name, questionsAnswered: widget.questions.length, correctAnswers: correct, questionIdsCovered: widget.questions.map((q) => q.id).toSet());
+      MasteryService.instance.recordSession(subject: widget.subject.name, correct: correct, total: widget.questions.length);
+      ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
+      SquadService.instance.recordActivity(activityType: 'question', amount: correct, subject: widget.subject.name);
+    } catch (e) {
+      debugPrint('[Exam] Recording session results failed (non-fatal): $e');
     }
-    if (wrongIds.isNotEmpty) MistakeVaultService.instance.recordWrongAnswers(subject: widget.subject.name, questionIds: wrongIds);
-    CertificationService.instance.recordPracticeSession(subject: widget.subject.name, questionsAnswered: widget.questions.length, correctAnswers: correct, questionIdsCovered: widget.questions.map((q) => q.id).toSet());
-    MasteryService.instance.recordSession(subject: widget.subject.name, correct: correct, total: widget.questions.length);
-    ArenaService.instance.recordSession(correct: correct, total: widget.questions.length);
-    SquadService.instance.recordActivity(activityType: 'question', amount: correct, subject: widget.subject.name);
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ResultsScreen(subject: widget.subject, questions: widget.questions, selectedAnswers: _selectedAnswers, correctCount: correct, skippedCount: skipped, unansweredCount: unanswered)));
   }
 
@@ -2997,8 +3224,12 @@ class ReviewScreen extends StatelessWidget {
                       icon: const Icon(Icons.star_border_rounded),
                       tooltip: 'Bookmark for later',
                       onPressed: () async {
-                        await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject);
-                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
+                        try {
+                          await BookmarkService.instance.toggleBookmark(questionId: question.id, subject: question.subject).timeout(kNetTimeout);
+                          if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark updated — check Bookmarks on Home.')));
+                        } catch (e) {
+                          if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e, fallback: 'Could not update bookmark. Please try again.'))));
+                        }
                       },
                     ),
                   ],
