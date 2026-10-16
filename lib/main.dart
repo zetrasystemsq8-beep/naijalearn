@@ -953,8 +953,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
                         ),
                         const SizedBox(height: 4),
-                        // Primary, highly visible signup button — creates
-                        // a Zetra ID directly in-app, no website needed.
+                        // Basic (non-ZetraMail) account signup — simple in-app login.
                         SizedBox(
                           height: 54,
                           child: FilledButton.icon(
@@ -967,7 +966,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? null
                                 : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewAccountScreen())),
                             icon: const Icon(Icons.person_add_alt_1_rounded),
-                            label: const Text('Create a New Zetra ID', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                            label: const Text('Basic Sign-Up', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -995,7 +994,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     const SizedBox(width: 8),
                                     Flexible(
                                       child: Text(
-                                        "Prefer the website instead? Create your Zetra ID there",
+                                        "Don't want to download ZetraMail? Create your Zetra ID on the web",
                                         textAlign: TextAlign.center,
                                         style: TextStyle(color: scheme.primary, fontSize: 12.5, fontWeight: FontWeight.w700),
                                       ),
