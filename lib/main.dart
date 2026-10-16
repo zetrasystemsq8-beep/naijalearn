@@ -970,6 +970,25 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
+                        // Basic login — username + password, no OTP. Only
+                        // for accounts made through Basic Sign-Up.
+                        SizedBox(
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: scheme.primary,
+                              side: BorderSide(color: scheme.primary.withOpacity(0.7), width: 1.6),
+                              backgroundColor: Colors.white.withOpacity(0.95),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            onPressed: _loading
+                                ? null
+                                : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BasicLoginScreen())),
+                            icon: const Icon(Icons.login_rounded),
+                            label: const Text('Basic Login', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         // Demarcated website button — set apart with a bordered
                         // "card" treatment so it's clearly noticeable rather
                         // than reading like a plain text link.

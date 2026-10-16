@@ -1,13 +1,16 @@
 // lib/new_account_screen.dart
 //
-// In-app Zetra ID signup for NaijaLearn — no website visit required.
-// Uses the same Supabase project, same RPCs, same account system as
-// the existing app and website registration flows.
+// BASIC SIGN-UP for NaijaLearn — a simple in-app account, no ZetraMail
+// needed. This is NOT a ZetraMail account and is not presented as one.
+// Later, basic accounts will be required to move to a ZetraMail account.
+//
+// A brand-new account has no earlier code to receive, so there is NO OTP
+// step here: after sign-up the user goes straight to the referral/tutor
+// code step and then into the app.
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'main.dart';
-
 
 const List<String> kNaijaLearnNigerianStates = [
   'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
@@ -18,11 +21,8 @@ const List<String> kNaijaLearnNigerianStates = [
   'Yobe', 'Zamfara',
 ];
 
-/// Creates a brand-new Zetra ID directly inside NaijaLearn — no website
-/// visit required at all. Same underlying account system as the
-/// website/app registration (same RPCs, same shared Supabase project),
-/// just built natively here so Glo (or any carrier blocking GitHub
-/// Pages) can't stop someone from signing up.
+/// Creates a basic NaijaLearn account directly inside the app — no website
+/// visit and no ZetraMail required.
 class NewAccountScreen extends StatefulWidget {
   const NewAccountScreen({super.key});
   @override
@@ -57,6 +57,10 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
     super.dispose();
   }
 
+  void _fail(String message) {
+    if (mounted) setState(() => _errorMessage = message);
+  }
+
   Future<void> _pickDateOfBirth() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -66,7 +70,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
       lastDate: DateTime(now.year - 13, now.month, now.day),
       helpText: 'Select date of birth',
     );
-    if (picked != null) setState(() => _dateOfBirth = picked);
+    if (picked != null && mounted) setState(() => _dateOfBirth = picked);
   }
 
   String _formatDate(DateTime d) {
@@ -103,9 +107,9 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
 
       final internalEmail = await client
           .rpc('internal_auth_email', params: {'p_username': username})
-          .timeout(const Duration(seconds: 15)) as String?;
+          .timeout(kNetTimeout) as String?;
       if (internalEmail == null || internalEmail.isEmpty) {
-        setState(() => _errorMessage = 'Something went wrong setting up your account. Please try again.');
+        _fail('Something went wrong setting up your account. Please try again.');
         return;
       }
 
@@ -115,10 +119,10 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
             'p_email': internalEmail,
             'p_phone': null,
           })
-          .timeout(const Duration(seconds: 20));
+          .timeout(kNetTimeout);
       final availability = Map<String, dynamic>.from(availabilityRaw as Map);
       if (availability['username_taken'] == true) {
-        setState(() => _errorMessage = 'That username is already taken.');
+        _fail('That username is already taken.');
         return;
       }
 
@@ -130,6 +134,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
             email: internalEmail,
             password: password,
             data: {
+              'account_type': 'basic',
               'username': username,
               'full_name': fullName,
               'date_of_birth': dob,
@@ -139,33 +144,47 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
               if (recoveryEmail.isNotEmpty) 'recovery_email': recoveryEmail,
             },
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(kNetTimeout);
 
       if (response.session == null) {
-        setState(() => _errorMessage = 'Something went wrong creating your account. Please try again.');
+        _fail('Something went wrong creating your account. Please try again.');
         return;
       }
 
-      // Same security posture as password login: every password-based
-      // session gets an OTP step, including a brand-new signup.
+      // NO OTP for a brand-new basic account: there is no earlier code to
+      // receive. Mark the session verified so the app (and the splash
+      // screen on the next launch) lets them straight in.
       try {
-        await client.rpc('request_otp').timeout(const Duration(seconds: 15));
-      } catch (_) {
-        // Non-fatal — VerifyOtpScreen's own "Resend" button covers this
-        // if the code never arrives.
+        await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true})).timeout(kQuickTimeout);
+      } catch (e) {
+        debugPrint('[NewAccount] Could not set otp-verified flag (non-fatal): $e');
+      }
+
+      ZetraProfile profile;
+      try {
+        profile = await AuthService.instance.loadCurrentProfile();
+      } catch (e) {
+        // Profile row may not be readable yet — build a minimal one so the
+        // user is never blocked from entering the app.
+        debugPrint('[NewAccount] Profile load failed, using minimal profile: $e');
+        profile = ZetraProfile(
+          id: response.user?.id ?? client.auth.currentUser?.id ?? '',
+          zetramail: '',
+          username: username,
+          verified: false,
+        );
       }
 
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const VerifyOtpScreen()),
-        (route) => false,
-      );
+      await routeAfterFullyVerifiedLogin(context, profile);
+    } on AuthRetryableFetchException {
+      _fail(kOfflineMessage);
     } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message.isNotEmpty ? e.message : 'Something went wrong. Please try again.');
+      _fail(e.message.isNotEmpty ? e.message : 'Something went wrong. Please try again.');
     } on PostgrestException catch (_) {
-      setState(() => _errorMessage = 'Something went wrong. Please try again.');
+      _fail('Something went wrong. Please try again.');
     } catch (e) {
-      setState(() => _errorMessage = 'Something went wrong. Please try again.');
+      _fail(friendlyError(e, fallback: 'Something went wrong. Please try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -173,9 +192,8 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Your Zetra ID')),
+      appBar: AppBar(title: const Text('Basic Sign-Up')),
       body: SafeArea(
         child: Form(
           key: _formKey,
@@ -184,6 +202,30 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Honest note: this is a basic account, not ZetraMail.
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.blue.shade200, width: 1.2),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded, color: Colors.blue.shade700, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'This is a basic NaijaLearn account — it is not a ZetraMail account. You can start learning right away. You will be asked to get a ZetraMail account later.',
+                          style: TextStyle(color: Colors.blue.shade900, fontSize: 12.5, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
                 // Prominent, honest recovery-risk warning — not buried text.
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -205,7 +247,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                                 style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade800, fontSize: 13)),
                             const SizedBox(height: 4),
                             Text(
-                              'There is no working "forgot password" yet for any Zetra ID, app or website. Write your password down somewhere safe, or set up fingerprint sign-in right after creating your account.',
+                              'There is no working "forgot password" yet. Write your password down somewhere safe.',
                               style: TextStyle(color: Colors.red.shade900, fontSize: 12, height: 1.4),
                             ),
                           ],
@@ -323,7 +365,195 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                     onPressed: _loading ? null : _createAccount,
                     child: _loading
                         ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
-                        : const Text('Create Zetra ID', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                        : const Text('Create Basic Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Basic login — username + password, no OTP. Only for BASIC accounts
+/// (made through Basic Sign-Up). ZetraMail accounts must use the normal
+/// Log In so they keep their OTP step.
+class BasicLoginScreen extends StatefulWidget {
+  const BasicLoginScreen({super.key});
+  @override
+  State<BasicLoginScreen> createState() => _BasicLoginScreenState();
+}
+
+class _BasicLoginScreenState extends State<BasicLoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _loading = false;
+  String? _errorMessage;
+
+  static const String _invalidMessage = 'Invalid username or password.';
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _fail(String message) {
+    if (mounted) setState(() => _errorMessage = message);
+  }
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    try {
+      final client = Supabase.instance.client;
+
+      final internalEmail = await client
+          .rpc('internal_auth_email', params: {'p_username': username})
+          .timeout(kNetTimeout) as String?;
+      if (internalEmail == null || internalEmail.isEmpty) {
+        _fail(_invalidMessage);
+        return;
+      }
+
+      final response = await client.auth
+          .signInWithPassword(email: internalEmail, password: password)
+          .timeout(kNetTimeout);
+      final user = response.user;
+      if (user == null) {
+        _fail(_invalidMessage);
+        return;
+      }
+
+      // Only basic accounts may skip OTP. A ZetraMail account that ends up
+      // here is signed straight back out and pointed to the normal login.
+      if (user.userMetadata?['account_type'] != 'basic') {
+        await AuthService.instance.signOut();
+        _fail('This is not a basic account. Please use the normal Log In with your ZetraMail.');
+        return;
+      }
+
+      try {
+        await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true})).timeout(kQuickTimeout);
+      } catch (e) {
+        debugPrint('[BasicLogin] Could not set otp-verified flag (non-fatal): $e');
+      }
+
+      ZetraProfile profile;
+      try {
+        profile = await AuthService.instance.loadCurrentProfile();
+      } catch (e) {
+        debugPrint('[BasicLogin] Profile load failed, using minimal profile: $e');
+        profile = ZetraProfile(id: user.id, zetramail: '', username: username, verified: false);
+      }
+
+      if (!mounted) return;
+      await routeAfterFullyVerifiedLogin(context, profile);
+    } on AuthRetryableFetchException {
+      _fail(kOfflineMessage);
+    } on AuthException {
+      _fail(_invalidMessage);
+    } on PostgrestException {
+      _fail('Something went wrong. Please try again.');
+    } catch (e) {
+      _fail(friendlyError(e, fallback: 'Something went wrong. Please try again.'));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Basic Login')),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.amber.shade700, width: 1.4),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 24),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('You are not a fully verified user',
+                                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 13.5)),
+                            const SizedBox(height: 4),
+                            Text(
+                              'A basic login is not a real ZetraMail account, so it has no code verification and fewer protections. Please consider signing up for a ZetraMail account later.',
+                              style: TextStyle(color: Colors.amber.shade900, fontSize: 12.5, height: 1.4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextFormField(
+                  controller: _usernameController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Username', prefixIcon: Icon(Icons.person_outline)),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your username' : null,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _login(),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                  validator: (v) => (v == null || v.isEmpty) ? 'Enter your password' : null,
+                ),
+                const SizedBox(height: 20),
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
+                    child: Text(_errorMessage!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                SizedBox(
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: _loading ? null : _login,
+                    child: _loading
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                        : const Text('Log In (Basic)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
