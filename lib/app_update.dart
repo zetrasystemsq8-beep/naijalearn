@@ -1,62 +1,43 @@
 // lib/app_update.dart
 //
-// FORCE UPDATE / VERSION GATE
+// FORCE UPDATE / VERSION GATE — now with a grace-period WARNING stage.
 //
-// Lets you remotely require a minimum app version. When you ship a new
-// build that changes something old clients can't safely talk to, bump
-// `min_supported_version` in the `naijalearn_config` Supabase table. Any
-// device running an older build than that gets a full-screen,
-// non-dismissible "please update" screen instead of the app — before
-// login, before anything else touches the backend.
+// Behaviour:
+//   1. User is on an outdated version (below min_supported_version).
+//   2. For the first `grace_days` days after the LATEST version was set,
+//      they see a dismissible banner ("update available") — the app
+//      still works normally.
+//   3. Once grace_days have passed, the banner becomes a full-screen,
+//      non-dismissible block (ForceUpdateScreen) — same hard lock as
+//      before.
 //
 // Deliberately "fails open": if the version check itself fails (offline,
 // Supabase hiccup, table missing), the app is allowed to continue rather
 // than locking everyone out because of a network blip.
 //
-// IMPORTANT: this reads from `naijalearn_config`, NOT `app_config`.
-// NaijaLearn was moved to its own dedicated table because `app_config`
-// is already used by Tribunal (id=1 singleton conflict).
+// SUPABASE SETUP — run this once to add the grace period column:
 //
-// DIRECT APK LINK — no Zetra Store involved. Users tap one button and
-// download the APK straight from GitHub.
+//   ALTER TABLE naijalearn_config ADD COLUMN IF NOT EXISTS grace_days INT DEFAULT 3;
 //
-// SUPABASE SETUP (already done — table exists, apk_url column added):
+// To tune how long the warning shows before it blocks, just update that
+// column's value — no app redeploy needed.
 //
-//   create table if not exists public.naijalearn_config (
-//     id int primary key default 1,
-//     min_supported_version text not null default '1.0.0',
-//     latest_version text not null default '1.0.0',
-//     update_message text,
-//     apk_url text,
-//     updated_at timestamptz not null default now(),
-//     constraint naijalearn_config_singleton check (id = 1)
-//   );
-//
-// To FORCE an update later: just raise min_supported_version in that row
-// to match your new build's version in pubspec.yaml, and set apk_url to
-// the new release's direct download link. No app redeploy needed to
-// flip the switch.
-//
-// PUBSPEC: requires these two dependencies —
-//   package_info_plus: ^8.0.0
-//   url_launcher: ^6.3.0
-//
-// MAIN.DART INTEGRATION: unchanged — SplashScreen already calls
-// AppUpdateService.instance.checkForUpdate() and shows ForceUpdateScreen
-// if mustUpdate is true. No changes needed there.
+// MAIN.DART INTEGRATION — 2 small changes, both inside NaijaLearnApp's
+// build() method, see instructions below the code block in chat.
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Result of a version check — either the app is fine to continue, or it
-/// must show the force-update wall.
+/// Result of a version check.
 class AppUpdateCheckResult {
   final String currentVersion;
   final String minSupportedVersion;
   final String latestVersion;
-  final bool mustUpdate;
+  final bool mustUpdate;   // hard block — grace period has expired
+  final bool showBanner;   // soft warning — still within grace period
   final String updateMessage;
   final String? apkUrl;
 
@@ -65,6 +46,7 @@ class AppUpdateCheckResult {
     required this.minSupportedVersion,
     required this.latestVersion,
     required this.mustUpdate,
+    required this.showBanner,
     required this.updateMessage,
     this.apkUrl,
   });
@@ -74,6 +56,7 @@ class AppUpdateCheckResult {
         minSupportedVersion: currentVersion,
         latestVersion: currentVersion,
         mustUpdate: false,
+        showBanner: false,
         updateMessage: '',
       );
 }
@@ -81,6 +64,13 @@ class AppUpdateCheckResult {
 class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
+
+  static const _prefVersionKey = 'nl_update_first_seen_version';
+  static const _prefTimeKey = 'nl_update_first_seen_at';
+
+  /// The rest of the app (the banner host in main.dart) listens to this
+  /// to know whether to show the dismissible banner right now.
+  final ValueNotifier<AppUpdateCheckResult?> lastResult = ValueNotifier(null);
 
   SupabaseClient get _client => Supabase.instance.client;
 
@@ -96,6 +86,7 @@ class AppUpdateService {
         minSupportedVersion: '0.0.0',
         latestVersion: '0.0.0',
         mustUpdate: false,
+        showBanner: false,
         updateMessage: '',
       );
     }
@@ -104,29 +95,63 @@ class AppUpdateService {
       final row = await _client.from('naijalearn_config').select().eq('id', 1).maybeSingle();
       if (row == null) {
         debugPrint('[AppUpdateService] No naijalearn_config row found — skipping version gate.');
-        return AppUpdateCheckResult.upToDate(currentVersion);
+        final result = AppUpdateCheckResult.upToDate(currentVersion);
+        lastResult.value = result;
+        return result;
       }
 
       final minVersion = row['min_supported_version'] as String? ?? '0.0.0';
       final latestVersion = row['latest_version'] as String? ?? currentVersion;
       final message = (row['update_message'] as String?)?.trim();
       final apkUrl = row['apk_url'] as String?;
+      final graceDays = (row['grace_days'] as int?) ?? 3;
 
-      final mustUpdate = _isVersionLower(currentVersion, minVersion);
+      final isBehind = _isVersionLower(currentVersion, minVersion);
 
-      return AppUpdateCheckResult(
+      if (!isBehind) {
+        final result = AppUpdateCheckResult.upToDate(currentVersion);
+        lastResult.value = result;
+        return result;
+      }
+
+      // Track when THIS user first saw THIS latest version, so the grace
+      // period is per-version, not reset every app launch.
+      final prefs = await SharedPreferences.getInstance();
+      final storedVersion = prefs.getString(_prefVersionKey);
+      final storedAt = prefs.getInt(_prefTimeKey);
+
+      DateTime firstSeenAt;
+      if (storedVersion == latestVersion && storedAt != null) {
+        firstSeenAt = DateTime.fromMillisecondsSinceEpoch(storedAt);
+      } else {
+        firstSeenAt = DateTime.now();
+        await prefs.setString(_prefVersionKey, latestVersion);
+        await prefs.setInt(_prefTimeKey, firstSeenAt.millisecondsSinceEpoch);
+      }
+
+      final elapsed = DateTime.now().difference(firstSeenAt);
+      final graceExpired = elapsed >= Duration(days: graceDays);
+
+      final finalMessage = (message == null || message.isEmpty)
+          ? 'A new version of NaijaLearn is required to continue. Please update to keep using the app.'
+          : message;
+
+      final result = AppUpdateCheckResult(
         currentVersion: currentVersion,
         minSupportedVersion: minVersion,
         latestVersion: latestVersion,
-        mustUpdate: mustUpdate,
-        updateMessage: (message == null || message.isEmpty)
-            ? 'A new version of NaijaLearn is required to continue. Please update to keep using the app.'
-            : message,
+        mustUpdate: graceExpired,
+        showBanner: !graceExpired,
+        updateMessage: finalMessage,
         apkUrl: apkUrl,
       );
+      lastResult.value = result;
+      return result;
     } catch (e) {
       debugPrint('[AppUpdateService] Version check failed (non-fatal, allowing app to continue): $e');
-      return AppUpdateCheckResult.upToDate(currentVersion);
+      final result = AppUpdateCheckResult.upToDate(currentVersion);
+      lastResult.value = result;
+      return result;
     }
   }
 
@@ -149,11 +174,8 @@ class AppUpdateService {
   }
 }
 
-/// Full-screen, non-dismissible "please update" wall. Sends users
-/// straight to the direct APK download link — no Zetra Store, no extra
-/// app needed. Written in plain, step-by-step language since most
-/// NaijaLearn users are students who may never have installed an app
-/// outside the Play Store before.
+/// Full-screen, non-dismissible "please update" wall. Shown only once the
+/// grace period has fully expired (AppUpdateCheckResult.mustUpdate).
 class ForceUpdateScreen extends StatelessWidget {
   final AppUpdateCheckResult result;
   const ForceUpdateScreen({super.key, required this.result});
@@ -229,31 +251,15 @@ class ForceUpdateScreen extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      _StepLine(
-                        number: '1',
-                        text: 'Tap the green "Download Update" button below. The file will download to your phone.',
-                      ),
+                      _StepLine(number: '1', text: 'Tap the green "Download Update" button below. The file will download to your phone.'),
                       const SizedBox(height: 10),
-                      _StepLine(
-                        number: '2',
-                        text: 'Open the downloaded file to install it.',
-                      ),
+                      _StepLine(number: '2', text: 'Open the downloaded file to install it.'),
                       const SizedBox(height: 10),
-                      _StepLine(
-                        number: '3',
-                        text: 'Your phone may show a warning like "Unsafe app blocked" or "Unknown app". '
-                            'This is normal — it only means the app did not come from the Play Store.',
-                      ),
+                      _StepLine(number: '3', text: 'Your phone may show a warning like "Unsafe app blocked" or "Unknown app". This is normal — it only means the app did not come from the Play Store.'),
                       const SizedBox(height: 10),
-                      _StepLine(
-                        number: '4',
-                        text: 'Tap "More details" or the three-dot menu, then tap "Install anyway" to continue.',
-                      ),
+                      _StepLine(number: '4', text: 'Tap "More details" or the three-dot menu, then tap "Install anyway" to continue.'),
                       const SizedBox(height: 10),
-                      _StepLine(
-                        number: '5',
-                        text: 'Wait for it to install, then open NaijaLearn again like normal.',
-                      ),
+                      _StepLine(number: '5', text: 'Wait for it to install, then open NaijaLearn again like normal.'),
                       const SizedBox(height: 12),
                       Text(
                         'This is safe. NaijaLearn is only ever shared this way — directly from our team.',
@@ -287,8 +293,6 @@ class ForceUpdateScreen extends StatelessWidget {
   }
 }
 
-/// A single numbered instruction line — small circular number badge
-/// followed by the instruction text.
 class _StepLine extends StatelessWidget {
   final String number;
   final String text;
@@ -303,23 +307,94 @@ class _StepLine extends StatelessWidget {
           width: 22,
           height: 22,
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Colors.amber.shade800,
-            shape: BoxShape.circle,
-          ),
-          child: Text(
-            number,
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-          ),
+          decoration: BoxDecoration(color: Colors.amber.shade800, shape: BoxShape.circle),
+          child: Text(number, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Text(
-            text,
-            style: TextStyle(fontSize: 12.5, height: 1.4, color: Colors.amber.shade900),
-          ),
+          child: Text(text, style: TextStyle(fontSize: 12.5, height: 1.4, color: Colors.amber.shade900)),
         ),
       ],
+    );
+  }
+}
+
+// =====================================================================
+// SOFT WARNING BANNER — shown during the grace period, dismissible for
+// this session. Wrap your MaterialApp's `builder:` with this widget (see
+// chat instructions) so it floats above whatever screen is currently
+// showing, without needing to touch every individual screen.
+// =====================================================================
+class UpdateBannerHost extends StatefulWidget {
+  final Widget child;
+  const UpdateBannerHost({super.key, required this.child});
+
+  @override
+  State<UpdateBannerHost> createState() => _UpdateBannerHostState();
+}
+
+class _UpdateBannerHostState extends State<UpdateBannerHost> {
+  bool _dismissed = false;
+
+  Future<void> _openDownload(String? url) async {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AppUpdateCheckResult?>(
+      valueListenable: AppUpdateService.instance.lastResult,
+      builder: (context, result, _) {
+        final show = result != null && result.showBanner && !_dismissed;
+        return Stack(
+          textDirection: TextDirection.ltr,
+          children: [
+            widget.child,
+            if (show)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(
+                  child: Container(
+                    margin: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade900,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 20, offset: Offset(0, 8))],
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.system_update_rounded, color: Colors.white),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'A new version of NaijaLearn is available',
+                            style: TextStyle(color: Colors.white, fontSize: 13.5),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() => _dismissed = true),
+                          child: const Text('Later', style: TextStyle(color: Colors.white70)),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => _openDownload(result!.apkUrl),
+                          child: const Text('Update'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
