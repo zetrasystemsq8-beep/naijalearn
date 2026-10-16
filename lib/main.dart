@@ -1311,6 +1311,7 @@ class NaijaLearnApp extends StatelessWidget {
       theme: AppTheme.light(seedColor),
       darkTheme: AppTheme.dark(seedColor),
       home: const SplashScreen(),
+      builder: (context, child) => UpdateBannerHost(child: child ?? const SizedBox.shrink()),
     );
   }
 }
