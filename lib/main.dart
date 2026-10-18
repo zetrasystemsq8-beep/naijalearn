@@ -1311,7 +1311,6 @@ class NaijaLearnApp extends StatelessWidget {
       theme: AppTheme.light(seedColor),
       darkTheme: AppTheme.dark(seedColor),
       home: const SplashScreen(),
-      builder: (context, child) => UpdateBannerHost(child: child ?? const SizedBox.shrink()),
     );
   }
 }
@@ -1494,9 +1493,59 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         height: double.infinity,
         decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.primary, scheme.primaryContainer])),
         child: SafeArea(
-          child: Center(
-            child: _offline ? _buildOfflineState() : _buildLogoState(scheme),
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: _offline ? _buildOfflineState() : _buildLogoState(scheme),
+                  ),
+                ),
+              ),
+              // Subtle brand signature — fades in with the logo, adds no delay.
+              FadeTransition(opacity: _fade, child: const _PoweredByZetra()),
+              const SizedBox(height: 20),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small "Powered by Zetra" signature shown at the bottom of the splash
+/// screen. Sits on a soft white pill so the Zetra greens stay readable on
+/// any theme colour. Purely visual — no logic, no network, no assets.
+class _PoweredByZetra extends StatelessWidget {
+  const _PoweredByZetra();
+
+  static const Color _zetraGreen = Color(0xFF008751);
+  static const Color _zetraDarkGreen = Color(0xFF00623B);
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Powered by Zetra',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.92),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Powered by',
+              style: TextStyle(fontSize: 11, letterSpacing: 0.3, color: _zetraDarkGreen.withOpacity(0.75)),
+            ),
+            const SizedBox(width: 5),
+            const Text(
+              'Zetra',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 0.4, color: _zetraGreen),
+            ),
+          ],
         ),
       ),
     );
