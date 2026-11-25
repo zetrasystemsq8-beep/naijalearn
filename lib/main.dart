@@ -3,32 +3,15 @@
 // NaijaLearn — CBT Practice App
 // Material 3.
 //
-// AUTHENTICATION — ZetraMail account required, TWO ways in:
+// AUTHENTICATION — kept deliberately simple:
 //
-// 1) PASSWORD LOGIN: always followed by mandatory OTP (VerifyOtpScreen).
-// 2) FINGERPRINT SIGN-IN: per shared platform guidance, this is a
-//    STRONGER identity proof than password+OTP, so it SKIPS OTP
-//    entirely — straight to the same one-time referral check everyone
-//    goes through, then into the app.
+//   * Sign Up  : username + password only (NewAccountScreen).
+//   * Log In   : username + password (LoginScreen).
+//   * No ZetraMail, no OTP, no fingerprint, no guest mode, no extra steps.
 //
-// No NaijaLearn-only self-signup exists anymore — that path (username
-// + password with no ZetraMail) has been fully removed. People without
-// ZetraMail can create one via the shared Zetra ID website instead
-// (see kZetraIdRegisterUrl below), linked from LoginScreen.
-//
-// NEW-USER ONBOARDING: NewUserInfoScreen is shown before LoginScreen to
-// any signed-out user. It explains: ZetraMail app vs. website version,
-// the password-recovery risk on the website version, fingerprint
-// (app-only) vs. manual Zetra ID + OTP paste-back (website version),
-// and the referral/tutor code step. This is presentation-only — it
-// does not change AuthService or any backend behavior. If skipped,
-// users can get lost mid-signup, so it carries an "Attention" banner
-// and a "Need help?" link into the existing Contact Support screen.
-//
-// SECURITY LOGGING: AuthService.login() makes a best-effort call to
-// the shared `log_login_attempt` RPC. The exact parameter signature
-// hasn't been confirmed with the platform maintainer yet — wrapped so
-// it can never break login if wrong; confirm and adjust once known.
+// After sign-up or log-in the user goes to the one-time referral/tutor code
+// check and then into the app. Accounts are tagged "basic" at sign-up so a
+// ZetraMail requirement can be added later.
 //
 // NETWORK SAFETY: every network call in this file has a timeout, and
 // every failure is turned into a plain-English message (no internet /
@@ -49,7 +32,6 @@ import 'package:provider/provider.dart';
 import 'app_theme.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:passkeys/authenticator.dart';
 import 'notification_service.dart';
 import 'app_enhancements.dart';
 import 'certification.dart';
@@ -63,7 +45,6 @@ import 'academic_arena.dart';
 import 'world_challenge.dart';
 import 'study_squads.dart';
 import 'nai_mentor.dart';
-import 'guest_mode.dart';
 import 'app_update.dart';
 import 'referral_code_screen.dart';
 import 'challenge_feature.dart';
@@ -72,7 +53,6 @@ import 'championship_admin_screen.dart';
 import 'classes_home.dart';
 import 'admin_tutor_applications.dart';
 import 'admin_classroom_moderation.dart';
-import 'new_account_screen.dart';
 import 'questions_english.dart';
 import 'questions_accounting.dart';
 import 'questions_arabic.dart';
@@ -191,28 +171,6 @@ Future<void> _bootstrap() async {
   }
 }
 
-Future<ZetraProfile> signInWithZetraFingerprint() async {
-  final authenticator = PasskeyAuthenticator();
-  final client = Supabase.instance.client;
-  AuthResponse response;
-  try {
-    // Generous timeout: the system fingerprint prompt is interactive.
-    response = await client.auth.signInWithPasskey(authenticator).timeout(const Duration(seconds: 90));
-  } catch (e) {
-    if (isNetworkError(e)) throw asAuthError(e, kOfflineMessage);
-    throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
-  }
-  if (response.session == null) {
-    throw ZetraAuthException('Fingerprint sign-in failed. Please try your ZetraMail and password instead.');
-  }
-  try {
-    await client.auth.updateUser(UserAttributes(data: {'nl_otp_verified': true})).timeout(kQuickTimeout);
-  } catch (e) {
-    debugPrint('[ZetraAuth] Could not set otp-verified flag after fingerprint sign-in (non-fatal): $e');
-  }
-  return AuthService.instance.loadCurrentProfile();
-}
-
 class ZetraProfile {
   final String id;
   final String zetramail;
@@ -245,79 +203,44 @@ class ZetraAuthException implements Exception {
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
-  static const String invalidCredentialsMessage = 'Invalid ZetraMail or password.';
-  static const String invalidOtpMessage = 'Invalid or expired code. Please try again.';
+  static const String invalidCredentialsMessage = 'Invalid username or password.';
   static const String profileLoadErrorMessage = 'Could not load your profile. Please try again.';
-  static const String _otpVerifiedMetaKey = 'nl_otp_verified';
   SupabaseClient get _client => Supabase.instance.client;
   bool get isSignedIn => _client.auth.currentSession != null;
-  bool get isOtpVerifiedForCurrentSession => _client.auth.currentUser?.userMetadata?[_otpVerifiedMetaKey] == true;
 
-  Future<void> _logLoginAttempt({required String identifier, required bool success}) async {
+  /// Username + password log-in. No OTP, no extra steps.
+  Future<ZetraProfile> login({required String username, required String password}) async {
+    final name = username.trim();
+    if (name.isEmpty) throw ZetraAuthException(invalidCredentialsMessage);
+
+    String? internalEmail;
     try {
-      await _client.rpc('log_login_attempt', params: {'p_identifier': identifier, 'p_success': success}).timeout(kQuickTimeout);
-    } catch (e) {
-      debugPrint('[ZetraAuth] log_login_attempt failed (non-fatal, signature may need confirming): $e');
-    }
-  }
-
-  Future<ZetraProfile> login({required String zetramail, required String password}) async {
-    final normalized = zetramail.trim().toLowerCase();
-    if (normalized.isEmpty) throw ZetraAuthException(invalidCredentialsMessage);
-
-    String? resolvedEmail;
-    try {
-      final result = await _client.rpc('resolve_login_email', params: {'p_identifier': normalized}).timeout(kNetTimeout);
-      resolvedEmail = result is String ? result : null;
+      final result = await _client.rpc('internal_auth_email', params: {'p_username': name}).timeout(kNetTimeout);
+      internalEmail = result is String ? result : null;
     } on PostgrestException {
       throw ZetraAuthException(invalidCredentialsMessage);
     } catch (e) {
       throw asAuthError(e, invalidCredentialsMessage);
     }
-
-    if (resolvedEmail == null || resolvedEmail.isEmpty) {
-      await _logLoginAttempt(identifier: normalized, success: false);
+    if (internalEmail == null || internalEmail.isEmpty) {
       throw ZetraAuthException(invalidCredentialsMessage);
     }
 
-    AuthResponse response;
     try {
-      response = await _client.auth.signInWithPassword(email: resolvedEmail, password: password).timeout(kNetTimeout);
+      final response = await _client.auth.signInWithPassword(email: internalEmail, password: password).timeout(kNetTimeout);
+      if (response.user == null) throw ZetraAuthException(invalidCredentialsMessage);
+    } on ZetraAuthException {
+      rethrow;
     } on AuthRetryableFetchException {
       // Network failure reported by the auth client — NOT a wrong password.
       throw ZetraAuthException(kOfflineMessage, isNetwork: true);
     } on AuthException {
-      await _logLoginAttempt(identifier: normalized, success: false);
       throw ZetraAuthException(invalidCredentialsMessage);
     } catch (e) {
       throw asAuthError(e, invalidCredentialsMessage);
     }
 
-    final user = response.user;
-    if (user == null) {
-      await _logLoginAttempt(identifier: normalized, success: false);
-      throw ZetraAuthException(invalidCredentialsMessage);
-    }
-
-    await _logLoginAttempt(identifier: normalized, success: true);
-
-    try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false})).timeout(kQuickTimeout);
-    } catch (e) {
-      debugPrint('[ZetraAuth] Could not reset otp-verified flag (non-fatal): $e');
-    }
-
-    final profile = await loadCurrentProfile();
-
-    try {
-      await _client.rpc('request_otp').timeout(kNetTimeout);
-    } on PostgrestException {
-      throw ZetraAuthException('Could not send your verification code. Please try again.');
-    } catch (e) {
-      throw asAuthError(e, 'Could not send your verification code. Please try again.');
-    }
-
-    return profile;
+    return loadProfileOrMinimal();
   }
 
   Future<ZetraProfile> loadCurrentProfile() async {
@@ -335,46 +258,26 @@ class AuthService {
     return ZetraProfile.fromMap(row);
   }
 
-  Future<ZetraProfile> verifyCode({required String code}) async {
-    final session = _client.auth.currentSession;
-    if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
-    dynamic result;
+  /// Loads the profile row; if it cannot be read (but the user IS signed in
+  /// and the problem is not the network), falls back to a minimal profile
+  /// built from the account itself so the user is never locked out.
+  Future<ZetraProfile> loadProfileOrMinimal() async {
     try {
-      result = await _client.rpc('verify_otp', params: {'p_code': code.trim()}).timeout(kNetTimeout);
-    } on PostgrestException {
-      throw ZetraAuthException(invalidOtpMessage);
-    } catch (e) {
-      throw asAuthError(e, invalidOtpMessage);
-    }
-    if (result != true) throw ZetraAuthException(invalidOtpMessage);
-    try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: true})).timeout(kQuickTimeout);
-    } catch (e) {
-      debugPrint('[ZetraAuth] Could not persist otp-verified flag (non-fatal): $e');
-    }
-    return loadCurrentProfile();
-  }
-
-  Future<void> resendCode() async {
-    final session = _client.auth.currentSession;
-    if (session == null) throw ZetraAuthException("You're not signed in. Please log in again.");
-    try {
-      await _client.rpc('request_otp').timeout(kNetTimeout);
-    } on PostgrestException {
-      throw ZetraAuthException('Could not resend code. Please try again.');
-    } catch (e) {
-      throw asAuthError(e, 'Could not resend code. Please try again.');
+      return await loadCurrentProfile();
+    } on ZetraAuthException catch (e) {
+      if (e.isNetwork) rethrow;
+      final user = _client.auth.currentUser;
+      if (user == null) rethrow;
+      final meta = user.userMetadata ?? const <String, dynamic>{};
+      return ZetraProfile(id: user.id, zetramail: '', username: (meta['username'] as String?) ?? '', verified: false);
     }
   }
 
   Future<void> signOut() async {
     try {
-      await _client.auth.updateUser(UserAttributes(data: {_otpVerifiedMetaKey: false})).timeout(kQuickTimeout);
-    } catch (_) {}
-    try {
       await _client.auth.signOut().timeout(kQuickTimeout);
     } catch (e) {
-      debugPrint('[ZetraAuth] signOut did not complete cleanly (non-fatal): $e');
+      debugPrint('[Auth] signOut did not complete cleanly (non-fatal): $e');
     }
   }
 }
@@ -422,286 +325,6 @@ Future<void> routeAfterFullyVerifiedLogin(BuildContext context, ZetraProfile pro
   }
 }
 
-/// ============================================================
-/// NEW-USER "READ FIRST" GUIDE
-/// ============================================================
-///
-/// Shown before LoginScreen for every signed-out user. Explains the
-/// two ways to get a ZetraMail account (app vs. website), the
-/// consequences of each choice, and the referral/tutor-code step
-/// that follows sign-in. Purely informational — no auth logic lives
-/// here, and nothing on this screen touches AuthService.
-class NewUserInfoScreen extends StatelessWidget {
-  const NewUserInfoScreen({super.key});
-
-  static const String _whatsappNumber = '2348065425732';
-  static const String _whatsappDisplay = '0806 542 5732';
-
-  Future<void> _openZetraIdWebsite(BuildContext context) async {
-    final opened = await safeLaunch(Uri.parse(kZetraIdRegisterUrl));
-    if (!opened && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
-    }
-  }
-
-  Future<void> _openWhatsapp(BuildContext context) async {
-    final opened = await safeLaunch(Uri.parse('https://wa.me/$_whatsappNumber'));
-    if (!opened && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp. Please try again.')));
-    }
-  }
-
-  void _goToLogin(BuildContext context) {
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Before You Start')),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Attention banner
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.amber.shade700, width: 1.6),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 26),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('⚠️ Attention — Read This First', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 15)),
-                                const SizedBox(height: 4),
-                                Text(
-                                  "If you skip this, you may get lost during sign-up. It only takes a minute — please read every step below.",
-                                  style: TextStyle(color: Colors.amber.shade900, fontSize: 12.5, height: 1.4),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    _StepCard(
-                      number: '1',
-                      icon: Icons.download_rounded,
-                      iconColor: Colors.indigo,
-                      title: 'Download the ZetraMail App',
-                      body: "NaijaLearn requires a ZetraMail account to sign in. New users must download the ZetraMail app first — this is where you create your account and receive your login codes.",
-                    ),
-
-                    _StepCard(
-                      number: '2',
-                      icon: Icons.language_rounded,
-                      iconColor: Colors.teal,
-                      title: 'No app? Use the website version',
-                      body: "If you can't download the app, you can create your ZetraMail account on the website instead. Your Gmail will NOT work — only a ZetraMail account works.",
-                    ),
-
-                    _StepCard(
-                      number: '3',
-                      icon: Icons.info_outline_rounded,
-                      iconColor: Colors.blueGrey,
-                      title: 'The website version is basic',
-                      body: "The website version does not have fingerprint sign-in or password changing. If you use the website version, be very careful with your password — if you forget it, it is gone for good. Users on the app version may still be able to recover access.",
-                    ),
-
-                    _StepCard(
-                      number: '4',
-                      icon: Icons.fingerprint_rounded,
-                      iconColor: Colors.deepPurple,
-                      title: 'Fingerprint (app) vs. manual Zetra ID (website)',
-                      body: "If you're on the app, you can set up fingerprint sign-in — fast and secure.\n\n"
-                          "If you're on the website, fingerprint sign-in won't work. Instead:\n"
-                          "  • Open ZetraMail and find your Zetra ID (shown after you create your account).\n"
-                          "  • Come back here and paste your Zetra ID.\n"
-                          "  • Add your password to confirm it's really you.\n"
-                          "  • We'll send an OTP to your ZetraMail — go back, tap it, and it will copy automatically.\n"
-                          "  • Come back here and paste it. Don't worry — the app won't reload or lose your place.",
-                    ),
-
-                    _StepCard(
-                      number: '5',
-                      icon: Icons.card_giftcard_rounded,
-                      iconColor: Colors.green,
-                      title: 'Referral or Tutor Code',
-                      body: "Next, you'll be asked for a referral code or a tutor reference code. If you don't have one, just tap Direct to continue.",
-                    ),
-
-                    _StepCard(
-                      number: '6',
-                      icon: Icons.check_circle_outline_rounded,
-                      iconColor: Colors.orange,
-                      title: "That's all!",
-                      body: "Once that's done, you're in. You can head to the login screen now.",
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // Demarcated website button — clearly set apart from the rest
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [scheme.tertiary, scheme.primary]),
-                        boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 6))],
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(color: scheme.surface, borderRadius: BorderRadius.circular(17)),
-                        child: Material(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(17),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(17),
-                            onTap: () => _openZetraIdWebsite(context),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(12)),
-                                    child: Icon(Icons.open_in_new_rounded, color: scheme.onPrimaryContainer),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('No ZetraMail app? Create your Zetra ID on the web', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: scheme.primary)),
-                                        const SizedBox(height: 2),
-                                        Text('Opens the official Zetra ID website', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-                                      ],
-                                    ),
-                                  ),
-                                  Icon(Icons.chevron_right_rounded, color: scheme.primary),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Need help tile
-                    Material(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () => _openWhatsapp(context),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            children: [
-                              Icon(Icons.support_agent_rounded, color: scheme.primary),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('Ran into an issue?', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                                    Text('Chat with the dev on WhatsApp — $_whatsappDisplay', style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                                  ],
-                                ),
-                              ),
-                              const Icon(Icons.chevron_right_rounded),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: FilledButton.icon(
-                  onPressed: () => _goToLogin(context),
-                  icon: const Icon(Icons.arrow_forward_rounded),
-                  label: const Text("I've Read This — Continue", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StepCard extends StatelessWidget {
-  final String number;
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String body;
-  const _StepCard({required this.number, required this.icon, required this.iconColor, required this.title, required this.body});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(18)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: iconColor.withOpacity(0.15), shape: BoxShape.circle),
-            child: Text(number, style: TextStyle(fontWeight: FontWeight.bold, color: iconColor)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(icon, size: 18, color: iconColor),
-                    const SizedBox(width: 6),
-                    Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5))),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(body, style: const TextStyle(fontSize: 12.5, height: 1.5)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override
@@ -710,7 +333,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _zetramailController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _loading = false;
@@ -718,74 +341,31 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _zetramailController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  String? _validateZetraMail(String? value) {
-    final identifier = value?.trim() ?? '';
-    if (identifier.isEmpty) return 'Please enter your ZetraMail';
-    final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
-    if (!emailRegex.hasMatch(identifier)) return 'Please enter a valid ZetraMail address';
-    return null;
-  }
-
-  String? _validatePassword(String? value) {
-    final password = value ?? '';
-    if (password.isEmpty) return 'Please enter your password';
-    if (password.length < 6) return 'Password must be at least 6 characters';
-    return null;
-  }
-
-  Future<void> _continue() async {
+  Future<void> _logIn() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
       _errorMessage = null;
     });
-    final zetramail = _zetramailController.text.trim();
-    final password = _passwordController.text.trim();
     try {
-      await AuthService.instance.login(zetramail: zetramail, password: password);
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const VerifyOtpScreen()), (route) => false);
-    } on ZetraAuthException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Could not sign in. Please check your connection and try again.'));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _continueWithFingerprint() async {
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
-    try {
-      final profile = await signInWithZetraFingerprint();
+      final profile = await AuthService.instance.login(
+        username: _usernameController.text,
+        password: _passwordController.text,
+      );
       if (!mounted) return;
       await routeAfterFullyVerifiedLogin(context, profile);
     } on ZetraAuthException catch (e) {
       if (mounted) setState(() => _errorMessage = e.message);
     } catch (e) {
-      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Fingerprint sign-in failed. Please try your ZetraMail and password instead.'));
+      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Could not log in. Please check your connection and try again.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _openZetraIdWebsite() async {
-    final opened = await safeLaunch(Uri.parse(kZetraIdRegisterUrl));
-    if (!opened && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the browser. Please try again.')));
-    }
-  }
-
-  void _openNewUserInfo() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewUserInfoScreen()));
   }
 
   @override
@@ -811,20 +391,9 @@ class _LoginScreenState extends State<LoginScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _loading ? null : _openNewUserInfo,
-                        icon: const Icon(Icons.help_outline_rounded, size: 18, color: Colors.white),
-                        label: const Text('New here? Read this first', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                  ),
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                      padding: const EdgeInsets.fromLTRB(24, 40, 24, 12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -844,7 +413,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 28),
                           Text('Welcome to NaijaLearn', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                           const SizedBox(height: 8),
-                          Text('Sign in with your ZetraMail', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white.withOpacity(0.9))),
+                          Text('Log in to continue', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white.withOpacity(0.9))),
                           const SizedBox(height: 32),
                           Container(
                             padding: const EdgeInsets.all(20),
@@ -857,19 +426,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 TextFormField(
-                                  controller: _zetramailController,
-                                  keyboardType: TextInputType.emailAddress,
+                                  controller: _usernameController,
                                   autofillHints: const [AutofillHints.username],
                                   textInputAction: TextInputAction.next,
-                                  validator: _validateZetraMail,
+                                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your username' : null,
                                   decoration: InputDecoration(
-                                    labelText: 'ZetraMail',
-                                    hintText: 'you@zetramail.ng',
-                                    helperText: 'Use the exact address shown in your Zetra ID app',
-                                    helperStyle: const TextStyle(fontSize: 11),
+                                    labelText: 'Username',
                                     filled: true,
                                     fillColor: scheme.surfaceContainerHighest.withOpacity(0.5),
-                                    prefixIcon: Icon(Icons.email_outlined, color: scheme.primary),
+                                    prefixIcon: Icon(Icons.person_outline_rounded, color: scheme.primary),
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
                                   ),
                                 ),
@@ -879,8 +444,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   obscureText: _obscurePassword,
                                   autofillHints: const [AutofillHints.password],
                                   textInputAction: TextInputAction.done,
-                                  validator: _validatePassword,
-                                  onFieldSubmitted: (_) => _continue(),
+                                  validator: (v) => (v == null || v.isEmpty) ? 'Please enter your password' : null,
+                                  onFieldSubmitted: (_) => _logIn(),
                                   decoration: InputDecoration(
                                     labelText: 'Password',
                                     filled: true,
@@ -923,105 +488,23 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 56,
                           child: FilledButton(
                             style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)), backgroundColor: Colors.white, foregroundColor: scheme.primary, elevation: 6, shadowColor: Colors.black.withOpacity(0.3)),
-                            onPressed: _loading ? null : _continue,
+                            onPressed: _loading ? null : _logIn,
                             child: _loading
                                 ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: scheme.primary))
                                 : const Text('Log In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 56,
-                          child: FilledButton.icon(
-                            style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)), backgroundColor: Colors.white, foregroundColor: scheme.primary, elevation: 4, shadowColor: Colors.black.withOpacity(0.18)),
-                            onPressed: _loading ? null : _continueWithFingerprint,
-                            icon: _loading
-                                ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.2, color: scheme.primary))
-                                : Icon(Icons.fingerprint_rounded, color: scheme.primary),
-                            label: const Text('Sign in with Fingerprint', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Fingerprint skips the code below — password sign-in always sends one to ZetraMail.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.75)),
-                        ),
-                        const SizedBox(height: 14),
-                        TextButton(
-                          onPressed: _loading ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GuestHomeScreen())),
-                          child: Text('Continue as Guest', style: TextStyle(color: scheme.onSurfaceVariant)),
-                        ),
-                        const SizedBox(height: 4),
-                        // Basic (non-ZetraMail) account signup — simple in-app login.
+                        const SizedBox(height: 12),
                         SizedBox(
                           height: 54,
-                          child: FilledButton.icon(
+                          child: FilledButton(
                             style: FilledButton.styleFrom(
                               backgroundColor: scheme.primary,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                             ),
-                            onPressed: _loading
-                                ? null
-                                : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewAccountScreen())),
-                            icon: const Icon(Icons.person_add_alt_1_rounded),
-                            label: const Text('Basic Sign-Up', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Basic login — username + password, no OTP. Only
-                        // for accounts made through Basic Sign-Up.
-                        SizedBox(
-                          height: 50,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: scheme.primary,
-                              side: BorderSide(color: scheme.primary.withOpacity(0.7), width: 1.6),
-                              backgroundColor: Colors.white.withOpacity(0.95),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
-                            onPressed: _loading
-                                ? null
-                                : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BasicLoginScreen())),
-                            icon: const Icon(Icons.login_rounded),
-                            label: const Text('Basic Login', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Demarcated website button — set apart with a bordered
-                        // "card" treatment so it's clearly noticeable rather
-                        // than reading like a plain text link.
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.95),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: scheme.primary.withOpacity(0.6), width: 1.6),
-                          ),
-                          child: Material(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: _loading ? null : _openZetraIdWebsite,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.open_in_new_rounded, size: 16, color: scheme.primary),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Text(
-                                        "Don't want to download ZetraMail? Create your Zetra ID on the web",
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(color: scheme.primary, fontSize: 12.5, fontWeight: FontWeight.w700),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
+                            onPressed: _loading ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewAccountScreen())),
+                            child: const Text('Sign Up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                           ),
                         ),
                       ],
@@ -1032,176 +515,6 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class VerifyOtpScreen extends StatefulWidget {
-  const VerifyOtpScreen({super.key});
-  @override
-  State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
-}
-
-class _VerifyOtpScreenState extends State<VerifyOtpScreen> with WidgetsBindingObserver {
-  final _formKey = GlobalKey<FormState>();
-  final _codeController = TextEditingController();
-  bool _loading = false;
-  bool _resending = false;
-  String? _errorMessage;
-  static const int _resendCooldownSeconds = 30;
-  int _resendSecondsLeft = _resendCooldownSeconds;
-  Timer? _resendTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _startResendCooldown();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {}
-
-  void _startResendCooldown() {
-    _resendTimer?.cancel();
-    setState(() => _resendSecondsLeft = _resendCooldownSeconds);
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_resendSecondsLeft <= 1) {
-        timer.cancel();
-        setState(() => _resendSecondsLeft = 0);
-      } else {
-        setState(() => _resendSecondsLeft--);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _resendTimer?.cancel();
-    _codeController.dispose();
-    super.dispose();
-  }
-
-  String? _validateCode(String? value) {
-    final code = value?.trim() ?? '';
-    if (code.isEmpty) return 'Please enter the code';
-    if (code.length < 4) return 'Enter the code from your ZetraMail';
-    return null;
-  }
-
-  Future<void> _verifyCode() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
-    try {
-      final profile = await AuthService.instance.verifyCode(code: _codeController.text.trim());
-      if (!mounted) return;
-      await routeAfterFullyVerifiedLogin(context, profile);
-    } on ZetraAuthException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Invalid or expired code. Please try again.'));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _resendCode() async {
-    if (_resendSecondsLeft > 0) return;
-    setState(() {
-      _resending = true;
-      _errorMessage = null;
-    });
-    try {
-      await AuthService.instance.resendCode();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A new code has been sent to your ZetraMail inbox.')));
-      _startResendCooldown();
-    } on ZetraAuthException catch (e) {
-      if (mounted) setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _errorMessage = friendlyError(e, fallback: 'Could not resend code. Please try again.'));
-    } finally {
-      if (mounted) setState(() => _resending = false);
-    }
-  }
-
-  Future<void> _useDifferentAccount() async {
-    await AuthService.instance.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Verify Your Zetra ID')),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Icon(Icons.mark_email_read_rounded, size: 56, color: scheme.primary),
-                      const SizedBox(height: 20),
-                      Text('Open your ZetraMail in the Zetra ID app, copy the code, and paste it below.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
-                      const SizedBox(height: 28),
-                      TextFormField(
-                        controller: _codeController,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 22, letterSpacing: 8, fontWeight: FontWeight.bold),
-                        validator: _validateCode,
-                        onFieldSubmitted: (_) => _verifyCode(),
-                        decoration: InputDecoration(counterText: '', hintText: '------', border: OutlineInputBorder(borderRadius: BorderRadius.circular(14))),
-                      ),
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(_errorMessage!, style: TextStyle(color: scheme.error, fontSize: 13), textAlign: TextAlign.center),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      height: 52,
-                      child: FilledButton(
-                        onPressed: _loading ? null : _verifyCode,
-                        child: _loading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : const Text('Verify', style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: (_resending || _resendSecondsLeft > 0) ? null : _resendCode,
-                      child: _resending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(_resendSecondsLeft > 0 ? 'Resend code in ${_resendSecondsLeft}s' : "Didn't get a code? Resend"),
-                    ),
-                    TextButton(onPressed: _useDifferentAccount, child: const Text('Use a different account')),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1383,30 +696,25 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       Widget destination;
       if (hasSession) {
-        if (AuthService.instance.isOtpVerifiedForCurrentSession) {
-          try {
-            final profile = await AuthService.instance.loadCurrentProfile();
-            destination = HomeScreen(profile: profile);
-          } on ZetraAuthException catch (e) {
-            if (e.isNetwork) {
-              // Signed in, but no internet — don't pretend they're logged out.
-              _showOffline(e.message);
-              return;
-            }
-            destination = const NewUserInfoScreen();
-          } catch (e) {
-            if (isNetworkError(e)) {
-              _showOffline(friendlyError(e, fallback: kOfflineMessage));
-              return;
-            }
-            destination = const NewUserInfoScreen();
+        try {
+          final profile = await AuthService.instance.loadProfileOrMinimal();
+          destination = HomeScreen(profile: profile);
+        } on ZetraAuthException catch (e) {
+          if (e.isNetwork) {
+            // Signed in, but no internet — don't pretend they're logged out.
+            _showOffline(e.message);
+            return;
           }
-        } else {
-          destination = const VerifyOtpScreen();
+          destination = const LoginScreen();
+        } catch (e) {
+          if (isNetworkError(e)) {
+            _showOffline(friendlyError(e, fallback: kOfflineMessage));
+            return;
+          }
+          destination = const LoginScreen();
         }
       } else {
-        // Signed-out users see the "read first" guide before LoginScreen.
-        destination = const NewUserInfoScreen();
+        destination = const LoginScreen();
       }
       if (!mounted) return;
       _goTo(destination);
@@ -1415,7 +723,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       if (isNetworkError(e)) {
         _showOffline(friendlyError(e, fallback: kOfflineMessage));
       } else {
-        _goTo(const NewUserInfoScreen());
+        _goTo(const LoginScreen());
       }
     } finally {
       _starting = false;
@@ -3341,6 +2649,191 @@ class ReviewScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ============================================================
+// SIGN-UP SCREEN (username + password only)
+// ============================================================
+
+// Kept so any other file that still refers to this list keeps compiling.
+const List<String> kNaijaLearnNigerianStates = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue',
+  'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu',
+  'Federal Capital Territory (Abuja)', 'Gombe', 'Imo', 'Jigawa', 'Kaduna',
+  'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger',
+  'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
+  'Yobe', 'Zamfara',
+];
+
+class NewAccountScreen extends StatefulWidget {
+  const NewAccountScreen({super.key});
+  @override
+  State<NewAccountScreen> createState() => _NewAccountScreenState();
+}
+
+class _NewAccountScreenState extends State<NewAccountScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+  bool _loading = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  void _fail(String message) {
+    if (mounted) setState(() => _errorMessage = message);
+  }
+
+  Future<void> _createAccount() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    try {
+      final client = Supabase.instance.client;
+
+      final internalEmail = await client
+          .rpc('internal_auth_email', params: {'p_username': username})
+          .timeout(kNetTimeout) as String?;
+      if (internalEmail == null || internalEmail.isEmpty) {
+        _fail('Something went wrong setting up your account. Please try again.');
+        return;
+      }
+
+      final availabilityRaw = await client
+          .rpc('check_registration_availability', params: {
+            'p_username': username,
+            'p_email': internalEmail,
+            'p_phone': null,
+          })
+          .timeout(kNetTimeout);
+      final availability = Map<String, dynamic>.from(availabilityRaw as Map);
+      if (availability['username_taken'] == true) {
+        _fail('That username is already taken.');
+        return;
+      }
+
+      final response = await client.auth
+          .signUp(
+            email: internalEmail,
+            password: password,
+            data: {
+              'account_type': 'basic',
+              'username': username,
+            },
+          )
+          .timeout(kNetTimeout);
+
+      if (response.session == null) {
+        _fail('Something went wrong creating your account. Please try again.');
+        return;
+      }
+
+      final profile = await AuthService.instance.loadProfileOrMinimal();
+      if (!mounted) return;
+      await routeAfterFullyVerifiedLogin(context, profile);
+    } on AuthRetryableFetchException {
+      _fail(kOfflineMessage);
+    } on AuthException catch (e) {
+      _fail(e.message.isNotEmpty ? e.message : 'Something went wrong. Please try again.');
+    } on PostgrestException catch (_) {
+      _fail('Something went wrong. Please try again.');
+    } catch (e) {
+      _fail(friendlyError(e, fallback: 'Something went wrong. Please try again.'));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sign Up')),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _usernameController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Username', prefixIcon: Icon(Icons.person_outline)),
+                  validator: (v) => (v == null || v.trim().length < 3) ? 'At least 3 characters' : null,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  textInputAction: TextInputAction.next,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    helperText: 'Remember it — passwords cannot be recovered yet',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                  validator: (v) => (v == null || v.length < 6) ? 'At least 6 characters' : null,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _confirmController,
+                  obscureText: _obscureConfirm,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _createAccount(),
+                  decoration: InputDecoration(
+                    labelText: 'Confirm Password',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureConfirm ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                      onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                    ),
+                  ),
+                  validator: (v) => (v != _passwordController.text) ? 'Passwords do not match' : null,
+                ),
+                const SizedBox(height: 20),
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
+                    child: Text(_errorMessage!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                SizedBox(
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: _loading ? null : _createAccount,
+                    child: _loading
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                        : const Text('Create Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
